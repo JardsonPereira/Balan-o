@@ -21,21 +21,33 @@ with st.expander("➕ Novo Lançamento", expanded=True):
         desc = st.text_input("Descrição (Ex: Caixa, Salários)")
         natureza = st.selectbox("Natureza", ["Ativo", "Passivo", "Patrimônio Líquido", "Receita", "Despesa"])
         
-        # O Subgrupo só aparece se for Ativo ou Passivo
-        subgrupo = "N/A"
-        if natureza in ["Ativo", "Passivo"]:
-            subgrupo = st.selectbox("Subgrupo", ["Circulante", "Não Circulante"])
-            
+        # A MÁGICA ACONTECE AQUI: 
+        # O subgrupo só é definido se for Ativo ou Passivo.
+        # No Streamlit, para esconder o campo visualmente dentro de um form, 
+        # usamos uma lógica de placeholder ou container.
+        
+        subgrupo_opcoes = ["Circulante", "Não Circulante"]
+        
         tipo = st.selectbox("Operação", ["Débito", "Crédito"])
         valor = st.number_input("Valor (R$)", min_value=0.0, format="%.2f")
         
+        # Como estamos dentro de um st.form, precisamos tratar o subgrupo 
+        # de forma que ele só seja capturado se a natureza permitir.
+        sub_escolhido = st.selectbox("Subgrupo (Apenas para Ativo/Passivo)", ["N/A"] + subgrupo_opcoes)
+        
         if st.form_submit_button("Confirmar Lançamento"):
-            if desc and valor > 0:
+            # Validação extra: se for Ativo/Passivo, não pode ser N/A
+            if natureza in ["Ativo", "Passivo"] and sub_escolhido == "N/A":
+                st.error("Para Ativo ou Passivo, selecione Circulante ou Não Circulante.")
+            elif desc and valor > 0:
+                # Se não for Ativo/Passivo, forçamos N/A independente da escolha
+                final_sub = sub_escolhido if natureza in ["Ativo", "Passivo"] else "N/A"
+                
                 novo = pd.DataFrame([{
                     'ID': st.session_state.id_cont, 
                     'Descrição': desc.upper(), 
                     'Natureza': natureza, 
-                    'Subgrupo': subgrupo,
+                    'Subgrupo': final_sub,
                     'Tipo': tipo, 
                     'Valor': valor
                 }])
@@ -71,4 +83,8 @@ if not st.session_state.lancamentos.empty:
         st.dataframe(df_ac[['Conta', 'D']], use_container_width=True, hide_index=True)
         
         st.write("**Não Circulante**")
-        df_anc
+        df_anc = df_resumo[(df_resumo['Natureza'] == "Ativo") & (df_resumo['Subgrupo'] == "Não Circulante")]
+        st.dataframe(df_anc[['Conta', 'D']], use_container_width=True, hide_index=True)
+        st.info(f"Total: R$ {df_ac['D'].sum() + df_anc['D'].sum():,.2f}")
+
+    with col_passivo
