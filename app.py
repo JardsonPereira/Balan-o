@@ -71,22 +71,31 @@ if not st.session_state.lancamentos.empty:
         st.info("**ATIVO**")
         a_c = df_balancete[(df_balancete['Natureza'] == "Ativo") & (df_balancete['Subgrupo'] == "Circulante")]
         a_nc = df_balancete[(df_balancete['Natureza'] == "Ativo") & (df_balancete['Subgrupo'] == "Não Circulante")]
-        if not a_c.empty: st.write("Circulante"); st.table(a_c[['Conta', 'D']])
-        if not a_nc.empty: st.write("Não Circulante"); st.table(a_nc[['Conta', 'D']])
+        if not a_c.empty: 
+            st.write("Circulante")
+            st.table(a_c[['Conta', 'D']])
+        if not a_nc.empty: 
+            st.write("Não Circulante")
+            st.table(a_nc[['Conta', 'D']])
         st.write(f"**Total Ativo:** R$ {a_c['D'].sum() + a_nc['D'].sum():,.2f}")
 
     with c_ps:
         st.info("**PASSIVO**")
         p_c = df_balancete[(df_balancete['Natureza'] == "Passivo") & (df_balancete['Subgrupo'] == "Circulante")]
         p_nc = df_balancete[(df_balancete['Natureza'] == "Passivo") & (df_balancete['Subgrupo'] == "Não Circulante")]
-        if not p_c.empty: st.write("Circulante"); st.table(p_c[['Conta', 'C']])
-        if not p_nc.empty: st.write("Não Circulante"); st.table(p_nc[['Conta', 'C']])
+        if not p_c.empty: 
+            st.write("Circulante")
+            st.table(p_c[['Conta', 'C']])
+        if not p_nc.empty: 
+            st.write("Não Circulante")
+            st.table(p_nc[['Conta', 'C']])
         st.write(f"**Total Passivo:** R$ {p_c['C'].sum() + p_nc['C'].sum():,.2f}")
 
     with c_pl:
         st.info("**PATRIMÔNIO LÍQUIDO**")
         pl_d = df_balancete[df_balancete['Natureza'] == "Patrimônio Líquido"]
-        if not pl_d.empty: st.table(pl_d[['Conta', 'C']])
+        if not pl_d.empty: 
+            st.table(pl_d[['Conta', 'C']])
         st.write(f"**Total PL:** R$ {pl_d['C'].sum():,.2f}")
 
     # 6. Verificação de Equilíbrio
@@ -97,14 +106,26 @@ if not st.session_state.lancamentos.empty:
     else:
         st.error(f"❌ Desequilíbrio! D: R${tot_d:,.2f} | C: R${tot_c:,.2f}")
 
-    # 7. GESTÃO DE LANÇAMENTOS (Nova Função de Deletar)
+    # 7. GESTÃO DE LANÇAMENTOS (Onde estava o erro de identação)
     st.divider()
     st.subheader("⚙️ Gestão de Lançamentos")
-    st.write("Clique no 🗑️ para remover um erro específico:")
+    st.write("Remover lançamentos individuais:")
     
     for index, row in df.iterrows():
         col_info, col_btn = st.columns([5, 1])
         with col_info:
-            st.write(f"**{row['Descrição']}** | {row['Natureza']} | {row['Tipo']}: R$ {row['Valor']:,.2f}")
+            st.write(f"**{row['Descrição']}** | {row['Tipo']}: R$ {row['Valor']:,.2f}")
         with col_btn:
-            # Botão de deletar usando o ID único
+            # O botão deve estar exatamente aqui, identado dentro do 'with'
+            if st.button("🗑️", key=f"del_{row['ID']}"):
+                st.session_state.lancamentos = df[df['ID'] != row['ID']]
+                st.rerun()
+
+    # Botão para Limpar Tudo
+    if st.button("🚨 Resetar Tudo"):
+        st.session_state.lancamentos = pd.DataFrame(columns=['ID', 'Descrição', 'Natureza', 'Subgrupo', 'Tipo', 'Valor'])
+        st.session_state.id_cont = 0
+        st.rerun()
+
+else:
+    st.warning("Aguardando lançamentos...")
