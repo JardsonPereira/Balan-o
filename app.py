@@ -39,10 +39,12 @@ with st.expander("➕ Novo Lançamento", expanded=True):
                 st.session_state.id_cont += 1
                 st.rerun()
 
-# 4. Processamento dos Dados
+# 4. Processamento e Exibição
 if not st.session_state.lancamentos.empty:
     df = st.session_state.lancamentos
     resumo = []
+    
+    # Agrupamento para o Balancete
     for conta in df['Descrição'].unique():
         d_conta = df[df['Descrição'] == conta]
         deb = d_conta[d_conta['Tipo'] == 'Débito']['Valor'].sum()
@@ -56,11 +58,52 @@ if not st.session_state.lancamentos.empty:
     
     df_res = pd.DataFrame(resumo)
 
-    # 5. Balanço Patrimonial
+    # 5. Visualização das Tabelas
     st.subheader("📈 Balanço Patrimonial")
-    c_at, c_ps, c_pl = st.columns(3)
+    c1, c2, c3 = st.columns(3)
 
-    with c_at:
-        st.markdown("### ATIVO")
-        st.write("**Circulante**")
+    with c1:
+        st.write("**ATIVO**")
+        # Circulante
         df_ac = df_res[(df_res['Natureza'] == "Ativo") & (df_res['Subgrupo'] == "Circulante")]
+        if not df_ac.empty:
+            st.caption("Circulante")
+            st.dataframe(df_ac[['Conta', 'D']], hide_index=True, use_container_width=True)
+        # Não Circulante
+        df_anc = df_res[(df_res['Natureza'] == "Ativo") & (df_res['Subgrupo'] == "Não Circulante")]
+        if not df_anc.empty:
+            st.caption("Não Circulante")
+            st.dataframe(df_anc[['Conta', 'D']], hide_index=True, use_container_width=True)
+        st.info(f"Total Ativo: R${(df_ac['D'].sum() + df_anc['D'].sum()):,.2f}")
+
+    with c2:
+        st.write("**PASSIVO**")
+        # Circulante
+        df_pc = df_res[(df_res['Natureza'] == "Passivo") & (df_res['Subgrupo'] == "Circulante")]
+        if not df_pc.empty:
+            st.caption("Circulante")
+            st.dataframe(df_pc[['Conta', 'C']], hide_index=True, use_container_width=True)
+        # Não Circulante
+        df_pnc = df_res[(df_res['Natureza'] == "Passivo") & (df_res['Subgrupo'] == "Não Circulante")]
+        if not df_pnc.empty:
+            st.caption("Não Circulante")
+            st.dataframe(df_pnc[['Conta', 'C']], hide_index=True, use_container_width=True)
+        st.info(f"Total Passivo: R${(df_pc['C'].sum() + df_pnc['C'].sum()):,.2f}")
+
+    with c3:
+        st.write("**P. LÍQUIDO**")
+        df_pl = df_res[df_res['Natureza'] == "Patrimônio Líquido"]
+        if not df_pl.empty:
+            st.dataframe(df_pl[['Conta', 'C']], hide_index=True, use_container_width=True)
+        st.info(f"Total PL: R${df_pl['C'].sum():,.2f}")
+
+    # 6. Resultados
+    st.divider()
+    st.subheader("📊 Resultado do Exercício")
+    df_resultado = df_res[df_res['Natureza'].isin(["Receita", "Despesa"])]
+    if not df_resultado.empty:
+        st.dataframe(df_resultado[['Conta', 'Natureza', 'D', 'C']], hide_index=True, use_container_width=True)
+    
+    # 7. Verificação de Equilíbrio
+    st.divider()
+    tot
