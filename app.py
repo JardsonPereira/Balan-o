@@ -77,4 +77,40 @@ if not st.session_state.lancamentos.empty:
         st.info(f"Total Ativo: R$ {df_ac['D'].sum() + df_anc['D'].sum():,.2f}")
 
     with col_passivo:
-        st.markdown("### PASSIVO
+        st.markdown("### PASSIVO")
+        # Passivo Circulante
+        st.write("**Circulante**")
+        df_pc = df_resumo[(df_resumo['Natureza'] == "Passivo") & (df_resumo['Subgrupo'] == "Circulante")]
+        st.dataframe(df_pc[['Conta', 'C']], use_container_width=True, hide_index=True)
+        # Passivo Não Circulante
+        st.write("**Não Circulante**")
+        df_pnc = df_resumo[(df_resumo['Natureza'] == "Passivo") & (df_resumo['Subgrupo'] == "Não Circulante")]
+        st.dataframe(df_pnc[['Conta', 'C']], use_container_width=True, hide_index=True)
+        st.info(f"Total Passivo: R$ {df_pc['C'].sum() + df_pnc['C'].sum():,.2f}")
+
+    with col_pl:
+        st.markdown("### P. LÍQUIDO")
+        df_pl = df_resumo[df_resumo['Natureza'] == "Patrimônio Líquido"]
+        st.dataframe(df_pl[['Conta', 'C']], use_container_width=True, hide_index=True)
+        st.info(f"Total PL: R$ {df_pl['C'].sum():,.2f}")
+
+    # 6. Contas de Resultado
+    st.divider()
+    st.subheader("📊 Contas de Resultado")
+    df_res = df_resumo[df_resumo['Natureza'].isin(["Receita", "Despesa"])][['Conta', 'Natureza', 'D', 'C']]
+    st.dataframe(df_res, use_container_width=True, hide_index=True)
+
+    # 7. Ferramentas e Backup
+    with st.expander("⚙️ Gerenciar Lançamentos"):
+        for i, row in df.iterrows():
+            c_txt, c_btn = st.columns([4, 1])
+            c_txt.write(f"{row['Descrição']} ({row['Subgrupo']}) | R${row['Valor']:.2f}")
+            if c_btn.button("🗑️", key=f"del_{row['ID']}"):
+                st.session_state.lancamentos = df[df['ID'] != row['ID']]
+                st.rerun()
+                
+    csv = df.to_csv(index=False).encode('utf-8')
+    st.download_button("📥 Baixar Backup", csv, "balancete.csv", "text/csv", use_container_width=True)
+
+else:
+    st.info("Toque no '+' para começar.")
