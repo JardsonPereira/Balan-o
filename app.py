@@ -3,7 +3,7 @@ import pandas as pd
 
 # 1. Configuração para Celular
 st.set_page_config(
-    page_title="Balancete Mobile Pro",
+    page_title="Balancete Pro",
     layout="wide",
     initial_sidebar_state="collapsed"
 )
@@ -20,16 +20,13 @@ with st.expander("➕ Novo Lançamento", expanded=True):
     with st.form("form_contabil", clear_on_submit=True):
         desc = st.text_input("Descrição (Ex: Caixa, Fornecedores)")
         natureza = st.selectbox("Natureza", ["Ativo", "Passivo", "Patrimônio Líquido", "Receita", "Despesa"])
-        
         sub_escolhido = st.selectbox("Subgrupo (Se Ativo/Passivo)", ["Circulante", "Não Circulante", "N/A"])
-        
         tipo = st.selectbox("Operação", ["Débito", "Crédito"])
         valor = st.number_input("Valor (R$)", min_value=0.0, format="%.2f")
         
         if st.form_submit_button("Confirmar Lançamento"):
             if desc and valor > 0:
                 final_sub = sub_escolhido if natureza in ["Ativo", "Passivo"] else "N/A"
-                
                 novo = pd.DataFrame([{
                     'ID': st.session_state.id_cont, 
                     'Descrição': desc.upper(), 
@@ -57,13 +54,13 @@ if not st.session_state.lancamentos.empty:
         saldo_cre = max(0, cre - deb)
         resumo.append({'Conta': conta, 'Natureza': nat, 'Subgrupo': sub, 'D': saldo_dev, 'C': saldo_cre})
     
-    df_resumo = pd.DataFrame(resumo)
+    df_res = pd.DataFrame(resumo)
 
     # 5. Balanço Patrimonial
     st.subheader("📈 Balanço Patrimonial")
-    col_ativo, col_passivo, col_pl = st.columns(3)
+    c_at, c_ps, c_pl = st.columns(3)
 
-    with col_ativo:
+    with c_at:
         st.markdown("### ATIVO")
         st.write("**Circulante**")
-        df_ac = df_resumo[(df_resumo['Natureza'] ==
+        df_ac = df_res[(df_res['Natureza'] == "Ativo") & (df_res['Subgrupo'] == "Circulante")]
