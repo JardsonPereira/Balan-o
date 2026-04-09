@@ -18,7 +18,7 @@ with st.expander("➕ Novo Lançamento", expanded=True):
     with st.form("form_contabil", clear_on_submit=True):
         col1, col2 = st.columns(2)
         with col1:
-            desc = st.text_input("Conta (Ex: Mercadorias)")
+            desc = st.text_input("Conta (Ex: Banco)")
             natureza = st.selectbox("Natureza", ["Ativo", "Passivo", "Patrimônio Líquido", "Receita", "Despesa"])
         with col2:
             sub = st.selectbox("Subgrupo", ["Circulante", "Não Circulante", "N/A"])
@@ -41,95 +41,76 @@ with st.expander("➕ Novo Lançamento", expanded=True):
                 st.session_state.id_cont += 1
                 st.rerun()
 
-# 4. Processamento de Dados
+# 4. Processamento e Exibição
 if not st.session_state.lancamentos.empty:
     df = st.session_state.lancamentos
     
-    # 5. SEÇÃO DE RAZONETES (T-Accounts)
-    st.header("📊 Razonetes")
-    contas_unicas = df['Descrição'].unique()
+    # 5. RAZONETES DETALHADOS
+    st.header("📊 Razonetes (Movimentações)")
+    contas = df['Descrição'].unique()
     
-    # Exibição em colunas para simular os "T" contábeis
-    cols_raz = st.columns(3)
-    for i, conta in enumerate(contas_unicas):
-        with cols_raz[i % 3]:
-            st.markdown(f"**{conta}**")
+    # Grid de Razonetes
+    cols_raz = st.columns(2) # Duas colunas para melhor leitura detalhada
+    for i, conta in enumerate(contas):
+        with cols_raz[i % 2]:
+            st.markdown(f"### {conta}")
             df_c = df[df['Descrição'] == conta]
-            # Simulação do T
-            dados_t = pd.DataFrame({
-                'Débito (D)': [df_c[df_c['Tipo'] == 'Débito']['Valor'].sum()],
-                'Crédito (C)': [df_c[df_c['Tipo'] == 'Crédito']['Valor'].sum()]
-            })
-            st.table(dados_t)
             
-    # Consolidação para Balancete
+            # Criando a tabela de movimentação detalhada
+            debitos = df_c[df_c['Tipo'] == 'Débito']['Valor'].tolist()
+            creditos = df_c[df_c['Tipo'] == 'Crédito']['Valor'].tolist()
+            
+            # Alinhando as listas para a tabela (preenchendo com vazio onde não houver valor)
+            max_len = max(len(debitos), len(creditos))
+            debitos += [None] * (max_len - len(debitos))
+            creditos += [None] * (max_len - len(creditos))
+            
+            df_t = pd.DataFrame({
+                "Débito (D)": debitos,
+                "Crédito (C)": creditos
+            })
+            
+            # Exibe o "T"
+            st.table(df_t.fillna("-"))
+            
+            # Cálculo do Saldo do Razonete
+            tot_d = df_c[df_c['Tipo'] == 'Débito']['Valor'].sum()
+            tot_c = df_c[df_c['Tipo'] == 'Crédito']['Valor'].sum()
+            saldo = tot_d - tot_c
+            
+            if saldo >= 0:
+                st.write(f"**Saldo Devedor:** R$ {saldo:,.2f}")
+            else:
+                st.write(f"**Saldo Credor:** R$ {abs(saldo):,.2f}")
+            st.divider()
+
+    # 6. CONTA DE RESULTADO E BALANCETE (Consolidado)
     resumo = []
-    for conta in contas_unicas:
+    for conta in contas:
         df_c = df[df['Descrição'] == conta]
-        d_total = df_c[df_c['Tipo'] == 'Débito']['Valor'].sum()
-        c_total = df_c[df_c['Tipo'] == 'Crédito']['Valor'].sum()
+        d_tot = df_c[df_c['Tipo'] == 'Débito']['Valor'].sum()
+        c_tot = df_c[df_c['Tipo'] == 'Crédito']['Valor'].sum()
         resumo.append({
             'Conta': conta,
             'Natureza': df_c['Natureza'].iloc[0],
             'Subgrupo': df_c['Subgrupo'].iloc[0],
-            'Saldo_D': max(0.0, d_total - c_total),
-            'Saldo_C': max(0.0, c_total - d_total)
+            'Saldo_D': max(0.0, d_tot - c_tot),
+            'Saldo_C': max(0.0, c_tot - d_tot)
         })
     df_res = pd.DataFrame(resumo)
 
-    # 6. BALANÇO PATRIMONIAL (Ativo, Passivo, PL)
-    st.divider()
-    st.header("📈 Balanço Patrimonial")
-    c_at, c_ps, c_pl = st.columns(3)
-
-    with c_at:
-        st.info("ATIVO")
-        df_a = df_res[df_res['Natureza'] == "Ativo"]
-        st.dataframe(df_a[['Conta', 'Subgrupo', 'Saldo_D']], hide_index=True, use_container_width=True)
-        st.write(f"**Total Ativo:** R$ {df_a['Saldo_D'].sum():,.2f}")
-
-    with c_ps:
-        st.info("PASSIVO")
-        df_p = df_res[df_res['Natureza'] == "Passivo"]
-        st.dataframe(df_p[['Conta', 'Subgrupo', 'Saldo_C']], hide_index=True, use_container_width=True)
-        st.write(f"**Total Passivo:** R$ {df_p['Saldo_C'].sum():,.2f}")
-
-    with c_pl:
-        st.info("P. LÍQUIDO")
-        df_pl = df_res[df_res['Natureza'] == "Patrimônio Líquido"]
-        st.dataframe(df_pl[['Conta', 'Saldo_C']], hide_index=True, use_container_width=True)
-        st.write(f"**Total PL:** R$ {df_pl['Saldo_C'].sum():,.2f}")
-
-    # 7. CONTAS DE RESULTADO (DRE Simplificada)
-    st.divider()
+    # Exibição Simplificada do Resultado
     st.header("📊 Resultado do Exercício")
-    c_rec, c_des = st.columns(2)
-    
-    with c_rec:
-        st.success("RECEITAS")
-        df_rec = df_res[df_res['Natureza'] == "Receita"]
-        st.table(df_rec[['Conta', 'Saldo_C']])
-        
-    with c_des:
-        st.error("DESPESAS")
-        df_des = df_res[df_res['Natureza'] == "Despesa"]
-        st.table(df_des[['Conta', 'Saldo_D']])
-    
-    lucro_prejuizo = df_rec['Saldo_C'].sum() - df_des['Saldo_D'].sum()
-    st.metric("Resultado Líquido", f"R$ {lucro_prejuizo:,.2f}")
+    lucro = df_res[df_res['Natureza']=="Receita"]['Saldo_C'].sum() - df_res[df_res['Natureza']=="Despesa"]['Saldo_D'].sum()
+    st.metric("Lucro/Prejuízo Líquido", f"R$ {lucro:,.2f}")
 
-    # 8. GESTÃO DE LANÇAMENTOS
-    st.divider()
-    with st.expander("⚙️ Gerenciar / Deletar Lançamentos"):
+    # 7. GESTÃO DE LANÇAMENTOS
+    with st.expander("⚙️ Ver Histórico / Deletar"):
         for index, row in df.iterrows():
-            col_inf, col_del = st.columns([5, 1])
-            col_inf.write(f"{row['Descrição']} | {row['Tipo']} | R$ {row['Valor']:,.2f}")
-            if col_del.button("🗑️", key=f"del_{row['ID']}"):
+            c_inf, c_del = st.columns([5, 1])
+            c_inf.write(f"ID {row['ID']} | {row['Descrição']} | {row['Tipo']} | R$ {row['Valor']:,.2f}")
+            if c_del.button("🗑️", key=f"del_{row['ID']}"):
                 st.session_state.lancamentos = df[df['ID'] != row['ID']]
                 st.rerun()
-
-    if st.button("🚨 Resetar Sistema"):
-        st.session_state.clear()
-        st.rerun()
 else:
-    st.info("Aguardando lançamentos para gerar razonetes e resultados.")
+    st.info("Lance um valor para visualizar o detalhamento nos razonetes.")
