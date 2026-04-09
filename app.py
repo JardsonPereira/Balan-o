@@ -18,7 +18,7 @@ with st.expander("➕ Novo Lançamento", expanded=True):
     with st.form("form_contabil", clear_on_submit=True):
         col1, col2 = st.columns(2)
         with col1:
-            desc = st.text_input("Conta (Ex: Banco)")
+            desc = st.text_input("Conta (Ex: Caixa)")
             natureza = st.selectbox("Natureza", ["Ativo", "Passivo", "Patrimônio Líquido", "Receita", "Despesa"])
         with col2:
             sub = st.selectbox("Subgrupo", ["Circulante", "Não Circulante", "N/A"])
@@ -41,69 +41,85 @@ with st.expander("➕ Novo Lançamento", expanded=True):
                 st.session_state.id_cont += 1
                 st.rerun()
 
-# 4. Processamento
+# 4. Processamento e Exibição
 if not st.session_state.lancamentos.empty:
     df = st.session_state.lancamentos
     contas = df['Descrição'].unique()
+    
+    # --- SEÇÃO 1: RAZONETES DETALHADOS ---
+    st.header("📊 Razonetes (T)")
+    cols_raz = st.columns(2)
     resumo_balancete = []
 
-    # Processamento dos Razonetes (Oculto ou Exibido conforme preferir)
-    for conta in contas:
-        df_c = df[df['Descrição'] == conta]
-        tot_d = df_c[df_c['Tipo'] == 'Débito']['Valor'].sum()
-        tot_c = df_c[df_c['Tipo'] == 'Crédito']['Valor'].sum()
-        
-        resumo_balancete.append({
-            'Conta': conta,
-            'Natureza': df_c['Natureza'].iloc[0],
-            'Saldo Devedor': max(0.0, tot_d - tot_c),
-            'Saldo Credor': max(0.0, tot_c - tot_d)
-        })
+    for i, conta in enumerate(contas):
+        with cols_raz[i % 2]:
+            st.subheader(f"Conta: {conta}")
+            df_c = df[df['Descrição'] == conta]
+            
+            debitos = df_c[df_c['Tipo'] == 'Débito']['Valor'].tolist()
+            creditos = df_c[df_c['Tipo'] == 'Crédito']['Valor'].tolist()
+            
+            max_len = max(len(debitos), len(creditos))
+            debitos += [None] * (max_len - len(debitos))
+            creditos += [None] * (max_len - len(creditos))
+            
+            # Tabela do Razonete
+            st.table(pd.DataFrame({"Débito (D)": debitos, "Crédito (C)": creditos}).fillna("-"))
+            
+            t_d = df_c[df_c['Tipo'] == 'Débito']['Valor'].sum()
+            t_c = df_c[df_c['Tipo'] == 'Crédito']['Valor'].sum()
+            
+            s_d = max(0.0, t_d - t_c)
+            s_c = max(0.0, t_c - t_d)
+            
+            resumo_balancete.append({
+                'Conta': conta,
+                'Natureza': df_c['Natureza'].iloc[0],
+                'Saldo Devedor': s_d,
+                'Saldo Credor': s_c
+            })
+            st.divider()
 
-    # 5. BALANCETE DE VERIFICAÇÃO COM TOTAIS ALINHADOS
+    # --- SEÇÃO 2: BALANCETE DE VERIFICAÇÃO ---
     st.header("🏁 Balancete de Verificação")
     df_final = pd.DataFrame(resumo_balancete)
     
-    # Totais
-    total_d = df_final['Saldo Devedor'].sum()
-    total_c = df_final['Saldo Credor'].sum()
-
-    # Exibição da Tabela principal
     st.table(df_final[['Conta', 'Natureza', 'Saldo Devedor', 'Saldo Credor']].style.format({
         'Saldo Devedor': 'R$ {:,.2f}',
         'Saldo Credor': 'R$ {:,.2f}'
     }))
 
-    # Criando a linha de totalização visualmente alinhada
-    # Usamos colunas para "empurrar" os totais para baixo das colunas corretas
-    col_label, col_nat, col_tot_d, col_tot_c = st.columns([2, 1, 1, 1])
+    # Linha de Totais Alinhada
+    total_d = df_final['Saldo Devedor'].sum()
+    total_c = df_final['Saldo Credor'].sum()
     
-    with col_label:
-        st.markdown("**TOTAL GERAL**")
-    with col_tot_d:
-        st.markdown(f"**R$ {total_d:,.2f}**")
-    with col_tot_c:
-        st.markdown(f"**R$ {total_c:,.2f}**")
+    c_l, c_n, c_td, c_tc = st.columns([2, 1, 1, 1])
+    c_l.markdown("**TOTAL GERAL**")
+    c_td.markdown(f"**R$ {total_d:,.2f}**")
+    c_tc.markdown(f"**R$ {total_c:,.2f}**")
 
-    # Alerta de Equilíbrio
-    if round(total_d, 2) == round(total_c, 2):
-        st.success("✅ Partidas Dobradas verificadas: Débitos e Créditos em equilíbrio.")
-    else:
-        st.error(f"❌ Erro de Equilíbrio: Diferença de R$ {abs(total_d - total_c):,.2f}")
+    # --- SEÇÃO 3: RESULTADO DO EXERCÍCIO ---
+    st.header("📈 Resultado")
+    receitas = df_final[df_final['Natureza'] == "Receita"]['Saldo Credor'].sum()
+    despesas = df_final[df_final['Natureza'] == "Despesa"]['Saldo Devedor'].sum()
+    resultado_liquido = receitas - despesas
+    
+    st.metric("Lucro/Prejuízo Líquido", f"R$ {resultado_liquido:,.2f}")
 
-    # 6. GESTÃO / RAZONETES (Opcional - Exibição compacta)
-    with st.expander("🔍 Ver Razonetes Detalhados"):
-        for conta in contas:
-            df_c = df[df['Descrição'] == conta]
-            st.write(f"**{conta}**")
-            st.dataframe(df_c[['Tipo', 'Valor']], hide_index=True)
-
-    with st.expander("⚙️ Gerenciar / Deletar Lançamentos"):
-        for index, row in df.iterrows():
-            c_inf, c_del = st.columns([5, 1])
-            c_inf.write(f"{row['Descrição']} | {row['Tipo']} | R$ {row['Valor']:,.2f}")
-            if c_del.button("🗑️", key=f"del_{row['ID']}"):
+    # --- SEÇÃO 4: GESTÃO DE LANÇAMENTOS (DELETAR) ---
+    st.divider()
+    st.header("⚙️ Gestão de Lançamentos")
+    for index, row in df.iterrows():
+        col_inf, col_del = st.columns([5, 1])
+        with col_inf:
+            st.write(f"**{row['Descrição']}** | {row['Tipo']} | R$ {row['Valor']:,.2f}")
+        with col_del:
+            if st.button("🗑️", key=f"del_{row['ID']}"):
                 st.session_state.lancamentos = df[df['ID'] != row['ID']]
                 st.rerun()
+
+    if st.button("🚨 Resetar Sistema"):
+        st.session_state.clear()
+        st.rerun()
 else:
     st.info("Aguardando lançamentos.")
