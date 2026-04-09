@@ -39,12 +39,12 @@ with st.expander("➕ Novo Lançamento", expanded=True):
                 st.session_state.id_cont += 1
                 st.rerun()
 
-# 4. Processamento e Exibição
+# 4. Processamento e Exibição (Onde estava o erro)
 if not st.session_state.lancamentos.empty:
     df_base = st.session_state.lancamentos
     resumo_lista = []
     
-    # Agrupamento por conta única para gerar o saldo
+    # Consolidação dos saldos por conta única
     for conta in df_base['Descrição'].unique():
         d_conta = df_base[df_base['Descrição'] == conta]
         v_deb = d_conta[d_conta['Tipo'] == 'Débito']['Valor'].sum()
@@ -52,7 +52,7 @@ if not st.session_state.lancamentos.empty:
         v_nat = d_conta['Natureza'].iloc[0]
         v_sub = d_conta['Subgrupo'].iloc[0]
         
-        # Cálculo de saldo devedor ou credor
+        # Cálculo do saldo líquido (Devedor ou Credor)
         s_devedor = max(0.0, v_deb - v_cre)
         s_credor = max(0.0, v_cre - v_deb)
         
@@ -66,7 +66,7 @@ if not st.session_state.lancamentos.empty:
     
     df_res = pd.DataFrame(resumo_lista)
 
-    # 5. Visualização das Tabelas (Balanço Patrimonial)
+    # 5. Tabelas do Balanço Patrimonial
     st.subheader("📈 Balanço Patrimonial")
     c1, c2, c3 = st.columns(3)
 
@@ -103,7 +103,7 @@ if not st.session_state.lancamentos.empty:
             st.dataframe(df_pl[['Conta', 'C']], hide_index=True, use_container_width=True)
         st.info(f"Total PL: R${df_pl['C'].sum():,.2f}")
 
-    # 6. Resultados do Exercício
+    # 6. Demonstração de Resultado
     st.divider()
     st.subheader("📊 Resultado do Exercício")
     df_resultado = df_res[df_res['Natureza'].isin(["Receita", "Despesa"])]
@@ -125,7 +125,7 @@ if not st.session_state.lancamentos.empty:
     else:
         st.error(f"❌ Diferença de R${abs(res_devedor - res_credor):,.2f}")
 
-    # 8. Gestão e Exclusão
+    # 8. Gestão de Lançamentos
     with st.expander("⚙️ Gerenciar Lançamentos"):
         for i, row in df_base.iterrows():
             col_t, col_b = st.columns([4, 1])
