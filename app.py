@@ -66,5 +66,9 @@ if not st.session_state.lancamentos.empty:
 
     with col_ativo:
         st.markdown("### ATIVO")
-        # Ativo Circulante
-        st.write("**Circul
+        st.write("**Circulante**")
+        df_ac = df_resumo[(df_resumo['Natureza'] == "Ativo") & (df_resumo['Subgrupo'] == "Circulante")]
+        st.dataframe(df_ac[['Conta', 'D']], use_container_width=True, hide_index=True)
+        
+        st.write("**Não Circulante**")
+        df_anc
