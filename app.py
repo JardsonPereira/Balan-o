@@ -49,68 +49,72 @@ if not st.session_state.lancamentos.empty:
     st.header("📊 Razonetes (Movimentações)")
     contas = df['Descrição'].unique()
     
-    # Grid de Razonetes
-    cols_raz = st.columns(2) # Duas colunas para melhor leitura detalhada
+    cols_raz = st.columns(2)
+    resumo_balancete = []
+
     for i, conta in enumerate(contas):
         with cols_raz[i % 2]:
             st.markdown(f"### {conta}")
             df_c = df[df['Descrição'] == conta]
             
-            # Criando a tabela de movimentação detalhada
             debitos = df_c[df_c['Tipo'] == 'Débito']['Valor'].tolist()
             creditos = df_c[df_c['Tipo'] == 'Crédito']['Valor'].tolist()
             
-            # Alinhando as listas para a tabela (preenchendo com vazio onde não houver valor)
             max_len = max(len(debitos), len(creditos))
             debitos += [None] * (max_len - len(debitos))
             creditos += [None] * (max_len - len(creditos))
             
-            df_t = pd.DataFrame({
-                "Débito (D)": debitos,
-                "Crédito (C)": creditos
-            })
+            st.table(pd.DataFrame({"Débito (D)": debitos, "Crédito (C)": creditos}).fillna("-"))
             
-            # Exibe o "T"
-            st.table(df_t.fillna("-"))
-            
-            # Cálculo do Saldo do Razonete
             tot_d = df_c[df_c['Tipo'] == 'Débito']['Valor'].sum()
             tot_c = df_c[df_c['Tipo'] == 'Crédito']['Valor'].sum()
-            saldo = tot_d - tot_c
             
-            if saldo >= 0:
-                st.write(f"**Saldo Devedor:** R$ {saldo:,.2f}")
+            saldo_d = max(0.0, tot_d - tot_c)
+            saldo_c = max(0.0, tot_c - tot_d)
+            
+            resumo_balancete.append({
+                'Conta': conta,
+                'Natureza': df_c['Natureza'].iloc[0],
+                'Saldo Devedor': saldo_d,
+                'Saldo Credor': saldo_c
+            })
+            
+            if saldo_d > 0:
+                st.write(f"**Saldo Final:** R$ {saldo_d:,.2f} (Devedor)")
             else:
-                st.write(f"**Saldo Credor:** R$ {abs(saldo):,.2f}")
+                st.write(f"**Saldo Final:** R$ {saldo_c:,.2f} (Credor)")
             st.divider()
 
-    # 6. CONTA DE RESULTADO E BALANCETE (Consolidado)
-    resumo = []
-    for conta in contas:
-        df_c = df[df['Descrição'] == conta]
-        d_tot = df_c[df_c['Tipo'] == 'Débito']['Valor'].sum()
-        c_tot = df_c[df_c['Tipo'] == 'Crédito']['Valor'].sum()
-        resumo.append({
-            'Conta': conta,
-            'Natureza': df_c['Natureza'].iloc[0],
-            'Subgrupo': df_c['Subgrupo'].iloc[0],
-            'Saldo_D': max(0.0, d_tot - c_tot),
-            'Saldo_C': max(0.0, c_tot - d_tot)
-        })
-    df_res = pd.DataFrame(resumo)
+    # 6. BALANCETE DE VERIFICAÇÃO (Resultado Final Solicitado)
+    st.header("🏁 Balancete de Verificação")
+    df_final = pd.DataFrame(resumo_balancete)
+    
+    # Exibe a tabela comparativa final
+    st.table(df_final[['Conta', 'Natureza', 'Saldo Devedor', 'Saldo Credor']].style.format({
+        'Saldo Devedor': 'R$ {:,.2f}',
+        'Saldo Credor': 'R$ {:,.2f}'
+    }))
 
-    # Exibição Simplificada do Resultado
-    st.header("📊 Resultado do Exercício")
-    lucro = df_res[df_res['Natureza']=="Receita"]['Saldo_C'].sum() - df_res[df_res['Natureza']=="Despesa"]['Saldo_D'].sum()
-    st.metric("Lucro/Prejuízo Líquido", f"R$ {lucro:,.2f}")
+    # Totais Finais
+    total_devedor = df_final['Saldo Devedor'].sum()
+    total_credor = df_final['Saldo Credor'].sum()
 
-    # 7. GESTÃO DE LANÇAMENTOS
+    col_res_d, col_res_c = st.columns(2)
+    col_res_d.metric("TOTAL DEVEDOR", f"R$ {total_devedor:,.2f}")
+    col_res_c.metric("TOTAL CREDOR", f"R$ {total_credor:,.2f}")
+
+    if round(total_devedor, 2) == round(total_credor, 2):
+        st.success("✅ O Balancete está equilibrado!")
+    else:
+        st.error("❌ Atenção: Existe uma diferença entre os saldos!")
+
+    # 7. GESTÃO
     with st.expander("⚙️ Ver Histórico / Deletar"):
         for index, row in df.iterrows():
             c_inf, c_del = st.columns([5, 1])
-            c_inf.write(f"ID {row['ID']} | {row['Descrição']} | {row['Tipo']} | R$ {row['Valor']:,.2f}")
+            c_inf.write(f"{row['Descrição']} | {row['Tipo']} | R$ {row['Valor']:,.2f}")
             if c_del.button("🗑️", key=f"del_{row['ID']}"):
                 st.session_state.lancamentos = df[df['ID'] != row['ID']]
                 st.rerun()
 else:
-    st.info("Lance um valor para visualizar o detalhamento nos razonetes.")
+    st.info("Aguardando lançamentos.")
