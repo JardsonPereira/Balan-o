@@ -36,21 +36,4 @@ with st.expander("➕ Novo Lançamento", expanded=True):
                     'Valor': valor
                 }])
                 st.session_state.lancamentos = pd.concat([st.session_state.lancamentos, novo], ignore_index=True)
-                st.session_state.id_cont += 1
-                st.rerun()
-
-# 4. Processamento e Exibição
-if not st.session_state.lancamentos.empty:
-    df_base = st.session_state.lancamentos
-    resumo_lista = []
-    
-    for conta in df_base['Descrição'].unique():
-        d_conta = df_base[df_base['Descrição'] == conta]
-        v_deb = d_conta[d_conta['Tipo'] == 'Débito']['Valor'].sum()
-        v_cre = d_conta[d_conta['Tipo'] == 'Crédito']['Valor'].sum()
-        v_nat = d_conta['Natureza'].iloc[0]
-        v_sub = d_conta['Subgrupo'].iloc[0]
-        
-        s_devedor = max(0, v_deb - v_cre)
-        s_credor = max(0, v_cre - v_deb)
-        resumo_lista.append({'Conta': conta, '
+                st.session_state.id_cont +=
