@@ -18,29 +18,18 @@ if 'lancamentos' not in st.session_state:
 # 3. Interface de Entrada
 with st.expander("➕ Novo Lançamento", expanded=True):
     with st.form("form_contabil", clear_on_submit=True):
-        desc = st.text_input("Descrição (Ex: Caixa, Salários)")
+        desc = st.text_input("Descrição (Ex: Caixa, Fornecedores)")
         natureza = st.selectbox("Natureza", ["Ativo", "Passivo", "Patrimônio Líquido", "Receita", "Despesa"])
         
-        # A MÁGICA ACONTECE AQUI: 
-        # O subgrupo só é definido se for Ativo ou Passivo.
-        # No Streamlit, para esconder o campo visualmente dentro de um form, 
-        # usamos uma lógica de placeholder ou container.
-        
-        subgrupo_opcoes = ["Circulante", "Não Circulante"]
+        # Subgrupo: O usuário deve escolher apenas se for Ativo ou Passivo
+        sub_escolhido = st.selectbox("Subgrupo (Se Ativo/Passivo)", ["Circulante", "Não Circulante", "N/A"])
         
         tipo = st.selectbox("Operação", ["Débito", "Crédito"])
         valor = st.number_input("Valor (R$)", min_value=0.0, format="%.2f")
         
-        # Como estamos dentro de um st.form, precisamos tratar o subgrupo 
-        # de forma que ele só seja capturado se a natureza permitir.
-        sub_escolhido = st.selectbox("Subgrupo (Apenas para Ativo/Passivo)", ["N/A"] + subgrupo_opcoes)
-        
         if st.form_submit_button("Confirmar Lançamento"):
-            # Validação extra: se for Ativo/Passivo, não pode ser N/A
-            if natureza in ["Ativo", "Passivo"] and sub_escolhido == "N/A":
-                st.error("Para Ativo ou Passivo, selecione Circulante ou Não Circulante.")
-            elif desc and valor > 0:
-                # Se não for Ativo/Passivo, forçamos N/A independente da escolha
+            if desc and valor > 0:
+                # Lógica para garantir que PL e Resultados fiquem como N/A
                 final_sub = sub_escolhido if natureza in ["Ativo", "Passivo"] else "N/A"
                 
                 novo = pd.DataFrame([{
@@ -87,4 +76,41 @@ if not st.session_state.lancamentos.empty:
         st.dataframe(df_anc[['Conta', 'D']], use_container_width=True, hide_index=True)
         st.info(f"Total: R$ {df_ac['D'].sum() + df_anc['D'].sum():,.2f}")
 
-    with col_passivo
+    with col_passivo:
+        st.markdown("### PASSIVO")
+        st.write("**Circulante**")
+        df_pc = df_resumo[(df_resumo['Natureza'] == "Passivo") & (df_resumo['Subgrupo'] == "Circulante")]
+        st.dataframe(df_pc[['Conta', 'C']], use_container_width=True, hide_index=True)
+        
+        st.write("**Não Circulante**")
+        df_pnc = df_resumo[(df_resumo['Natureza'] == "Passivo") & (df_resumo['Subgrupo'] == "Não Circulante")]
+        st.dataframe(df_pnc[['Conta', 'C']], use_container_width=True, hide_index=True)
+        st.info(f"Total: R$ {df_pc['C'].sum() + df_pnc['C'].sum():,.2f}")
+
+    with col_pl:
+        st.markdown("### P. LÍQUIDO")
+        df_pl = df_resumo[df_resumo['Natureza'] == "Patrimônio Líquido"]
+        st.dataframe(df_pl[['Conta', 'C']], use_container_width=True, hide_index=True)
+        st.info(f"Total: R$ {df_pl['C'].sum():,.2f}")
+
+    # 6. Contas de Resultado
+    st.divider()
+    st.subheader("📊 Contas de Resultado")
+    df_res = df_resumo[df_resumo['Natureza'].isin(["Receita", "Despesa"])][['Conta', 'Natureza', 'D', 'C']]
+    st.dataframe(df_res, use_container_width=True, hide_index=True)
+
+    # 7. Ferramentas e Backup
+    with st.expander("⚙️ Gerenciar Lançamentos"):
+        for i, row in df.iterrows():
+            c_txt, c_btn = st.columns([4, 1])
+            sub_info = f"({row['Subgrupo']})" if row['Subgrupo'] != "N/A" else ""
+            c_txt.write(f"{row['Descrição']} {sub_info} | R${row['Valor']:.2f}")
+            if c_btn.button("🗑️", key=f"del_{row['ID']}"):
+                st.session_state.lancamentos = df[df['ID'] != row['ID']]
+                st.rerun()
+                
+    csv = df.to_csv(index=False).encode('utf-8')
+    st.download_button("📥 Baixar Backup (CSV)", csv, "balancete.csv", "text/csv", use_container_width=True)
+
+else:
+    st.info("Toque no '+' para começar.")
