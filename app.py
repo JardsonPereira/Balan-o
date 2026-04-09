@@ -46,7 +46,15 @@ if not st.session_state.lancamentos.empty:
         saldo_cre = max(0, cre - deb)
         resumo.append({'Conta': conta, 'Natureza': nat, 'Devedor': saldo_dev, 'Credor': saldo_cre})
     
+    # Criamos o DataFrame do Balancete
     df_balancete = pd.DataFrame(resumo)
+    
+    # Organização: Contas Patrimoniais primeiro, depois Resultado
+    df_balancete['Ordem'] = df_balancete['Natureza'].map({
+        "Ativo": 1, "Passivo": 2, "Patrimônio Líquido": 3, "Receita": 4, "Despesa": 5
+    })
+    df_balancete = df_balancete.sort_values('Ordem').drop(columns=['Ordem'])
+
     total_dev = df_balancete['Devedor'].sum()
     total_cre = df_balancete['Credor'].sum()
 
@@ -55,23 +63,19 @@ if not st.session_state.lancamentos.empty:
     col1.metric("Devedor", f"R${total_dev:,.2f}")
     col2.metric("Credor", f"R${total_cre:,.2f}")
 
-    # 5. Balancete
+    # 5. Balancete Unificado
     st.divider()
-    tab1, tab2 = st.tabs(["Patrimonial", "Resultado"])
+    st.subheader("📈 Balancete de Verificação")
     
-    with tab1:
-        patrimonial = df_balancete[df_balancete['Natureza'].isin(["Ativo", "Passivo", "Patrimônio Líquido"])]
-        st.dataframe(patrimonial, use_container_width=True, hide_index=True)
-        
-    with tab2:
-        resultado = df_balancete[df_balancete['Natureza'].isin(["Receita", "Despesa"])]
-        st.dataframe(resultado, use_container_width=True, hide_index=True)
+    # Exibe a tabela única com todas as contas
+    st.dataframe(df_balancete, use_container_width=True, hide_index=True)
 
     # 6. Gerenciar
-    with st.expander("⚙️ Ver/Deletar Lançamentos"):
+    st.divider()
+    with st.expander("⚙️ Ver/Deletar Lançamentos Individuais"):
         for i, row in df.iterrows():
             c_txt, c_btn = st.columns([4, 1])
-            c_txt.write(f"{row['Descrição']} | R${row['Valor']:.2f}")
+            c_txt.write(f"{row['Descrição']} ({row['Tipo']}) | R${row['Valor']:.2f}")
             if c_btn.button("🗑️", key=f"del_{row['ID']}"):
                 st.session_state.lancamentos = df[df['ID'] != row['ID']]
                 st.rerun()
