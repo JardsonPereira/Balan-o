@@ -31,7 +31,7 @@ with st.expander("➕ Novo Lançamento", expanded=True):
                 st.session_state.id_cont += 1
                 st.rerun()
 
-# 4. Painel de Resumo
+# 4. Processamento dos Dados
 if not st.session_state.lancamentos.empty:
     df = st.session_state.lancamentos
     
@@ -44,44 +44,14 @@ if not st.session_state.lancamentos.empty:
         
         saldo_dev = max(0, deb - cre)
         saldo_cre = max(0, cre - deb)
-        resumo.append({'Conta': conta, 'Natureza': nat, 'Devedor': saldo_dev, 'Credor': saldo_cre})
+        resumo.append({'Conta': conta, 'Natureza': nat, 'D': saldo_dev, 'C': saldo_cre})
     
-    # Criamos o DataFrame do Balancete
-    df_balancete = pd.DataFrame(resumo)
-    
-    # Organização: Contas Patrimoniais primeiro, depois Resultado
-    df_balancete['Ordem'] = df_balancete['Natureza'].map({
-        "Ativo": 1, "Passivo": 2, "Patrimônio Líquido": 3, "Receita": 4, "Despesa": 5
-    })
-    df_balancete = df_balancete.sort_values('Ordem').drop(columns=['Ordem'])
+    df_resumo = pd.DataFrame(resumo)
 
-    total_dev = df_balancete['Devedor'].sum()
-    total_cre = df_balancete['Credor'].sum()
+    # 5. Exibição em Colunas Distintas (Ativo | Passivo | PL)
+    st.subheader("📈 Grupos Patrimoniais")
+    col_ativo, col_passivo, col_pl = st.columns(3)
 
-    st.subheader("📊 Totais")
-    col1, col2 = st.columns(2)
-    col1.metric("Devedor", f"R${total_dev:,.2f}")
-    col2.metric("Credor", f"R${total_cre:,.2f}")
-
-    # 5. Balancete Unificado
-    st.divider()
-    st.subheader("📈 Balancete de Verificação")
-    
-    # Exibe a tabela única com todas as contas
-    st.dataframe(df_balancete, use_container_width=True, hide_index=True)
-
-    # 6. Gerenciar
-    st.divider()
-    with st.expander("⚙️ Ver/Deletar Lançamentos Individuais"):
-        for i, row in df.iterrows():
-            c_txt, c_btn = st.columns([4, 1])
-            c_txt.write(f"{row['Descrição']} ({row['Tipo']}) | R${row['Valor']:.2f}")
-            if c_btn.button("🗑️", key=f"del_{row['ID']}"):
-                st.session_state.lancamentos = df[df['ID'] != row['ID']]
-                st.rerun()
-                
-    csv = df.to_csv(index=False).encode('utf-8')
-    st.download_button("📥 Baixar Backup", csv, "balancete.csv", "text/csv", use_container_width=True)
-
-else:
-    st.info("Toque no '+' para começar.")
+    with col_ativo:
+        st.markdown("**Ativo**")
+        df_a = df_resumo
