@@ -44,10 +44,10 @@ with st.expander("➕ Novo Lançamento", expanded=True):
 # 4. Processamento e Exibição
 if not st.session_state.lancamentos.empty:
     df = st.session_state.lancamentos
-    contas = df['Descrição'].unique()
+    contas = sorted(df['Descrição'].unique())
     
-    # --- SEÇÃO 1: RAZONETES DETALHADOS ---
-    st.header("📊 Razonetes (T)")
+    # --- SEÇÃO 1: RAZONETES DETALHADOS COM RASTREABILIDADE ---
+    st.header("📊 Razonetes (T) com Origem (#ID)")
     cols_raz = st.columns(2)
     resumo_balancete = []
 
@@ -56,19 +56,27 @@ if not st.session_state.lancamentos.empty:
             st.subheader(f"Conta: {conta}")
             df_c = df[df['Descrição'] == conta]
             
-            debitos = df_c[df_c['Tipo'] == 'Débito']['Valor'].tolist()
-            creditos = df_c[df_c['Tipo'] == 'Crédito']['Valor'].tolist()
+            # Formatação com ID para identificar a origem
+            debitos = []
+            creditos = []
             
+            for _, row in df_c.iterrows():
+                info = f"R$ {row['Valor']:,.2f} (#{int(row['ID'])})"
+                if row['Tipo'] == 'Débito':
+                    debitos.append(info)
+                else:
+                    creditos.append(info)
+            
+            # Alinhamento visual do T
             max_len = max(len(debitos), len(creditos))
-            debitos += [None] * (max_len - len(debitos))
-            creditos += [None] * (max_len - len(creditos))
+            debitos += ["-"] * (max_len - len(debitos))
+            creditos += ["-"] * (max_len - len(creditos))
             
-            # Tabela do Razonete
-            st.table(pd.DataFrame({"Débito (D)": debitos, "Crédito (C)": creditos}).fillna("-"))
+            st.table(pd.DataFrame({"Débito (D)": debitos, "Crédito (C)": creditos}))
             
+            # Cálculos de Saldo
             t_d = df_c[df_c['Tipo'] == 'Débito']['Valor'].sum()
             t_c = df_c[df_c['Tipo'] == 'Crédito']['Valor'].sum()
-            
             s_d = max(0.0, t_d - t_c)
             s_c = max(0.0, t_c - t_d)
             
@@ -78,6 +86,11 @@ if not st.session_state.lancamentos.empty:
                 'Saldo Devedor': s_d,
                 'Saldo Credor': s_c
             })
+            
+            # Exibe o saldo individual abaixo de cada T
+            if s_d > 0: st.caption(f"Saldo Devedor: R$ {s_d:,.2f}")
+            elif s_c > 0: st.caption(f"Saldo Credor: R$ {s_c:,.2f}")
+            else: st.caption("Conta Zerada")
             st.divider()
 
     # --- SEÇÃO 2: BALANCETE DE VERIFICAÇÃO ---
@@ -93,33 +106,38 @@ if not st.session_state.lancamentos.empty:
     total_d = df_final['Saldo Devedor'].sum()
     total_c = df_final['Saldo Credor'].sum()
     
+    # Proporção das colunas para alinhar com a tabela acima
     c_l, c_n, c_td, c_tc = st.columns([2, 1, 1, 1])
     c_l.markdown("**TOTAL GERAL**")
     c_td.markdown(f"**R$ {total_d:,.2f}**")
     c_tc.markdown(f"**R$ {total_c:,.2f}**")
 
     # --- SEÇÃO 3: RESULTADO DO EXERCÍCIO ---
-    st.header("📈 Resultado")
+    st.header("📈 Resultado do Exercício")
     receitas = df_final[df_final['Natureza'] == "Receita"]['Saldo Credor'].sum()
     despesas = df_final[df_final['Natureza'] == "Despesa"]['Saldo Devedor'].sum()
     resultado_liquido = receitas - despesas
     
-    st.metric("Lucro/Prejuízo Líquido", f"R$ {resultado_liquido:,.2f}")
+    if resultado_liquido >= 0:
+        st.metric("Lucro Líquido", f"R$ {resultado_liquido:,.2f}")
+    else:
+        st.metric("Prejuízo Líquido", f"R$ {abs(resultado_liquido):,.2f}", delta_color="inverse")
 
     # --- SEÇÃO 4: GESTÃO DE LANÇAMENTOS (DELETAR) ---
     st.divider()
-    st.header("⚙️ Gestão de Lançamentos")
-    for index, row in df.iterrows():
-        col_inf, col_del = st.columns([5, 1])
-        with col_inf:
-            st.write(f"**{row['Descrição']}** | {row['Tipo']} | R$ {row['Valor']:,.2f}")
-        with col_del:
-            if st.button("🗑️", key=f"del_{row['ID']}"):
-                st.session_state.lancamentos = df[df['ID'] != row['ID']]
-                st.rerun()
+    with st.expander("⚙️ Gerenciar Lançamentos (Consultar Origem #ID)"):
+        st.write("Consulte o número após o '#' nos razonetes para identificar qual lançamento deletar:")
+        for index, row in df.iterrows():
+            col_inf, col_del = st.columns([5, 1])
+            with col_inf:
+                st.write(f"**#{int(row['ID'])}** | {row['Descrição']} | {row['Tipo']} | R$ {row['Valor']:,.2f}")
+            with col_del:
+                if st.button("🗑️", key=f"del_{row['ID']}"):
+                    st.session_state.lancamentos = df[df['ID'] != row['ID']]
+                    st.rerun()
 
-    if st.button("🚨 Resetar Sistema"):
+    if st.button("🚨 Resetar Tudo"):
         st.session_state.clear()
         st.rerun()
 else:
-    st.info("Aguardando lançamentos.")
+    st.info("Aguardando lançamentos para gerar os razonetes e o balancete.")
