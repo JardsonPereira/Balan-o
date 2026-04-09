@@ -1,137 +1,127 @@
 import streamlit as st
 import pandas as pd
 
-# 1. Configuração para Celular
-st.set_page_config(
-    page_title="Balancete Pro",
-    layout="wide",
-    initial_sidebar_state="collapsed"
-)
+# 1. Configuração de Página
+st.set_page_config(page_title="Balancete Pro", layout="wide")
 
-st.title("📑 Balancete Detalhado")
+st.title("📑 Balancete e Razonetes")
 
-# 2. Inicialização do Estado
+# 2. Inicialização do Banco de Dados em Memória
 if 'lancamentos' not in st.session_state:
-    st.session_state.lancamentos = pd.DataFrame(columns=['ID', 'Descrição', 'Natureza', 'Subgrupo', 'Tipo', 'Valor'])
+    st.session_state.lancamentos = pd.DataFrame(
+        columns=['ID', 'Descrição', 'Natureza', 'Subgrupo', 'Tipo', 'Valor']
+    )
     st.session_state.id_cont = 0
 
-# 3. Interface de Entrada
-with st.expander("➕ Novo Lançamento", expanded=True):
+# 3. Formulário de Entrada
+with st.expander("➕ Realizar Novo Lançamento", expanded=True):
     with st.form("form_contabil", clear_on_submit=True):
-        desc = st.text_input("Descrição (Ex: Caixa, Fornecedores)")
-        natureza = st.selectbox("Natureza", ["Ativo", "Passivo", "Patrimônio Líquido", "Receita", "Despesa"])
-        sub_escolhido = st.selectbox("Subgrupo (Se Ativo/Passivo)", ["Circulante", "Não Circulante", "N/A"])
-        tipo = st.selectbox("Operação", ["Débito", "Crédito"])
-        valor = st.number_input("Valor (R$)", min_value=0.0, format="%.2f")
+        col1, col2 = st.columns(2)
+        with col1:
+            desc = st.text_input("Nome da Conta (Ex: Mercadorias)")
+            natureza = st.selectbox("Natureza", ["Ativo", "Passivo", "Patrimônio Líquido", "Receita", "Despesa"])
+        with col2:
+            sub = st.selectbox("Subgrupo (Se Ativo/Passivo)", ["Circulante", "Não Circulante", "N/A"])
+            tipo = st.selectbox("Tipo de Lançamento", ["Débito", "Crédito"])
+        
+        valor = st.number_input("Valor R$", min_value=0.01, format="%.2f")
         
         if st.form_submit_button("Confirmar Lançamento"):
-            if desc and valor > 0:
-                final_sub = sub_escolhido if natureza in ["Ativo", "Passivo"] else "N/A"
-                novo = pd.DataFrame([{
-                    'ID': st.session_state.id_cont, 
-                    'Descrição': desc.upper(), 
-                    'Natureza': natureza, 
-                    'Subgrupo': final_sub,
-                    'Tipo': tipo, 
+            if desc:
+                # Lógica de Subgrupo Automático
+                f_sub = sub if natureza in ["Ativo", "Passivo"] else "N/A"
+                
+                novo_dado = pd.DataFrame([{
+                    'ID': st.session_state.id_cont,
+                    'Descrição': desc.upper().strip(),
+                    'Natureza': natureza,
+                    'Subgrupo': f_sub,
+                    'Tipo': tipo,
                     'Valor': valor
                 }])
-                st.session_state.lancamentos = pd.concat([st.session_state.lancamentos, novo], ignore_index=True)
+                
+                st.session_state.lancamentos = pd.concat([st.session_state.lancamentos, novo_dado], ignore_index=True)
                 st.session_state.id_cont += 1
                 st.rerun()
 
-# 4. Processamento e Exibição (Onde estava o erro)
+# 4. Processamento dos Resultados (Razonetes e Saldos)
 if not st.session_state.lancamentos.empty:
-    df_base = st.session_state.lancamentos
-    resumo_lista = []
+    df = st.session_state.lancamentos
     
-    # Consolidação dos saldos por conta única
-    for conta in df_base['Descrição'].unique():
-        d_conta = df_base[df_base['Descrição'] == conta]
-        v_deb = d_conta[d_conta['Tipo'] == 'Débito']['Valor'].sum()
-        v_cre = d_conta[d_conta['Tipo'] == 'Crédito']['Valor'].sum()
-        v_nat = d_conta['Natureza'].iloc[0]
-        v_sub = d_conta['Subgrupo'].iloc[0]
+    # Criando os Saldos por Conta (Razonetes Simplificados)
+    resumo = []
+    for conta in df['Descrição'].unique():
+        filtro = df[df['Descrição'] == conta]
+        debito_total = filtro[filtro['Tipo'] == 'Débito']['Valor'].sum()
+        credito_total = filtro[filtro['Tipo'] == 'Crédito']['Valor'].sum()
         
-        # Cálculo do saldo líquido (Devedor ou Credor)
-        s_devedor = max(0.0, v_deb - v_cre)
-        s_credor = max(0.0, v_cre - v_deb)
+        # Saldo Líquido
+        s_devedor = max(0.0, debito_total - credito_total)
+        s_credor = max(0.0, credito_total - debito_total)
         
-        resumo_lista.append({
-            'Conta': conta, 
-            'Natureza': v_nat, 
-            'Subgrupo': v_sub, 
-            'D': s_devedor, 
+        resumo.append({
+            'Conta': conta,
+            'Natureza': filtro['Natureza'].iloc[0],
+            'Subgrupo': filtro['Subgrupo'].iloc[0],
+            'D': s_devedor,
             'C': s_credor
         })
     
-    df_res = pd.DataFrame(resumo_lista)
+    df_balancete = pd.DataFrame(resumo)
 
-    # 5. Tabelas do Balanço Patrimonial
+    # 5. EXIBIÇÃO: Razonetes e Histórico
+    st.divider()
+    st.subheader("📝 Lançamentos e Razonetes")
+    tab1, tab2 = st.tabs(["Histórico de Lançamentos", "Saldos das Contas"])
+    
+    with tab1:
+        st.dataframe(df, use_container_width=True, hide_index=True)
+    
+    with tab2:
+        st.dataframe(df_balancete, use_container_width=True, hide_index=True)
+
+    # 6. EXIBIÇÃO: Balanço Patrimonial
+    st.divider()
     st.subheader("📈 Balanço Patrimonial")
-    c1, c2, c3 = st.columns(3)
+    col_at, col_ps, col_pl = st.columns(3)
 
-    with c1:
-        st.write("**ATIVO**")
-        df_ac = df_res[(df_res['Natureza'] == "Ativo") & (df_res['Subgrupo'] == "Circulante")]
-        if not df_ac.empty:
-            st.caption("Circulante")
-            st.dataframe(df_ac[['Conta', 'D']], hide_index=True, use_container_width=True)
-        
-        df_anc = df_res[(df_res['Natureza'] == "Ativo") & (df_res['Subgrupo'] == "Não Circulante")]
-        if not df_anc.empty:
-            st.caption("Não Circulante")
-            st.dataframe(df_anc[['Conta', 'D']], hide_index=True, use_container_width=True)
-        st.info(f"Total Ativo: R${(df_ac['D'].sum() + df_anc['D'].sum()):,.2f}")
+    with col_at:
+        st.info("**ATIVO**")
+        a_circ = df_balancete[(df_balancete['Natureza'] == "Ativo") & (df_balancete['Subgrupo'] == "Circulante")]
+        a_ncirc = df_balancete[(df_balancete['Natureza'] == "Ativo") & (df_balancete['Subgrupo'] == "Não Circulante")]
+        if not a_circ.empty: st.write("Circulante"); st.table(a_circ[['Conta', 'D']])
+        if not a_ncirc.empty: st.write("Não Circulante"); st.table(a_ncirc[['Conta', 'D']])
+        st.write(f"**Total Ativo:** R$ {a_circ['D'].sum() + a_ncirc['D'].sum():,.2f}")
 
-    with c2:
-        st.write("**PASSIVO**")
-        df_pc = df_res[(df_res['Natureza'] == "Passivo") & (df_res['Subgrupo'] == "Circulante")]
-        if not df_pc.empty:
-            st.caption("Circulante")
-            st.dataframe(df_pc[['Conta', 'C']], hide_index=True, use_container_width=True)
-            
-        df_pnc = df_res[(df_res['Natureza'] == "Passivo") & (df_res['Subgrupo'] == "Não Circulante")]
-        if not df_pnc.empty:
-            st.caption("Não Circulante")
-            st.dataframe(df_pnc[['Conta', 'C']], hide_index=True, use_container_width=True)
-        st.info(f"Total Passivo: R${(df_pc['C'].sum() + df_pnc['C'].sum()):,.2f}")
+    with col_ps:
+        st.info("**PASSIVO**")
+        p_circ = df_balancete[(df_balancete['Natureza'] == "Passivo") & (df_balancete['Subgrupo'] == "Circulante")]
+        p_ncirc = df_balancete[(df_balancete['Natureza'] == "Passivo") & (df_balancete['Subgrupo'] == "Não Circulante")]
+        if not p_circ.empty: st.write("Circulante"); st.table(p_circ[['Conta', 'C']])
+        if not p_ncirc.empty: st.write("Não Circulante"); st.table(p_ncirc[['Conta', 'C']])
+        st.write(f"**Total Passivo:** R$ {p_circ['C'].sum() + p_ncirc['C'].sum():,.2f}")
 
-    with c3:
-        st.write("**P. LÍQUIDO**")
-        df_pl = df_res[df_res['Natureza'] == "Patrimônio Líquido"]
-        if not df_pl.empty:
-            st.dataframe(df_pl[['Conta', 'C']], hide_index=True, use_container_width=True)
-        st.info(f"Total PL: R${df_pl['C'].sum():,.2f}")
+    with col_pl:
+        st.info("**PATRIMÔNIO LÍQUIDO**")
+        pl_data = df_balancete[df_balancete['Natureza'] == "Patrimônio Líquido"]
+        if not pl_data.empty: st.table(pl_data[['Conta', 'C']])
+        st.write(f"**Total PL:** R$ {pl_data['C'].sum():,.2f}")
 
-    # 6. Demonstração de Resultado
+    # 7. Verificação Final de Equilíbrio
     st.divider()
-    st.subheader("📊 Resultado do Exercício")
-    df_resultado = df_res[df_res['Natureza'].isin(["Receita", "Despesa"])]
-    if not df_resultado.empty:
-        st.dataframe(df_resultado[['Conta', 'Natureza', 'D', 'C']], hide_index=True, use_container_width=True)
+    tot_d = df_balancete['D'].sum()
+    tot_c = df_balancete['C'].sum()
     
-    # 7. Verificação de Equilíbrio Contábil
-    st.divider()
-    res_devedor = df_res['D'].sum()
-    res_credor = df_res['C'].sum()
-    
-    st.subheader("🏁 Verificação de Saldos")
-    col_a, col_b = st.columns(2)
-    col_a.metric("Total Devedor", f"R${res_devedor:,.2f}")
-    col_b.metric("Total Credor", f"R${res_credor:,.2f}")
-
-    if round(res_devedor, 2) == round(res_credor, 2):
-        st.success("✅ O Balancete fechou corretamente!")
+    if round(tot_d, 2) == round(tot_c, 2):
+        st.success(f"✅ Balancete Fechado! Total Devedor: R${tot_d:,.2f} | Total Credor: R${tot_c:,.2f}")
     else:
-        st.error(f"❌ Diferença de R${abs(res_devedor - res_credor):,.2f}")
+        st.error(f"❌ Diferença Encontrada! D: R${tot_d:,.2f} | C: R${tot_c:,.2f}")
 
-    # 8. Gestão de Lançamentos
-    with st.expander("⚙️ Gerenciar Lançamentos"):
-        for i, row in df_base.iterrows():
-            col_t, col_b = st.columns([4, 1])
-            col_t.write(f"{row['Descrição']} | R${row['Valor']:.2f} ({row['Tipo']})")
-            if col_b.button("🗑️", key=f"del_{row['ID']}"):
-                st.session_state.lancamentos = df_base[df_base['ID'] != row['ID']]
-                st.rerun()
+    # Botão para Limpar Tudo
+    if st.button("🗑️ Limpar Todos os Lançamentos"):
+        st.session_state.lancamentos = pd.DataFrame(columns=['ID', 'Descrição', 'Natureza', 'Subgrupo', 'Tipo', 'Valor'])
+        st.session_state.id_cont = 0
+        st.rerun()
+
 else:
-    st.info("Toque no '+' para realizar o primeiro lançamento.")
+    st.warning("Aguardando o primeiro lançamento para gerar os relatórios.")
