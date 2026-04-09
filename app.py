@@ -21,7 +21,6 @@ with st.expander("➕ Novo Lançamento", expanded=True):
         desc = st.text_input("Descrição (Ex: Caixa, Fornecedores)")
         natureza = st.selectbox("Natureza", ["Ativo", "Passivo", "Patrimônio Líquido", "Receita", "Despesa"])
         
-        # Subgrupo: O usuário deve escolher apenas se for Ativo ou Passivo
         sub_escolhido = st.selectbox("Subgrupo (Se Ativo/Passivo)", ["Circulante", "Não Circulante", "N/A"])
         
         tipo = st.selectbox("Operação", ["Débito", "Crédito"])
@@ -29,7 +28,6 @@ with st.expander("➕ Novo Lançamento", expanded=True):
         
         if st.form_submit_button("Confirmar Lançamento"):
             if desc and valor > 0:
-                # Lógica para garantir que PL e Resultados fiquem como N/A
                 final_sub = sub_escolhido if natureza in ["Ativo", "Passivo"] else "N/A"
                 
                 novo = pd.DataFrame([{
@@ -61,7 +59,7 @@ if not st.session_state.lancamentos.empty:
     
     df_resumo = pd.DataFrame(resumo)
 
-    # 5. Exibição em Colunas (Balanço Patrimonial)
+    # 5. Balanço Patrimonial
     st.subheader("📈 Balanço Patrimonial")
     col_ativo, col_passivo, col_pl = st.columns(3)
 
@@ -74,7 +72,8 @@ if not st.session_state.lancamentos.empty:
         st.write("**Não Circulante**")
         df_anc = df_resumo[(df_resumo['Natureza'] == "Ativo") & (df_resumo['Subgrupo'] == "Não Circulante")]
         st.dataframe(df_anc[['Conta', 'D']], use_container_width=True, hide_index=True)
-        st.info(f"Total: R$ {df_ac['D'].sum() + df_anc['D'].sum():,.2f}")
+        total_a = df_ac['D'].sum() + df_anc['D'].sum()
+        st.info(f"Total Ativo: R$ {total_a:,.2f}")
 
     with col_passivo:
         st.markdown("### PASSIVO")
@@ -85,13 +84,15 @@ if not st.session_state.lancamentos.empty:
         st.write("**Não Circulante**")
         df_pnc = df_resumo[(df_resumo['Natureza'] == "Passivo") & (df_resumo['Subgrupo'] == "Não Circulante")]
         st.dataframe(df_pnc[['Conta', 'C']], use_container_width=True, hide_index=True)
-        st.info(f"Total: R$ {df_pc['C'].sum() + df_pnc['C'].sum():,.2f}")
+        total_p = df_pc['C'].sum() + df_pnc['C'].sum()
+        st.info(f"Total Passivo: R$ {total_p:,.2f}")
 
     with col_pl:
         st.markdown("### P. LÍQUIDO")
         df_pl = df_resumo[df_resumo['Natureza'] == "Patrimônio Líquido"]
         st.dataframe(df_pl[['Conta', 'C']], use_container_width=True, hide_index=True)
-        st.info(f"Total: R$ {df_pl['C'].sum():,.2f}")
+        total_pl = df_pl['C'].sum()
+        st.info(f"Total PL: R$ {total_pl:,.2f}")
 
     # 6. Contas de Resultado
     st.divider()
@@ -99,18 +100,15 @@ if not st.session_state.lancamentos.empty:
     df_res = df_resumo[df_resumo['Natureza'].isin(["Receita", "Despesa"])][['Conta', 'Natureza', 'D', 'C']]
     st.dataframe(df_res, use_container_width=True, hide_index=True)
 
-    # 7. Ferramentas e Backup
-    with st.expander("⚙️ Gerenciar Lançamentos"):
-        for i, row in df.iterrows():
-            c_txt, c_btn = st.columns([4, 1])
-            sub_info = f"({row['Subgrupo']})" if row['Subgrupo'] != "N/A" else ""
-            c_txt.write(f"{row['Descrição']} {sub_info} | R${row['Valor']:.2f}")
-            if c_btn.button("🗑️", key=f"del_{row['ID']}"):
-                st.session_state.lancamentos = df[df['ID'] != row['ID']]
-                st.rerun()
-                
-    csv = df.to_csv(index=False).encode('utf-8')
-    st.download_button("📥 Baixar Backup (CSV)", csv, "balancete.csv", "text/csv", use_container_width=True)
+    # 7. VERIFICAÇÃO FINAL (Saldo Devedor == Saldo Credor)
+    st.divider()
+    t_devedor = df_resumo['D'].sum()
+    t_credor = df_resumo['C'].sum()
+    
+    st.subheader("🏁 Verificação de Saldos")
+    c1, c2 = st.columns(2)
+    c1.metric("Total Devedor", f"R$ {t_devedor:,.2f}")
+    c2.metric("Total Credor", f"R$ {t_credor:,.2f}")
 
-else:
-    st.info("Toque no '+' para começar.")
+    if round(t_devedor, 2) == round(t_credor, 2):
+        st.success("✅ O
