@@ -17,32 +17,34 @@ if 'lancamentos' not in st.session_state:
     )
     st.session_state.id_cont = 0
 
-# 3. Formulário na Barra Lateral - FOCO EM ESCOLHA DE CONTA
+# 3. Formulário na Barra Lateral
 with st.sidebar:
     st.header("➕ Novo Lançamento")
     
-    # Lista de contas já existentes para o Selectbox
+    # Lista de contas já existentes
     contas_existentes = sorted(st.session_state.lancamentos['Descrição'].unique().tolist())
-    opcoes = ["-- Selecione uma conta --", "+ Nova Conta"] + contas_existentes
+    opcoes = ["-- Selecione uma conta existente --"] + contas_existentes
 
     with st.form("form_mobile", clear_on_submit=True):
-        # Opção 1: Escolher conta existente
-        escolha_conta = st.selectbox("Escolha a Conta", opcoes)
+        # Seleção de conta já criada
+        escolha_conta = st.selectbox("Escolher Conta Criada", opcoes)
         
-        # Opção 2: Campo de texto (só usado se escolher "+ Nova Conta")
-        nova_conta_input = st.text_input("Nome da Nova Conta (se aplicável)").upper().strip()
+        # Campo para digitar nova conta
+        nova_conta_input = st.text_input("OU Digite uma Nova Conta").upper().strip()
         
         natureza = st.selectbox("Natureza", ["Ativo", "Passivo", "Patrimônio Líquido", "Receita", "Despesa"])
         tipo = st.radio("Operação", ["Débito", "Crédito"], horizontal=True)
         valor = st.number_input("Valor R$", min_value=0.01, format="%.2f")
         
         if st.form_submit_button("Confirmar Lançamento", use_container_width=True):
-            # Lógica de definição do nome da conta
-            nome_final = ""
-            if escolha_conta == "+ Nova Conta":
+            # Lógica: Se digitou algo, prioriza o texto (nova conta). 
+            # Se não digitou, usa a seleção do menu.
+            if nova_conta_input:
                 nome_final = nova_conta_input
-            elif escolha_conta != "-- Selecione uma conta --":
+            elif escolha_conta != "-- Selecione uma conta existente --":
                 nome_final = escolha_conta
+            else:
+                nome_final = None
             
             if nome_final:
                 novo = pd.DataFrame([{
@@ -57,9 +59,9 @@ with st.sidebar:
                 st.toast(f"Lançado em {nome_final}!", icon="✅")
                 st.rerun()
             else:
-                st.error("Selecione uma conta ou digite o nome de uma nova.")
+                st.error("Erro: Selecione uma conta ou digite um novo nome.")
 
-# 4. Conteúdo Principal: Razonetes (Contas T)
+# 4. Conteúdo Principal: Razonetes
 if not st.session_state.lancamentos.empty:
     df = st.session_state.lancamentos
     contas = sorted(df['Descrição'].unique())
@@ -88,7 +90,7 @@ if not st.session_state.lancamentos.empty:
             elif saldo < 0: st.warning(f"Saldo Credor: R$ {abs(saldo):,.2f}")
             else: st.info("Saldo Zerado")
 
-    # 5. Balancete de Verificação (Com Natureza e Totais)
+    # 5. Balancete de Verificação
     st.divider()
     st.subheader("🏁 Balancete de Verificação")
     
@@ -110,25 +112,27 @@ if not st.session_state.lancamentos.empty:
     df_bal = pd.DataFrame(resumo_bal)
     st.dataframe(df_bal, use_container_width=True, hide_index=True)
 
-    # Totais Devedor e Credor
+    # Totais do Balancete
     t_d, t_c = df_bal['Saldo D'].sum(), df_bal['Saldo C'].sum()
     c_b1, c_b2 = st.columns(2)
     c_b1.metric("Total Devedor", f"R$ {t_d:,.2f}")
     c_b2.metric("Total Credor", f"R$ {t_c:,.2f}")
 
-    # 6. Resultado do Período
-    st.divider()
-    st.subheader("📈 Resultado")
-    res = tot_receitas - tot_despesas
-    st.metric("LUCRO/PREJUÍZO", f"R$ {res:,.2f}", delta=res)
+    if round(t_d, 2) != round(t_c, 2):
+        st.error("⚠️ Diferença entre D e C!")
 
-    # 7. Gestão de Lançamentos (Deletar)
+    # 6. Resultado
+    st.divider()
+    res = tot_receitas - tot_despesas
+    st.metric("LUCRO/PREJUÍZO DO PERÍODO", f"R$ {res:,.2f}", delta=res)
+
+    # 7. Gestão
     with st.expander("⚙️ Gerenciar Lançamentos"):
         for index, row in df.iterrows():
             c_txt, c_btn = st.columns([4, 1])
-            c_txt.write(f"**{row['Descrição']}**: R$ {row['Valor']:,.2f} ({row['Tipo'][0]})")
+            c_txt.write(f"{row['Descrição']}: R$ {row['Valor']:,.2f} ({row['Tipo'][0]})")
             if c_btn.button("🗑️", key=f"del_{index}"):
                 st.session_state.lancamentos = df.drop(index).reset_index(drop=True)
                 st.rerun()
 else:
-    st.info("Abra o menu lateral para selecionar ou criar uma conta.")
+    st.info("Utilize o menu lateral para iniciar os lançamentos.")
