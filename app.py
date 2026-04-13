@@ -15,11 +15,11 @@ if 'lancamentos' not in st.session_state:
     st.session_state.lancamentos = pd.DataFrame(
         columns=['ID', 'Descrição', 'Natureza', 'Tipo', 'Valor']
     )
-    st.session_state.id_cont = 0
+    st.session_state.id_cont = 1 # Começa no 1 para contagem amigável
 
 # 3. Formulário na Barra Lateral
 with st.sidebar:
-    st.header("➕ Novo Lançamento")
+    st.header(f"➕ Lançamento Nº {st.session_state.id_cont}")
     
     contas_existentes = sorted(st.session_state.lancamentos['Descrição'].unique().tolist())
     opcoes = ["-- Selecione uma conta existente --"] + contas_existentes
@@ -49,7 +49,7 @@ with st.sidebar:
                     'Valor': valor
                 }])
                 st.session_state.lancamentos = pd.concat([st.session_state.lancamentos, novo], ignore_index=True)
-                st.session_state.id_cont += 1
+                st.session_state.id_cont += 1 # Incrementa a ordem
                 st.rerun()
 
 # 4. Conteúdo Principal: Razonetes
@@ -66,13 +66,15 @@ if not st.session_state.lancamentos.empty:
             with col_esq:
                 st.markdown("<p style='text-align:center; border-bottom:2px solid #555'><b>DÉBITO</b></p>", unsafe_allow_html=True)
                 debitos = df_c[df_c['Tipo'] == 'Débito']
-                for v in debitos['Valor']: st.write(f"R$ {v:,.2f}")
+                for _, row in debitos.iterrows(): 
+                    st.write(f"#{row['ID']} - R$ {row['Valor']:,.2f}")
                 tot_d = debitos['Valor'].sum()
             
             with col_dir:
                 st.markdown("<p style='text-align:center; border-bottom:2px solid #555'><b>CRÉDITO</b></p>", unsafe_allow_html=True)
                 creditos = df_c[df_c['Tipo'] == 'Crédito']
-                for v in creditos['Valor']: st.write(f"R$ {v:,.2f}")
+                for _, row in creditos.iterrows(): 
+                    st.write(f"#{row['ID']} - R$ {row['Valor']:,.2f}")
                 tot_c = creditos['Valor'].sum()
 
             saldo = tot_d - tot_c
@@ -97,40 +99,33 @@ if not st.session_state.lancamentos.empty:
         s_d, s_c = max(0.0, v_d - v_c), max(0.0, v_c - v_d)
         resumo_bal.append({'Conta': conta, 'Natureza': nat, 'Saldo D': s_d, 'Saldo C': s_c})
         
-        # Lógica para Resultado (Receitas aumentam por crédito, Despesas por débito)
         if nat == "Receita": tot_receitas += (v_c - v_d)
         if nat == "Despesa": tot_despesas += (v_d - v_c)
     
-    df_bal = pd.DataFrame(resumo_bal)
-    st.dataframe(df_bal, use_container_width=True, hide_index=True)
+    st.dataframe(pd.DataFrame(resumo_bal), use_container_width=True, hide_index=True)
 
     # Totais do Balancete
-    t_d, t_c = df_bal['Saldo D'].sum(), df_bal['Saldo C'].sum()
+    t_d, t_c = sum(x['Saldo D'] for x in resumo_bal), sum(x['Saldo C'] for x in resumo_bal)
     c_b1, c_b2 = st.columns(2)
     c_b1.metric("Total Devedor", f"R$ {t_d:,.2f}")
     c_b2.metric("Total Credor", f"R$ {t_c:,.2f}")
 
-    # 6. Apuração de Resultado com Fórmula
+    # 6. Apuração de Resultado
     st.divider()
     st.subheader("📈 Resultado do Período")
-    
     res = tot_receitas - tot_despesas
-    
-    # Exibição da fórmula matemática
     st.latex(rf"Resultado = {tot_receitas:,.2f} (Rec) - {tot_despesas:,.2f} (Desp)")
-    
-    label_resultado = "LUCRO" if res >= 0 else "PREJUÍZO"
-    cor_delta = "normal" if res >= 0 else "inverse"
-    
-    st.metric(label=label_resultado, value=f"R$ {abs(res):,.2f}", delta=f"{res:,.2f}", delta_color=cor_delta)
+    st.metric(label="LUCRO/PREJUÍZO", value=f"R$ {abs(res):,.2f}", delta=f"{res:,.2f}")
 
-    # 7. Gestão
-    with st.expander("⚙️ Gerenciar Lançamentos"):
+    # 7. Gestão de Lançamentos com Numeração
+    st.divider()
+    with st.expander("⚙️ Lista de Lançamentos (Ordem Cronológica)"):
         for index, row in df.iterrows():
             c_txt, c_btn = st.columns([4, 1])
-            c_txt.write(f"{row['Descrição']}: R$ {row['Valor']:,.2f} ({row['Tipo'][0]})")
-            if c_btn.button("🗑️", key=f"del_{index}"):
+            # Exibe o número do lançamento aqui também
+            c_txt.write(f"**#{row['ID']}** | {row['Descrição']} | R$ {row['Valor']:,.2f} ({row['Tipo'][0]})")
+            if c_btn.button("🗑️", key=f"del_{row['ID']}"):
                 st.session_state.lancamentos = df.drop(index).reset_index(drop=True)
                 st.rerun()
 else:
-    st.info("Utilize o menu lateral para iniciar os lançamentos.")
+    st.info("Utilize o menu lateral para iniciar o lançamento #1.")
