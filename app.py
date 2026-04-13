@@ -21,15 +21,11 @@ if 'lancamentos' not in st.session_state:
 with st.sidebar:
     st.header("➕ Novo Lançamento")
     
-    # Lista de contas já existentes
     contas_existentes = sorted(st.session_state.lancamentos['Descrição'].unique().tolist())
     opcoes = ["-- Selecione uma conta existente --"] + contas_existentes
 
     with st.form("form_mobile", clear_on_submit=True):
-        # Seleção de conta já criada
         escolha_conta = st.selectbox("Escolher Conta Criada", opcoes)
-        
-        # Campo para digitar nova conta
         nova_conta_input = st.text_input("OU Digite uma Nova Conta").upper().strip()
         
         natureza = st.selectbox("Natureza", ["Ativo", "Passivo", "Patrimônio Líquido", "Receita", "Despesa"])
@@ -37,8 +33,6 @@ with st.sidebar:
         valor = st.number_input("Valor R$", min_value=0.01, format="%.2f")
         
         if st.form_submit_button("Confirmar Lançamento", use_container_width=True):
-            # Lógica: Se digitou algo, prioriza o texto (nova conta). 
-            # Se não digitou, usa a seleção do menu.
             if nova_conta_input:
                 nome_final = nova_conta_input
             elif escolha_conta != "-- Selecione uma conta existente --":
@@ -56,10 +50,7 @@ with st.sidebar:
                 }])
                 st.session_state.lancamentos = pd.concat([st.session_state.lancamentos, novo], ignore_index=True)
                 st.session_state.id_cont += 1
-                st.toast(f"Lançado em {nome_final}!", icon="✅")
                 st.rerun()
-            else:
-                st.error("Erro: Selecione uma conta ou digite um novo nome.")
 
 # 4. Conteúdo Principal: Razonetes
 if not st.session_state.lancamentos.empty:
@@ -106,6 +97,7 @@ if not st.session_state.lancamentos.empty:
         s_d, s_c = max(0.0, v_d - v_c), max(0.0, v_c - v_d)
         resumo_bal.append({'Conta': conta, 'Natureza': nat, 'Saldo D': s_d, 'Saldo C': s_c})
         
+        # Lógica para Resultado (Receitas aumentam por crédito, Despesas por débito)
         if nat == "Receita": tot_receitas += (v_c - v_d)
         if nat == "Despesa": tot_despesas += (v_d - v_c)
     
@@ -118,13 +110,19 @@ if not st.session_state.lancamentos.empty:
     c_b1.metric("Total Devedor", f"R$ {t_d:,.2f}")
     c_b2.metric("Total Credor", f"R$ {t_c:,.2f}")
 
-    if round(t_d, 2) != round(t_c, 2):
-        st.error("⚠️ Diferença entre D e C!")
-
-    # 6. Resultado
+    # 6. Apuração de Resultado com Fórmula
     st.divider()
+    st.subheader("📈 Resultado do Período")
+    
     res = tot_receitas - tot_despesas
-    st.metric("LUCRO/PREJUÍZO DO PERÍODO", f"R$ {res:,.2f}", delta=res)
+    
+    # Exibição da fórmula matemática
+    st.latex(rf"Resultado = {tot_receitas:,.2f} (Rec) - {tot_despesas:,.2f} (Desp)")
+    
+    label_resultado = "LUCRO" if res >= 0 else "PREJUÍZO"
+    cor_delta = "normal" if res >= 0 else "inverse"
+    
+    st.metric(label=label_resultado, value=f"R$ {abs(res):,.2f}", delta=f"{res:,.2f}", delta_color=cor_delta)
 
     # 7. Gestão
     with st.expander("⚙️ Gerenciar Lançamentos"):
