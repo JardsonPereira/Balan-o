@@ -17,11 +17,10 @@ if 'lancamentos' not in st.session_state:
     )
     st.session_state.id_cont = 1
 
-# --- NOVIDADE: INDICADOR DE TOTAL DE LANÇAMENTOS NO TOPO ---
+# Indicador de Total de Lançamentos
 if not st.session_state.lancamentos.empty:
     total_registros = len(st.session_state.lancamentos)
-    st.markdown(f"**Total de Lançamentos realizados:** `{total_registros}`")
-# ---------------------------------------------------------
+    st.markdown(f"**Total de Lançamentos:** `{total_registros}`")
 
 # 3. Formulário na Barra Lateral
 with st.sidebar:
@@ -68,18 +67,16 @@ if not st.session_state.lancamentos.empty:
                 st.markdown("<p style='text-align:center; border-bottom:2px solid #555'><b>DÉBITO</b></p>", unsafe_allow_html=True)
                 debitos = df_c[df_c['Tipo'] == 'Débito']
                 for _, row in debitos.iterrows():
-                    c_val, c_num = st.columns([3, 1])
-                    c_val.write(f"R$ {row['Valor']:,.2f}")
-                    c_num.markdown(f"<p style='text-align:right; font-size:10px; color:gray;'>{row['ID']}</p>", unsafe_allow_html=True)
+                    # Efeito de Expoente: Valor acompanhado do ID em subscrito
+                    st.markdown(f"R$ {row['Valor']:,.2f} <sup style='color:gray;'>({row['ID']})</sup>", unsafe_allow_html=True)
                 tot_d = debitos['Valor'].sum()
             
             with col_dir:
                 st.markdown("<p style='text-align:center; border-bottom:2px solid #555'><b>CRÉDITO</b></p>", unsafe_allow_html=True)
                 creditos = df_c[df_c['Tipo'] == 'Crédito']
                 for _, row in creditos.iterrows():
-                    c_val, c_num = st.columns([3, 1])
-                    c_val.write(f"R$ {row['Valor']:,.2f}")
-                    c_num.markdown(f"<p style='text-align:right; font-size:10px; color:gray;'>{row['ID']}</p>", unsafe_allow_html=True)
+                    # Efeito de Expoente: Valor acompanhado do ID em subscrito
+                    st.markdown(f"R$ {row['Valor']:,.2f} <sup style='color:gray;'>({row['ID']})</sup>", unsafe_allow_html=True)
                 tot_c = creditos['Valor'].sum()
 
             saldo = tot_d - tot_c
