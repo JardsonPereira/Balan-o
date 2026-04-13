@@ -20,14 +20,10 @@ if 'lancamentos' not in st.session_state:
 if 'edit_index' not in st.session_state:
     st.session_state.edit_index = None
 
-# Indicador de Total de Lançamentos
-if not st.session_state.lancamentos.empty:
-    st.markdown(f"**Total de Lançamentos:** `{len(st.session_state.lancamentos)}`")
-
 # 3. Formulário na Barra Lateral (Criar/Editar)
 with st.sidebar:
     if st.session_state.edit_index is not None:
-        st.header(f"📝 Editar Lançamento #{st.session_state.lancamentos.loc[st.session_state.edit_index, 'ID']}")
+        st.header(f"📝 Editar #{st.session_state.lancamentos.loc[st.session_state.edit_index, 'ID']}")
         row_to_edit = st.session_state.lancamentos.loc[st.session_state.edit_index]
         btn_label = "Salvar Alterações"
     else:
@@ -52,39 +48,23 @@ with st.sidebar:
         
         valor_padrao = float(row_to_edit['Valor']) if row_to_edit is not None else 0.01
         valor = st.number_input("Valor R$", min_value=0.01, format="%.2f", value=valor_padrao)
-        
-        just_padrao = row_to_edit['Justificativa'] if row_to_edit is not None else ""
-        justificativa = st.text_area("Justificativa / Histórico", value=just_padrao)
+        justificativa = st.text_area("Justificativa", value=row_to_edit['Justificativa'] if row_to_edit is not None else "")
         
         if st.form_submit_button(btn_label, use_container_width=True):
             nome_final = nova_conta_input if nova_conta_input else (escolha_conta if escolha_conta != "-- Selecione uma conta --" else None)
-            
             if nome_final:
                 if st.session_state.edit_index is not None:
-                    # Atualizar registro existente
-                    st.session_state.lancamentos.at[st.session_state.edit_index, 'Descrição'] = nome_final
-                    st.session_state.lancamentos.at[st.session_state.edit_index, 'Natureza'] = natureza
-                    st.session_state.lancamentos.at[st.session_state.edit_index, 'Tipo'] = tipo
-                    st.session_state.lancamentos.at[st.session_state.edit_index, 'Valor'] = valor
-                    st.session_state.lancamentos.at[st.session_state.edit_index, 'Justificativa'] = justificativa
+                    st.session_state.lancamentos.iloc[st.session_state.edit_index] = [
+                        row_to_edit['ID'], nome_final, natureza, tipo, valor, justificativa
+                    ]
                     st.session_state.edit_index = None
                 else:
-                    # Adicionar novo registro
-                    novo = pd.DataFrame([{
-                        'ID': st.session_state.id_cont,
-                        'Descrição': nome_final, 'Natureza': natureza, 'Tipo': tipo,
-                        'Valor': valor, 'Justificativa': justificativa if justificativa else "Sem justificativa."
-                    }])
+                    novo = pd.DataFrame([{'ID': st.session_state.id_cont, 'Descrição': nome_final, 'Natureza': natureza, 'Tipo': tipo, 'Valor': valor, 'Justificativa': justificativa}])
                     st.session_state.lancamentos = pd.concat([st.session_state.lancamentos, novo], ignore_index=True)
                     st.session_state.id_cont += 1
                 st.rerun()
-    
-    if st.session_state.edit_index is not None:
-        if st.button("Cancelar Edição", use_container_width=True):
-            st.session_state.edit_index = None
-            st.rerun()
 
-# 4. Razonetes
+# 4. Razonetes com Totais nas Colunas
 if not st.session_state.lancamentos.empty:
     df = st.session_state.lancamentos
     contas = sorted(df['Descrição'].unique())
@@ -94,16 +74,33 @@ if not st.session_state.lancamentos.empty:
         with st.expander(f"📊 {conta}", expanded=False):
             df_c = df[df['Descrição'] == conta]
             col_esq, col_dir = st.columns(2)
+            
+            # Coluna de Débito
             with col_esq:
                 st.markdown("<p style='text-align:center; border-bottom:2px solid #555'><b>DÉBITO</b></p>", unsafe_allow_html=True)
-                for _, row in df_c[df_c['Tipo'] == 'Débito'].iterrows():
-                    st.button(f"R$ {row['Valor']:,.2f} ({row['ID']})", key=f"d_{row['ID']}", help=row['Justificativa'], use_container_width=True)
+                debitos = df_c[df_c['Tipo'] == 'Débito']
+                for _, r in debitos.iterrows():
+                    st.button(f"R$ {r['Valor']:,.2f} ({r['ID']})", key=f"d_{r['ID']}_{conta}", help=r['Justificativa'], use_container_width=True)
+                tot_d = debitos['Valor'].sum()
+                st.markdown(f"<p style='text-align:right; border-top:1px dashed #888; color:gray;'>Total D: <b>R$ {tot_d:,.2f}</b></p>", unsafe_allow_html=True)
+            
+            # Coluna de Crédito
             with col_dir:
                 st.markdown("<p style='text-align:center; border-bottom:2px solid #555'><b>CRÉDITO</b></p>", unsafe_allow_html=True)
-                for _, row in df_c[df_c['Tipo'] == 'Crédito'].iterrows():
-                    st.button(f"R$ {row['Valor']:,.2f} ({row['ID']})", key=f"c_{row['ID']}", help=row['Justificativa'], use_container_width=True)
+                creditos = df_c[df_c['Tipo'] == 'Crédito']
+                for _, r in creditos.iterrows():
+                    st.button(f"R$ {r['Valor']:,.2f} ({r['ID']})", key=f"c_{r['ID']}_{conta}", help=r['Justificativa'], use_container_width=True)
+                tot_c = creditos['Valor'].sum()
+                st.markdown(f"<p style='text-align:right; border-top:1px dashed #888; color:gray;'>Total C: <b>R$ {tot_c:,.2f}</b></p>", unsafe_allow_html=True)
 
-    # 5. Balancete e Resultado (COM A FÓRMULA MANTIDA)
+            # Saldo Final da Conta
+            saldo = tot_d - tot_c
+            st.divider()
+            if saldo > 0: st.success(f"Saldo Devedor: R$ {abs(saldo):,.2f}")
+            elif saldo < 0: st.warning(f"Saldo Credor: R$ {abs(saldo):,.2f}")
+            else: st.info("Saldo Zerado")
+
+    # 5. Balancete e Resultado (Fórmula Mantida)
     st.divider()
     st.subheader("🏁 Balancete e Resultado")
     resumo_bal = []
@@ -119,21 +116,20 @@ if not st.session_state.lancamentos.empty:
     
     st.dataframe(pd.DataFrame(resumo_bal), use_container_width=True, hide_index=True)
     
-    # Exibição da Fórmula do Lucro
     res = tot_rec - tot_desp
     st.markdown("### 📈 Apuração do Resultado")
     st.latex(rf"Resultado = {tot_rec:,.2f} (Receitas) - {tot_desp:,.2f} (Despesas)")
     st.metric("LUCRO/PREJUÍZO FINAL", f"R$ {abs(res):,.2f}", delta=f"{res:,.2f}")
 
-    # 6. Gestão (Editar/Excluir)
+    # 6. Gestão
     with st.expander("⚙️ Gerenciar Lançamentos"):
         for index, row in df.iterrows():
             c_info, c_edit, c_del = st.columns([3, 1, 1])
             c_info.write(f"#{row['ID']} - {row['Descrição']} (R$ {row['Valor']:,.2f})")
-            if c_edit.button("📝", key=f"edit_list_{row['ID']}"):
+            if c_edit.button("📝", key=f"ed_{row['ID']}"):
                 st.session_state.edit_index = index
                 st.rerun()
-            if c_del.button("🗑️", key=f"del_list_{row['ID']}"):
+            if c_del.button("🗑️", key=f"dl_{row['ID']}"):
                 st.session_state.lancamentos = df.drop(index).reset_index(drop=True)
                 st.rerun()
 else:
