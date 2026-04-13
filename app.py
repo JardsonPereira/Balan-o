@@ -21,15 +21,12 @@ if 'lancamentos' not in st.session_state:
 with st.sidebar:
     st.header("➕ Novo Lançamento")
     
-    # Obtém a lista de contas já criadas
+    # Obtém a lista de contas já criadas para facilitar o lançamento
     contas_existentes = sorted(st.session_state.lancamentos['Descrição'].unique().tolist())
     opcoes_conta = ["-- Nova Conta --"] + contas_existentes
 
     with st.form("form_mobile", clear_on_submit=True):
-        # Seleção de conta existente
         conta_selecionada = st.selectbox("Selecione a Conta", opcoes_conta)
-        
-        # Campo para nova conta (visível sempre, mas usado se "Nova Conta" for selecionado)
         nova_conta = st.text_input("Ou digite o nome de uma Nova Conta").upper().strip()
         
         natureza = st.selectbox("Natureza", ["Ativo", "Passivo", "Patrimônio Líquido", "Receita", "Despesa"])
@@ -37,7 +34,6 @@ with st.sidebar:
         valor = st.number_input("Valor R$", min_value=0.01, format="%.2f")
         
         if st.form_submit_button("Confirmar Lançamento", use_container_width=True):
-            # Lógica para definir qual nome de conta usar
             desc_final = nova_conta if conta_selecionada == "-- Nova Conta --" else conta_selecionada
             
             if desc_final:
@@ -53,7 +49,7 @@ with st.sidebar:
                 st.toast(f"Lançado em {desc_final}!", icon="✅")
                 st.rerun()
             else:
-                st.error("Por favor, informe o nome da conta.")
+                st.error("Informe o nome da conta.")
 
 # 4. Exibição dos Razonetes (Visualização em T)
 if not st.session_state.lancamentos.empty:
@@ -66,9 +62,7 @@ if not st.session_state.lancamentos.empty:
         with st.expander(f"📊 {conta}", expanded=True):
             df_c = df[df['Descrição'] == conta]
             
-            # Cabeçalho do Razonete
             col_esq, col_dir = st.columns(2)
-            
             with col_esq:
                 st.markdown("<p style='text-align:center; border-bottom:2px solid #555'><b>Débito (D)</b></p>", unsafe_allow_html=True)
                 debitos = df_c[df_c['Tipo'] == 'Débito']
@@ -83,7 +77,6 @@ if not st.session_state.lancamentos.empty:
                     st.write(f"R$ {v:,.2f}")
                 tot_c = creditos['Valor'].sum()
 
-            # Linha de Totais e Saldo
             st.divider()
             saldo = tot_d - tot_c
             
@@ -98,26 +91,40 @@ if not st.session_state.lancamentos.empty:
             else:
                 st.info("**Saldo Zerado**")
 
-    # 5. Balancete Resumido
+    # 5. Balancete de Verificação
     st.divider()
     st.subheader("🏁 Balancete de Verificação")
-    
     resumo_balancete = []
     for conta in contas:
-        df_c = df[df['Descrição'] == conta]
-        v_d = df_c[df_c['Tipo'] == 'Débito']['Valor'].sum()
-        v_c = df_c[df_c['Tipo'] == 'Crédito']['Valor'].sum()
+        df_conta = df[df['Descrição'] == conta]
+        v_d = df_conta[df_conta['Tipo'] == 'Débito']['Valor'].sum()
+        v_c = df_conta[df_conta['Tipo'] == 'Crédito']['Valor'].sum()
         resumo_balancete.append({
             'Conta': conta,
-            'Saldo Devedor': max(0.0, v_d - v_c),
-            'Saldo Credor': max(0.0, v_c - v_d)
+            'Saldo D': max(0.0, v_d - v_c),
+            'Saldo C': max(0.0, v_c - v_d)
         })
-    
-    df_resumo = pd.DataFrame(resumo_balancete)
-    st.table(df_resumo) # Table é melhor para visualização rápida no mobile
+    st.dataframe(pd.DataFrame(resumo_balancete), use_container_width=True, hide_index=True)
 
-    if st.button("🗑️ Limpar Tudo", use_container_width=True):
-        st.session_state.clear()
-        st.rerun()
+    # 6. GESTÃO DE LANÇAMENTOS (DELETAR ESPECÍFICOS)
+    st.divider()
+    with st.expander("⚙️ Gerenciar / Deletar Lançamentos"):
+        st.write("Clique no 🗑️ para remover um lançamento específico:")
+        
+        # Iteramos sobre o dataframe original para permitir a exclusão pelo índice
+        for index, row in df.iterrows():
+            c_info, c_del = st.columns([4, 1])
+            tipo_cor = "🟢" if row['Tipo'] == "Débito" else "🔴"
+            c_info.write(f"{tipo_cor} **{row['Descrição']}**: R$ {row['Valor']:,.2f} ({row['Tipo']})")
+            
+            # Botão de deletar com chave única baseada no ID ou índice
+            if c_del.button("🗑️", key=f"del_{row['ID']}_{index}"):
+                st.session_state.lancamentos = df.drop(index).reset_index(drop=True)
+                st.toast(f"Lançamento de {row['Descrição']} removido!")
+                st.rerun()
+
+        if st.button("🚨 Apagar Tudo (Reset)", use_container_width=True):
+            st.session_state.clear()
+            st.rerun()
 else:
-    st.info("Nenhum razonete criado ainda. Use o menu lateral para começar.")
+    st.info("Nenhum lançamento. Abra o menu lateral (>) para começar.")
