@@ -17,7 +17,7 @@ if 'lancamentos' not in st.session_state:
     )
     st.session_state.id_cont = 1
 
-# Verificação de segurança para colunas
+# Garantia de colunas para dados antigos
 if 'Justificativa' not in st.session_state.lancamentos.columns:
     st.session_state.lancamentos['Justificativa'] = "Sem justificativa."
 
@@ -50,12 +50,13 @@ with st.sidebar:
                 st.session_state.id_cont += 1
                 st.rerun()
 
-# 4. Razonetes (Visualização Melhorada)
+# 4. Razonetes (CORRIGIDO)
 if not st.session_state.lancamentos.empty:
     df = st.session_state.lancamentos
     contas = sorted(df['Descrição'].unique())
 
     st.subheader("🔍 Razonetes (Contas T)")
+    st.caption("Passe o mouse ou toque no botão para ver a justificativa.")
     
     for conta in contas:
         with st.expander(f"📊 {conta}", expanded=False):
@@ -64,52 +65,56 @@ if not st.session_state.lancamentos.empty:
             
             with col_esq:
                 st.markdown("<p style='text-align:center; border-bottom:2px solid #555'><b>DÉBITO</b></p>", unsafe_allow_html=True)
-                for _, row in df_c[df_c['Tipo'] == 'Débito'].iterrows():
-                    # Visualização com Tooltip (Interrogação para indicar info)
-                    st.write(f"R$ {row['Valor']:,.2f} <sup>({row['ID']})</sup>", help=f"HISTÓRICO #{row['ID']}: {row['Justificativa']}")
+                debitos = df_c[df_c['Tipo'] == 'Débito']
+                for _, row in debitos.iterrows():
+                    # Usando st.button para evitar erro de HTML no st.write com help
+                    st.button(
+                        f"R$ {row['Valor']:,.2f} ({row['ID']})", 
+                        key=f"btn_d_{row['ID']}",
+                        help=f"JUSTIFICATIVA: {row['Justificativa']}",
+                        use_container_width=True
+                    )
                 
             with col_dir:
                 st.markdown("<p style='text-align:center; border-bottom:2px solid #555'><b>CRÉDITO</b></p>", unsafe_allow_html=True)
-                for _, row in df_c[df_c['Tipo'] == 'Crédito'].iterrows():
-                    st.write(f"R$ {row['Valor']:,.2f} <sup>({row['ID']})</sup>", help=f"HISTÓRICO #{row['ID']}: {row['Justificativa']}")
+                creditos = df_c[df_c['Tipo'] == 'Crédito']
+                for _, row in creditos.iterrows():
+                    st.button(
+                        f"R$ {row['Valor']:,.2f} ({row['ID']})", 
+                        key=f"btn_c_{row['ID']}",
+                        help=f"JUSTIFICATIVA: {row['Justificativa']}",
+                        use_container_width=True
+                    )
 
-            saldo = df_c[df_c['Tipo'] == 'Débito']['Valor'].sum() - df_c[df_c['Tipo'] == 'Crédito']['Valor'].sum()
+            saldo = debitos['Valor'].sum() - creditos['Valor'].sum()
             st.divider()
             if saldo > 0: st.success(f"Saldo Devedor: R$ {abs(saldo):,.2f}")
             elif saldo < 0: st.warning(f"Saldo Credor: R$ {abs(saldo):,.2f}")
 
-    # 5. NOVO: Diário de Justificativas (Tabela Detalhada)
+    # 5. Diário, Balancete e Resultado (Mantidos)
     st.divider()
-    with st.expander("📖 Diário de Lançamentos (Ver Detalhes)"):
-        st.dataframe(
-            df[['ID', 'Descrição', 'Tipo', 'Valor', 'Justificativa']],
-            use_container_width=True,
-            hide_index=True
-        )
+    with st.expander("📖 Diário de Lançamentos"):
+        st.dataframe(df[['ID', 'Descrição', 'Tipo', 'Valor', 'Justificativa']], use_container_width=True, hide_index=True)
 
-    # 6. Balancete de Verificação
     st.subheader("🏁 Balancete de Verificação")
     resumo_bal = []
-    tot_receitas, tot_despesas = 0.0, 0.0
-
+    tot_rec, tot_desp = 0.0, 0.0
     for conta in contas:
         df_conta = df[df['Descrição'] == conta]
         nat = df_conta['Natureza'].iloc[0]
         v_d, v_c = df_conta[df_conta['Tipo'] == 'Débito']['Valor'].sum(), df_conta[df_conta['Tipo'] == 'Crédito']['Valor'].sum()
         s_d, s_c = max(0.0, v_d - v_c), max(0.0, v_c - v_d)
-        resumo_bal.append({'Conta': conta, 'Nat': nat, 'Saldo D': s_d, 'Saldo C': s_c})
-        if nat == "Receita": tot_receitas += (v_c - v_d)
-        if nat == "Despesa": tot_despesas += (v_d - v_c)
+        resumo_bal.append({'Conta': conta, 'Nat': nat, 'D': s_d, 'C': s_c})
+        if nat == "Receita": tot_rec += (v_c - v_d)
+        if nat == "Despesa": tot_desp += (v_d - v_c)
     
-    st.table(pd.DataFrame(resumo_bal))
+    st.dataframe(pd.DataFrame(resumo_bal), use_container_width=True, hide_index=True)
 
-    # 7. Resultado
-    res = tot_receitas - tot_despesas
-    st.latex(rf"Resultado = {tot_receitas:,.2f} - {tot_despesas:,.2f}")
-    st.metric(label="LUCRO/PREJUÍZO", value=f"R$ {abs(res):,.2f}", delta=f"{res:,.2f}")
+    res = tot_rec - tot_desp
+    st.latex(rf"Resultado = {tot_rec:,.2f} - {tot_desp:,.2f}")
+    st.metric("LUCRO/PREJUÍZO", f"R$ {abs(res):,.2f}", delta=f"{res:,.2f}")
 
-    # 8. Gestão
-    with st.expander("⚙️ Gerenciar / Excluir"):
+    with st.expander("⚙️ Gerenciar"):
         for index, row in df.iterrows():
             c_txt, c_btn = st.columns([4, 1])
             c_txt.write(f"#{row['ID']} - {row['Descrição']} (R$ {row['Valor']:,.2f})")
@@ -117,4 +122,4 @@ if not st.session_state.lancamentos.empty:
                 st.session_state.lancamentos = df.drop(index).reset_index(drop=True)
                 st.rerun()
 else:
-    st.info("Aguardando lançamentos no menu lateral.")
+    st.info("Aguardando lançamentos.")
