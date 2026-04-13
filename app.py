@@ -13,7 +13,7 @@ st.title("📑 Contabilidade Digital")
 # 2. Inicialização do Estado
 if 'lancamentos' not in st.session_state:
     st.session_state.lancamentos = pd.DataFrame(
-        columns=['ID', 'Descrição', 'Natureza', 'Tipo', 'Valor']
+        columns=['ID', 'Descrição', 'Natureza', 'Tipo', 'Valor', 'Justificativa']
     )
     st.session_state.id_cont = 1
 
@@ -37,6 +37,9 @@ with st.sidebar:
         tipo = st.radio("Operação", ["Débito", "Crédito"], horizontal=True)
         valor = st.number_input("Valor R$", min_value=0.01, format="%.2f")
         
+        # NOVO: Campo de Justificativa
+        justificativa = st.text_area("Histórico / Justificativa", placeholder="Ex: Compra de mercadorias conforme NF 123")
+        
         if st.form_submit_button("Confirmar Lançamento", use_container_width=True):
             nome_final = nova_conta_input if nova_conta_input else (escolha_conta if escolha_conta != "-- Selecione uma conta existente --" else None)
             
@@ -46,7 +49,8 @@ with st.sidebar:
                     'Descrição': nome_final,
                     'Natureza': natureza,
                     'Tipo': tipo,
-                    'Valor': valor
+                    'Valor': valor,
+                    'Justificativa': justificativa if justificativa else "Nenhuma justificativa informada."
                 }])
                 st.session_state.lancamentos = pd.concat([st.session_state.lancamentos, novo], ignore_index=True)
                 st.session_state.id_cont += 1
@@ -58,6 +62,8 @@ if not st.session_state.lancamentos.empty:
     contas = sorted(df['Descrição'].unique())
 
     st.subheader("🔍 Razonetes (Contas T)")
+    st.caption("Toque no valor para ver a justificativa.")
+
     for conta in contas:
         with st.expander(f"📊 {conta}", expanded=False):
             df_c = df[df['Descrição'] == conta]
@@ -67,16 +73,20 @@ if not st.session_state.lancamentos.empty:
                 st.markdown("<p style='text-align:center; border-bottom:2px solid #555'><b>DÉBITO</b></p>", unsafe_allow_html=True)
                 debitos = df_c[df_c['Tipo'] == 'Débito']
                 for _, row in debitos.iterrows():
-                    # Efeito de Expoente: Valor acompanhado do ID em subscrito
-                    st.markdown(f"R$ {row['Valor']:,.2f} <sup style='color:gray;'>({row['ID']})</sup>", unsafe_allow_html=True)
+                    # NOVO: Popover para mostrar justificativa ao clicar
+                    with st.popover(f"R$ {row['Valor']:,.2f} <sup>({row['ID']})</sup>", use_container_width=True):
+                        st.write(f"**Lançamento #{row['ID']}**")
+                        st.info(row['Justificativa'])
                 tot_d = debitos['Valor'].sum()
             
             with col_dir:
                 st.markdown("<p style='text-align:center; border-bottom:2px solid #555'><b>CRÉDITO</b></p>", unsafe_allow_html=True)
                 creditos = df_c[df_c['Tipo'] == 'Crédito']
                 for _, row in creditos.iterrows():
-                    # Efeito de Expoente: Valor acompanhado do ID em subscrito
-                    st.markdown(f"R$ {row['Valor']:,.2f} <sup style='color:gray;'>({row['ID']})</sup>", unsafe_allow_html=True)
+                    # NOVO: Popover para mostrar justificativa ao clicar
+                    with st.popover(f"R$ {row['Valor']:,.2f} <sup>({row['ID']})</sup>", use_container_width=True):
+                        st.write(f"**Lançamento #{row['ID']}**")
+                        st.info(row['Justificativa'])
                 tot_c = creditos['Valor'].sum()
 
             saldo = tot_d - tot_c
