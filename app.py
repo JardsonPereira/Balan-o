@@ -17,37 +17,49 @@ if 'lancamentos' not in st.session_state:
     )
     st.session_state.id_cont = 0
 
-# 3. Formulário na Barra Lateral
+# 3. Formulário na Barra Lateral - FOCO EM ESCOLHA DE CONTA
 with st.sidebar:
     st.header("➕ Novo Lançamento")
     
+    # Lista de contas já existentes para o Selectbox
     contas_existentes = sorted(st.session_state.lancamentos['Descrição'].unique().tolist())
-    opcoes_conta = ["-- Nova Conta --"] + contas_existentes
+    opcoes = ["-- Selecione uma conta --", "+ Nova Conta"] + contas_existentes
 
     with st.form("form_mobile", clear_on_submit=True):
-        conta_selecionada = st.selectbox("Selecione a Conta", opcoes_conta)
-        nova_conta = st.text_input("Ou digite o nome de uma Nova Conta").upper().strip()
+        # Opção 1: Escolher conta existente
+        escolha_conta = st.selectbox("Escolha a Conta", opcoes)
+        
+        # Opção 2: Campo de texto (só usado se escolher "+ Nova Conta")
+        nova_conta_input = st.text_input("Nome da Nova Conta (se aplicável)").upper().strip()
         
         natureza = st.selectbox("Natureza", ["Ativo", "Passivo", "Patrimônio Líquido", "Receita", "Despesa"])
         tipo = st.radio("Operação", ["Débito", "Crédito"], horizontal=True)
         valor = st.number_input("Valor R$", min_value=0.01, format="%.2f")
         
         if st.form_submit_button("Confirmar Lançamento", use_container_width=True):
-            desc_final = nova_conta if conta_selecionada == "-- Nova Conta --" else conta_selecionada
+            # Lógica de definição do nome da conta
+            nome_final = ""
+            if escolha_conta == "+ Nova Conta":
+                nome_final = nova_conta_input
+            elif escolha_conta != "-- Selecione uma conta --":
+                nome_final = escolha_conta
             
-            if desc_final:
+            if nome_final:
                 novo = pd.DataFrame([{
                     'ID': st.session_state.id_cont,
-                    'Descrição': desc_final,
+                    'Descrição': nome_final,
                     'Natureza': natureza,
                     'Tipo': tipo,
                     'Valor': valor
                 }])
                 st.session_state.lancamentos = pd.concat([st.session_state.lancamentos, novo], ignore_index=True)
                 st.session_state.id_cont += 1
+                st.toast(f"Lançado em {nome_final}!", icon="✅")
                 st.rerun()
+            else:
+                st.error("Selecione uma conta ou digite o nome de uma nova.")
 
-# 4. Exibição dos Razonetes (Contas T)
+# 4. Conteúdo Principal: Razonetes (Contas T)
 if not st.session_state.lancamentos.empty:
     df = st.session_state.lancamentos
     contas = sorted(df['Descrição'].unique())
@@ -59,13 +71,13 @@ if not st.session_state.lancamentos.empty:
             col_esq, col_dir = st.columns(2)
             
             with col_esq:
-                st.markdown("<p style='text-align:center; border-bottom:1px solid #555'><b>DÉBITO</b></p>", unsafe_allow_html=True)
+                st.markdown("<p style='text-align:center; border-bottom:2px solid #555'><b>DÉBITO</b></p>", unsafe_allow_html=True)
                 debitos = df_c[df_c['Tipo'] == 'Débito']
                 for v in debitos['Valor']: st.write(f"R$ {v:,.2f}")
                 tot_d = debitos['Valor'].sum()
             
             with col_dir:
-                st.markdown("<p style='text-align:center; border-bottom:1px solid #555'><b>CRÉDITO</b></p>", unsafe_allow_html=True)
+                st.markdown("<p style='text-align:center; border-bottom:2px solid #555'><b>CRÉDITO</b></p>", unsafe_allow_html=True)
                 creditos = df_c[df_c['Tipo'] == 'Crédito']
                 for v in creditos['Valor']: st.write(f"R$ {v:,.2f}")
                 tot_c = creditos['Valor'].sum()
@@ -76,70 +88,47 @@ if not st.session_state.lancamentos.empty:
             elif saldo < 0: st.warning(f"Saldo Credor: R$ {abs(saldo):,.2f}")
             else: st.info("Saldo Zerado")
 
-    # 5. BALANCETE DE VERIFICAÇÃO
+    # 5. Balancete de Verificação (Com Natureza e Totais)
     st.divider()
     st.subheader("🏁 Balancete de Verificação")
     
-    resumo_balancete = []
-    tot_receitas = 0.0
-    tot_despesas = 0.0
+    resumo_bal = []
+    tot_receitas, tot_despesas = 0.0, 0.0
 
     for conta in contas:
         df_conta = df[df['Descrição'] == conta]
         nat = df_conta['Natureza'].iloc[0]
-        
         v_d = df_conta[df_conta['Tipo'] == 'Débito']['Valor'].sum()
         v_c = df_conta[df_conta['Tipo'] == 'Crédito']['Valor'].sum()
         
-        resumo_balancete.append({
-            'Conta': conta,
-            'Natureza': nat,
-            'Saldo D': max(0.0, v_d - v_c),
-            'Saldo C': max(0.0, v_c - v_d)
-        })
+        s_d, s_c = max(0.0, v_d - v_c), max(0.0, v_c - v_d)
+        resumo_bal.append({'Conta': conta, 'Natureza': nat, 'Saldo D': s_d, 'Saldo C': s_c})
         
-        # Lógica para Resultado
         if nat == "Receita": tot_receitas += (v_c - v_d)
         if nat == "Despesa": tot_despesas += (v_d - v_c)
     
-    df_bal = pd.DataFrame(resumo_balancete)
+    df_bal = pd.DataFrame(resumo_bal)
     st.dataframe(df_bal, use_container_width=True, hide_index=True)
 
-    # --- NOVIDADE: TOTAIS DO BALANCETE ---
-    total_final_d = df_bal['Saldo D'].sum()
-    total_final_c = df_bal['Saldo C'].sum()
+    # Totais Devedor e Credor
+    t_d, t_c = df_bal['Saldo D'].sum(), df_bal['Saldo C'].sum()
+    c_b1, c_b2 = st.columns(2)
+    c_b1.metric("Total Devedor", f"R$ {t_d:,.2f}")
+    c_b2.metric("Total Credor", f"R$ {t_c:,.2f}")
 
-    col_bal1, col_bal2 = st.columns(2)
-    col_bal1.metric("Total Devedor", f"R$ {total_final_d:,.2f}")
-    col_bal2.metric("Total Credor", f"R$ {total_final_c:,.2f}")
-
-    if round(total_final_d, 2) == round(total_final_c, 2):
-        st.success("✅ Balancete Equilibrado!")
-    else:
-        st.error("⚠️ Balancete Desequilibrado! Verifique os lançamentos.")
-
-    # 6. APURAÇÃO DO RESULTADO
+    # 6. Resultado do Período
     st.divider()
-    st.subheader("📈 Resultado do Período")
-    resultado_final = tot_receitas - tot_despesas
-    
-    c1, c2, c3 = st.columns(3)
-    c1.metric("Receitas", f"R$ {tot_receitas:,.2f}")
-    c2.metric("Despesas", f"R$ {tot_despesas:,.2f}")
-    
-    if resultado_final >= 0:
-        c3.metric("LUCRO", f"R$ {resultado_final:,.2f}")
-    else:
-        c3.metric("PREJUÍZO", f"R$ {abs(resultado_final):,.2f}", delta="-")
+    st.subheader("📈 Resultado")
+    res = tot_receitas - tot_despesas
+    st.metric("LUCRO/PREJUÍZO", f"R$ {res:,.2f}", delta=res)
 
-    # 7. GESTÃO
-    st.divider()
+    # 7. Gestão de Lançamentos (Deletar)
     with st.expander("⚙️ Gerenciar Lançamentos"):
         for index, row in df.iterrows():
-            c_info, c_del = st.columns([4, 1])
-            c_info.write(f"**{row['Descrição']}**: R$ {row['Valor']:,.2f} ({row['Tipo'][0]})")
-            if c_del.button("🗑️", key=f"del_{row['ID']}"):
+            c_txt, c_btn = st.columns([4, 1])
+            c_txt.write(f"**{row['Descrição']}**: R$ {row['Valor']:,.2f} ({row['Tipo'][0]})")
+            if c_btn.button("🗑️", key=f"del_{index}"):
                 st.session_state.lancamentos = df.drop(index).reset_index(drop=True)
                 st.rerun()
 else:
-    st.info("Aguardando lançamentos no menu lateral.")
+    st.info("Abra o menu lateral para selecionar ou criar uma conta.")
