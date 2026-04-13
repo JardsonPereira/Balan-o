@@ -15,7 +15,7 @@ if 'lancamentos' not in st.session_state:
     st.session_state.lancamentos = pd.DataFrame(
         columns=['ID', 'Descrição', 'Natureza', 'Tipo', 'Valor']
     )
-    st.session_state.id_cont = 1 # Começa no 1 para contagem amigável
+    st.session_state.id_cont = 1
 
 # 3. Formulário na Barra Lateral
 with st.sidebar:
@@ -33,12 +33,7 @@ with st.sidebar:
         valor = st.number_input("Valor R$", min_value=0.01, format="%.2f")
         
         if st.form_submit_button("Confirmar Lançamento", use_container_width=True):
-            if nova_conta_input:
-                nome_final = nova_conta_input
-            elif escolha_conta != "-- Selecione uma conta existente --":
-                nome_final = escolha_conta
-            else:
-                nome_final = None
+            nome_final = nova_conta_input if nova_conta_input else (escolha_conta if escolha_conta != "-- Selecione uma conta existente --" else None)
             
             if nome_final:
                 novo = pd.DataFrame([{
@@ -49,7 +44,7 @@ with st.sidebar:
                     'Valor': valor
                 }])
                 st.session_state.lancamentos = pd.concat([st.session_state.lancamentos, novo], ignore_index=True)
-                st.session_state.id_cont += 1 # Incrementa a ordem
+                st.session_state.id_cont += 1
                 st.rerun()
 
 # 4. Conteúdo Principal: Razonetes
@@ -66,15 +61,21 @@ if not st.session_state.lancamentos.empty:
             with col_esq:
                 st.markdown("<p style='text-align:center; border-bottom:2px solid #555'><b>DÉBITO</b></p>", unsafe_allow_html=True)
                 debitos = df_c[df_c['Tipo'] == 'Débito']
-                for _, row in debitos.iterrows(): 
-                    st.write(f"#{row['ID']} - R$ {row['Valor']:,.2f}")
+                for _, row in debitos.iterrows():
+                    # Layout para número no canto superior direito do valor
+                    c_val, c_num = st.columns([3, 1])
+                    c_val.write(f"R$ {row['Valor']:,.2f}")
+                    c_num.markdown(f"<p style='text-align:right; font-size:10px; color:gray;'>{row['ID']}</p>", unsafe_allow_html=True)
                 tot_d = debitos['Valor'].sum()
             
             with col_dir:
                 st.markdown("<p style='text-align:center; border-bottom:2px solid #555'><b>CRÉDITO</b></p>", unsafe_allow_html=True)
                 creditos = df_c[df_c['Tipo'] == 'Crédito']
-                for _, row in creditos.iterrows(): 
-                    st.write(f"#{row['ID']} - R$ {row['Valor']:,.2f}")
+                for _, row in creditos.iterrows():
+                    # Layout para número no canto superior direito do valor
+                    c_val, c_num = st.columns([3, 1])
+                    c_val.write(f"R$ {row['Valor']:,.2f}")
+                    c_num.markdown(f"<p style='text-align:right; font-size:10px; color:gray;'>{row['ID']}</p>", unsafe_allow_html=True)
                 tot_c = creditos['Valor'].sum()
 
             saldo = tot_d - tot_c
@@ -86,46 +87,39 @@ if not st.session_state.lancamentos.empty:
     # 5. Balancete de Verificação
     st.divider()
     st.subheader("🏁 Balancete de Verificação")
-    
     resumo_bal = []
     tot_receitas, tot_despesas = 0.0, 0.0
 
     for conta in contas:
         df_conta = df[df['Descrição'] == conta]
         nat = df_conta['Natureza'].iloc[0]
-        v_d = df_conta[df_conta['Tipo'] == 'Débito']['Valor'].sum()
-        v_c = df_conta[df_conta['Tipo'] == 'Crédito']['Valor'].sum()
-        
+        v_d, v_c = df_conta[df_conta['Tipo'] == 'Débito']['Valor'].sum(), df_conta[df_conta['Tipo'] == 'Crédito']['Valor'].sum()
         s_d, s_c = max(0.0, v_d - v_c), max(0.0, v_c - v_d)
         resumo_bal.append({'Conta': conta, 'Natureza': nat, 'Saldo D': s_d, 'Saldo C': s_c})
-        
         if nat == "Receita": tot_receitas += (v_c - v_d)
         if nat == "Despesa": tot_despesas += (v_d - v_c)
     
     st.dataframe(pd.DataFrame(resumo_bal), use_container_width=True, hide_index=True)
 
-    # Totais do Balancete
+    # Totais Devedor e Credor
     t_d, t_c = sum(x['Saldo D'] for x in resumo_bal), sum(x['Saldo C'] for x in resumo_bal)
-    c_b1, c_b2 = st.columns(2)
-    c_b1.metric("Total Devedor", f"R$ {t_d:,.2f}")
-    c_b2.metric("Total Credor", f"R$ {t_c:,.2f}")
+    col_t1, col_t2 = st.columns(2)
+    col_t1.metric("Total Devedor", f"R$ {t_d:,.2f}")
+    col_t2.metric("Total Credor", f"R$ {t_c:,.2f}")
 
-    # 6. Apuração de Resultado
+    # 6. Resultado do Período
     st.divider()
-    st.subheader("📈 Resultado do Período")
     res = tot_receitas - tot_despesas
-    st.latex(rf"Resultado = {tot_receitas:,.2f} (Rec) - {tot_despesas:,.2f} (Desp)")
+    st.latex(rf"Resultado = {tot_receitas:,.2f} - {tot_despesas:,.2f}")
     st.metric(label="LUCRO/PREJUÍZO", value=f"R$ {abs(res):,.2f}", delta=f"{res:,.2f}")
 
-    # 7. Gestão de Lançamentos com Numeração
-    st.divider()
-    with st.expander("⚙️ Lista de Lançamentos (Ordem Cronológica)"):
+    # 7. Gestão de Lançamentos
+    with st.expander("⚙️ Gerenciar Lançamentos"):
         for index, row in df.iterrows():
             c_txt, c_btn = st.columns([4, 1])
-            # Exibe o número do lançamento aqui também
-            c_txt.write(f"**#{row['ID']}** | {row['Descrição']} | R$ {row['Valor']:,.2f} ({row['Tipo'][0]})")
+            c_txt.write(f"#{row['ID']} - {row['Descrição']} - R$ {row['Valor']:,.2f}")
             if c_btn.button("🗑️", key=f"del_{row['ID']}"):
                 st.session_state.lancamentos = df.drop(index).reset_index(drop=True)
                 st.rerun()
 else:
-    st.info("Utilize o menu lateral para iniciar o lançamento #1.")
+    st.info("Aguardando lançamentos...")
