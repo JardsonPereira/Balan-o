@@ -45,7 +45,6 @@ with st.sidebar:
                 }])
                 st.session_state.lancamentos = pd.concat([st.session_state.lancamentos, novo], ignore_index=True)
                 st.session_state.id_cont += 1
-                st.toast(f"Lançado em {desc_final}!", icon="✅")
                 st.rerun()
 
 # 4. Exibição dos Razonetes (Contas T)
@@ -60,13 +59,13 @@ if not st.session_state.lancamentos.empty:
             col_esq, col_dir = st.columns(2)
             
             with col_esq:
-                st.markdown("<p style='text-align:center; border-bottom:2px solid #555'><b>DÉBITO</b></p>", unsafe_allow_html=True)
+                st.markdown("<p style='text-align:center; border-bottom:1px solid #555'><b>DÉBITO</b></p>", unsafe_allow_html=True)
                 debitos = df_c[df_c['Tipo'] == 'Débito']
                 for v in debitos['Valor']: st.write(f"R$ {v:,.2f}")
                 tot_d = debitos['Valor'].sum()
             
             with col_dir:
-                st.markdown("<p style='text-align:center; border-bottom:2px solid #555'><b>CRÉDITO</b></p>", unsafe_allow_html=True)
+                st.markdown("<p style='text-align:center; border-bottom:1px solid #555'><b>CRÉDITO</b></p>", unsafe_allow_html=True)
                 creditos = df_c[df_c['Tipo'] == 'Crédito']
                 for v in creditos['Valor']: st.write(f"R$ {v:,.2f}")
                 tot_c = creditos['Valor'].sum()
@@ -77,7 +76,7 @@ if not st.session_state.lancamentos.empty:
             elif saldo < 0: st.warning(f"Saldo Credor: R$ {abs(saldo):,.2f}")
             else: st.info("Saldo Zerado")
 
-    # 5. BALANCETE DE VERIFICAÇÃO COM NATUREZA E RESULTADO
+    # 5. BALANCETE DE VERIFICAÇÃO
     st.divider()
     st.subheader("🏁 Balancete de Verificação")
     
@@ -87,31 +86,41 @@ if not st.session_state.lancamentos.empty:
 
     for conta in contas:
         df_conta = df[df['Descrição'] == conta]
-        nat = df_conta['Natureza'].iloc[0] # Pega a natureza definida no cadastro
+        nat = df_conta['Natureza'].iloc[0]
         
         v_d = df_conta[df_conta['Tipo'] == 'Débito']['Valor'].sum()
         v_c = df_conta[df_conta['Tipo'] == 'Crédito']['Valor'].sum()
         
-        saldo_d = max(0.0, v_d - v_c)
-        saldo_c = max(0.0, v_c - v_d)
-        
-        # Acumula para o Resultado (DRE Simplificada)
-        if nat == "Receita": tot_receitas += (v_c - v_d)
-        if nat == "Despesa": tot_despesas += (v_d - v_c)
-
         resumo_balancete.append({
             'Conta': conta,
             'Natureza': nat,
-            'Saldo D': saldo_d,
-            'Saldo C': saldo_c
+            'Saldo D': max(0.0, v_d - v_c),
+            'Saldo C': max(0.0, v_c - v_d)
         })
+        
+        # Lógica para Resultado
+        if nat == "Receita": tot_receitas += (v_c - v_d)
+        if nat == "Despesa": tot_despesas += (v_d - v_c)
     
-    # Exibe a tabela do Balancete
     df_bal = pd.DataFrame(resumo_balancete)
     st.dataframe(df_bal, use_container_width=True, hide_index=True)
 
-    # 6. APURAÇÃO DO RESULTADO (LUCRO OU PREJUÍZO)
-    st.subheader("📈 Apuração do Resultado")
+    # --- NOVIDADE: TOTAIS DO BALANCETE ---
+    total_final_d = df_bal['Saldo D'].sum()
+    total_final_c = df_bal['Saldo C'].sum()
+
+    col_bal1, col_bal2 = st.columns(2)
+    col_bal1.metric("Total Devedor", f"R$ {total_final_d:,.2f}")
+    col_bal2.metric("Total Credor", f"R$ {total_final_c:,.2f}")
+
+    if round(total_final_d, 2) == round(total_final_c, 2):
+        st.success("✅ Balancete Equilibrado!")
+    else:
+        st.error("⚠️ Balancete Desequilibrado! Verifique os lançamentos.")
+
+    # 6. APURAÇÃO DO RESULTADO
+    st.divider()
+    st.subheader("📈 Resultado do Período")
     resultado_final = tot_receitas - tot_despesas
     
     c1, c2, c3 = st.columns(3)
@@ -119,21 +128,18 @@ if not st.session_state.lancamentos.empty:
     c2.metric("Despesas", f"R$ {tot_despesas:,.2f}")
     
     if resultado_final >= 0:
-        c3.metric("LUCRO", f"R$ {resultado_final:,.2f}", delta_color="normal")
-        st.success(f"O resultado do período é um Lucro de R$ {resultado_final:,.2f}")
+        c3.metric("LUCRO", f"R$ {resultado_final:,.2f}")
     else:
-        c3.metric("PREJUÍZO", f"R$ {abs(resultado_final):,.2f}", delta="-", delta_color="inverse")
-        st.error(f"O resultado do período é um Prejuízo de R$ {abs(resultado_final):,.2f}")
+        c3.metric("PREJUÍZO", f"R$ {abs(resultado_final):,.2f}", delta="-")
 
     # 7. GESTÃO
     st.divider()
     with st.expander("⚙️ Gerenciar Lançamentos"):
         for index, row in df.iterrows():
             c_info, c_del = st.columns([4, 1])
-            c_info.write(f"{row['Descrição']} ({row['Natureza']}): R$ {row['Valor']:,.2f} - {row['Tipo']}")
+            c_info.write(f"**{row['Descrição']}**: R$ {row['Valor']:,.2f} ({row['Tipo'][0]})")
             if c_del.button("🗑️", key=f"del_{row['ID']}"):
                 st.session_state.lancamentos = df.drop(index).reset_index(drop=True)
                 st.rerun()
-
 else:
-    st.info("Aguardando lançamentos...")
+    st.info("Aguardando lançamentos no menu lateral.")
