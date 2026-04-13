@@ -17,6 +17,12 @@ if 'lancamentos' not in st.session_state:
     )
     st.session_state.id_cont = 1
 
+# --- NOVIDADE: INDICADOR DE TOTAL DE LANÇAMENTOS NO TOPO ---
+if not st.session_state.lancamentos.empty:
+    total_registros = len(st.session_state.lancamentos)
+    st.markdown(f"**Total de Lançamentos realizados:** `{total_registros}`")
+# ---------------------------------------------------------
+
 # 3. Formulário na Barra Lateral
 with st.sidebar:
     st.header(f"➕ Lançamento Nº {st.session_state.id_cont}")
@@ -62,7 +68,6 @@ if not st.session_state.lancamentos.empty:
                 st.markdown("<p style='text-align:center; border-bottom:2px solid #555'><b>DÉBITO</b></p>", unsafe_allow_html=True)
                 debitos = df_c[df_c['Tipo'] == 'Débito']
                 for _, row in debitos.iterrows():
-                    # Layout para número no canto superior direito do valor
                     c_val, c_num = st.columns([3, 1])
                     c_val.write(f"R$ {row['Valor']:,.2f}")
                     c_num.markdown(f"<p style='text-align:right; font-size:10px; color:gray;'>{row['ID']}</p>", unsafe_allow_html=True)
@@ -72,7 +77,6 @@ if not st.session_state.lancamentos.empty:
                 st.markdown("<p style='text-align:center; border-bottom:2px solid #555'><b>CRÉDITO</b></p>", unsafe_allow_html=True)
                 creditos = df_c[df_c['Tipo'] == 'Crédito']
                 for _, row in creditos.iterrows():
-                    # Layout para número no canto superior direito do valor
                     c_val, c_num = st.columns([3, 1])
                     c_val.write(f"R$ {row['Valor']:,.2f}")
                     c_num.markdown(f"<p style='text-align:right; font-size:10px; color:gray;'>{row['ID']}</p>", unsafe_allow_html=True)
@@ -101,7 +105,6 @@ if not st.session_state.lancamentos.empty:
     
     st.dataframe(pd.DataFrame(resumo_bal), use_container_width=True, hide_index=True)
 
-    # Totais Devedor e Credor
     t_d, t_c = sum(x['Saldo D'] for x in resumo_bal), sum(x['Saldo C'] for x in resumo_bal)
     col_t1, col_t2 = st.columns(2)
     col_t1.metric("Total Devedor", f"R$ {t_d:,.2f}")
@@ -122,4 +125,4 @@ if not st.session_state.lancamentos.empty:
                 st.session_state.lancamentos = df.drop(index).reset_index(drop=True)
                 st.rerun()
 else:
-    st.info("Aguardando lançamentos...")
+    st.info("Aguardando lançamentos no menu lateral.")
