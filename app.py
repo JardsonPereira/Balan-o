@@ -64,7 +64,7 @@ with st.sidebar:
                     st.session_state.id_cont += 1
                 st.rerun()
 
-# 4. Razonetes com Totais nas Colunas
+# 4. Razonetes
 if not st.session_state.lancamentos.empty:
     df = st.session_state.lancamentos
     contas = sorted(df['Descrição'].unique())
@@ -75,7 +75,6 @@ if not st.session_state.lancamentos.empty:
             df_c = df[df['Descrição'] == conta]
             col_esq, col_dir = st.columns(2)
             
-            # Coluna de Débito
             with col_esq:
                 st.markdown("<p style='text-align:center; border-bottom:2px solid #555'><b>DÉBITO</b></p>", unsafe_allow_html=True)
                 debitos = df_c[df_c['Tipo'] == 'Débito']
@@ -84,7 +83,6 @@ if not st.session_state.lancamentos.empty:
                 tot_d = debitos['Valor'].sum()
                 st.markdown(f"<p style='text-align:right; border-top:1px dashed #888; color:gray;'>Total D: <b>R$ {tot_d:,.2f}</b></p>", unsafe_allow_html=True)
             
-            # Coluna de Crédito
             with col_dir:
                 st.markdown("<p style='text-align:center; border-bottom:2px solid #555'><b>CRÉDITO</b></p>", unsafe_allow_html=True)
                 creditos = df_c[df_c['Tipo'] == 'Crédito']
@@ -93,16 +91,15 @@ if not st.session_state.lancamentos.empty:
                 tot_c = creditos['Valor'].sum()
                 st.markdown(f"<p style='text-align:right; border-top:1px dashed #888; color:gray;'>Total C: <b>R$ {tot_c:,.2f}</b></p>", unsafe_allow_html=True)
 
-            # Saldo Final da Conta
             saldo = tot_d - tot_c
             st.divider()
             if saldo > 0: st.success(f"Saldo Devedor: R$ {abs(saldo):,.2f}")
             elif saldo < 0: st.warning(f"Saldo Credor: R$ {abs(saldo):,.2f}")
-            else: st.info("Saldo Zerado")
 
-    # 5. Balancete e Resultado (Fórmula Mantida)
+    # 5. Balancete de Verificação (COM TOTAIS NAS COLUNAS)
     st.divider()
-    st.subheader("🏁 Balancete e Resultado")
+    st.subheader("🏁 Balancete de Verificação")
+    
     resumo_bal = []
     tot_rec, tot_desp = 0.0, 0.0
     for conta in contas:
@@ -114,14 +111,32 @@ if not st.session_state.lancamentos.empty:
         if nat == "Receita": tot_rec += (v_c - v_d)
         if nat == "Despesa": tot_desp += (v_d - v_c)
     
+    # Exibe a tabela do balancete
     st.dataframe(pd.DataFrame(resumo_bal), use_container_width=True, hide_index=True)
     
+    # Soma das colunas do Balancete
+    soma_d = sum(item['D'] for item in resumo_bal)
+    soma_c = sum(item['C'] for item in resumo_bal)
+    
+    # Exibição dos totais logo abaixo das colunas
+    col_sum_d, col_sum_c = st.columns(2)
+    col_sum_d.markdown(f"<div style='text-align: center; border-top: 2px solid #555;'><b>Total D: R$ {soma_d:,.2f}</b></div>", unsafe_allow_html=True)
+    col_sum_c.markdown(f"<div style='text-align: center; border-top: 2px solid #555;'><b>Total C: R$ {soma_c:,.2f}</b></div>", unsafe_allow_html=True)
+    
+    # Verificação de Equilíbrio
+    if round(soma_d, 2) == round(soma_c, 2):
+        st.toast("Balancete Batido! ✅", icon="⚖️")
+    else:
+        st.error("Atenção: Balancete Desequilibrado! ❌")
+
+    # 6. Resultado do Período
+    st.divider()
     res = tot_rec - tot_desp
     st.markdown("### 📈 Apuração do Resultado")
     st.latex(rf"Resultado = {tot_rec:,.2f} (Receitas) - {tot_desp:,.2f} (Despesas)")
     st.metric("LUCRO/PREJUÍZO FINAL", f"R$ {abs(res):,.2f}", delta=f"{res:,.2f}")
 
-    # 6. Gestão
+    # 7. Gestão
     with st.expander("⚙️ Gerenciar Lançamentos"):
         for index, row in df.iterrows():
             c_info, c_edit, c_del = st.columns([3, 1, 1])
