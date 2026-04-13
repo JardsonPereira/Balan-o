@@ -20,9 +20,12 @@ if 'lancamentos' not in st.session_state:
 if 'edit_index' not in st.session_state:
     st.session_state.edit_index = None
 
-# 3. Formulário na Barra Lateral (Adaptado para Criar/Editar)
+# Indicador de Total de Lançamentos
+if not st.session_state.lancamentos.empty:
+    st.markdown(f"**Total de Lançamentos:** `{len(st.session_state.lancamentos)}`")
+
+# 3. Formulário na Barra Lateral (Criar/Editar)
 with st.sidebar:
-    # Se houver um index para editar, muda o título e carrega os dados
     if st.session_state.edit_index is not None:
         st.header(f"📝 Editar Lançamento #{st.session_state.lancamentos.loc[st.session_state.edit_index, 'ID']}")
         row_to_edit = st.session_state.lancamentos.loc[st.session_state.edit_index]
@@ -36,10 +39,8 @@ with st.sidebar:
     opcoes = ["-- Selecione uma conta --"] + contas_existentes
 
     with st.form("form_mobile", clear_on_submit=True):
-        # Valores padrão dependem se estamos editando ou criando
         idx_conta = opcoes.index(row_to_edit['Descrição']) if row_to_edit is not None and row_to_edit['Descrição'] in opcoes else 0
         escolha_conta = st.selectbox("Escolher Conta", opcoes, index=idx_conta)
-        
         nova_conta_input = st.text_input("OU Nova Conta").upper().strip()
         
         lista_nat = ["Ativo", "Passivo", "Patrimônio Líquido", "Receita", "Despesa"]
@@ -60,15 +61,15 @@ with st.sidebar:
             
             if nome_final:
                 if st.session_state.edit_index is not None:
-                    # Lógica de Atualização
+                    # Atualizar registro existente
                     st.session_state.lancamentos.at[st.session_state.edit_index, 'Descrição'] = nome_final
                     st.session_state.lancamentos.at[st.session_state.edit_index, 'Natureza'] = natureza
                     st.session_state.lancamentos.at[st.session_state.edit_index, 'Tipo'] = tipo
                     st.session_state.lancamentos.at[st.session_state.edit_index, 'Valor'] = valor
                     st.session_state.lancamentos.at[st.session_state.edit_index, 'Justificativa'] = justificativa
-                    st.session_state.edit_index = None # Limpa modo edição
+                    st.session_state.edit_index = None
                 else:
-                    # Lógica de Novo Cadastro
+                    # Adicionar novo registro
                     novo = pd.DataFrame([{
                         'ID': st.session_state.id_cont,
                         'Descrição': nome_final, 'Natureza': natureza, 'Tipo': tipo,
@@ -76,7 +77,6 @@ with st.sidebar:
                     }])
                     st.session_state.lancamentos = pd.concat([st.session_state.lancamentos, novo], ignore_index=True)
                     st.session_state.id_cont += 1
-                
                 st.rerun()
     
     if st.session_state.edit_index is not None:
@@ -84,7 +84,7 @@ with st.sidebar:
             st.session_state.edit_index = None
             st.rerun()
 
-# 4. Exibição (Razonetes, Balancete e Resultado)
+# 4. Razonetes
 if not st.session_state.lancamentos.empty:
     df = st.session_state.lancamentos
     contas = sorted(df['Descrição'].unique())
@@ -95,36 +95,16 @@ if not st.session_state.lancamentos.empty:
             df_c = df[df['Descrição'] == conta]
             col_esq, col_dir = st.columns(2)
             with col_esq:
-                st.markdown("<p style='text-align:center; border-bottom:1px solid #555'><b>DÉBITO</b></p>", unsafe_allow_html=True)
+                st.markdown("<p style='text-align:center; border-bottom:2px solid #555'><b>DÉBITO</b></p>", unsafe_allow_html=True)
                 for _, row in df_c[df_c['Tipo'] == 'Débito'].iterrows():
                     st.button(f"R$ {row['Valor']:,.2f} ({row['ID']})", key=f"d_{row['ID']}", help=row['Justificativa'], use_container_width=True)
             with col_dir:
-                st.markdown("<p style='text-align:center; border-bottom:1px solid #555'><b>CRÉDITO</b></p>", unsafe_allow_html=True)
+                st.markdown("<p style='text-align:center; border-bottom:2px solid #555'><b>CRÉDITO</b></p>", unsafe_allow_html=True)
                 for _, row in df_c[df_c['Tipo'] == 'Crédito'].iterrows():
                     st.button(f"R$ {row['Valor']:,.2f} ({row['ID']})", key=f"c_{row['ID']}", help=row['Justificativa'], use_container_width=True)
-            
-            saldo = df_c[df_c['Tipo'] == 'Débito']['Valor'].sum() - df_c[df_c['Tipo'] == 'Crédito']['Valor'].sum()
-            st.divider()
-            if saldo > 0: st.success(f"Saldo D: R$ {abs(saldo):,.2f}")
-            elif saldo < 0: st.warning(f"Saldo C: R$ {abs(saldo):,.2f}")
 
-    # 5. Gestão (Aqui ficam os botões de Editar e Excluir)
+    # 5. Balancete e Resultado (COM A FÓRMULA MANTIDA)
     st.divider()
-    with st.expander("⚙️ Gerenciar Lançamentos (Editar/Excluir)"):
-        for index, row in df.iterrows():
-            c_info, c_edit, c_del = st.columns([3, 1, 1])
-            c_info.write(f"#{row['ID']} - {row['Descrição']} (R$ {row['Valor']:,.2f})")
-            
-            if c_edit.button("📝", key=f"edit_{row['ID']}"):
-                st.session_state.edit_index = index
-                st.sidebar.expanded = True # Abre a lateral no mobile
-                st.rerun()
-                
-            if c_del.button("🗑️", key=f"del_{row['ID']}"):
-                st.session_state.lancamentos = df.drop(index).reset_index(drop=True)
-                st.rerun()
-
-    # 6. Balancete e Resultado (Resumo)
     st.subheader("🏁 Balancete e Resultado")
     resumo_bal = []
     tot_rec, tot_desp = 0.0, 0.0
@@ -138,7 +118,23 @@ if not st.session_state.lancamentos.empty:
         if nat == "Despesa": tot_desp += (v_d - v_c)
     
     st.dataframe(pd.DataFrame(resumo_bal), use_container_width=True, hide_index=True)
+    
+    # Exibição da Fórmula do Lucro
     res = tot_rec - tot_desp
-    st.metric("LUCRO/PREJUÍZO", f"R$ {abs(res):,.2f}", delta=f"{res:,.2f}")
+    st.markdown("### 📈 Apuração do Resultado")
+    st.latex(rf"Resultado = {tot_rec:,.2f} (Receitas) - {tot_desp:,.2f} (Despesas)")
+    st.metric("LUCRO/PREJUÍZO FINAL", f"R$ {abs(res):,.2f}", delta=f"{res:,.2f}")
+
+    # 6. Gestão (Editar/Excluir)
+    with st.expander("⚙️ Gerenciar Lançamentos"):
+        for index, row in df.iterrows():
+            c_info, c_edit, c_del = st.columns([3, 1, 1])
+            c_info.write(f"#{row['ID']} - {row['Descrição']} (R$ {row['Valor']:,.2f})")
+            if c_edit.button("📝", key=f"edit_list_{row['ID']}"):
+                st.session_state.edit_index = index
+                st.rerun()
+            if c_del.button("🗑️", key=f"del_list_{row['ID']}"):
+                st.session_state.lancamentos = df.drop(index).reset_index(drop=True)
+                st.rerun()
 else:
     st.info("Aguardando lançamentos.")
