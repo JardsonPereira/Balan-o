@@ -146,16 +146,33 @@ if not st.session_state.lancamentos.empty:
         if resultado >= 0: st.success(f"### LUCRO LÍQUIDO: R$ {resultado:,.2f}")
         else: st.error(f"### PREJUÍZO LÍQUIDO: R$ {abs(resultado):,.2f}")
 
-    # --- ABA GESTÃO ---
+    # --- ABA GESTÃO (Identificando Natureza) ---
     with tab_ges:
+        st.subheader("Histórico e Gestão de Lançamentos")
+        st.info("Abaixo você pode conferir a Natureza e o Tipo de cada operação registrada.")
+        
         for idx, row in df.iterrows():
-            col_i, col_e, col_d = st.columns([3, 1, 1])
-            col_i.write(f"#{row['ID']} - {row['Descrição']} (R$ {row['Valor']:,.2f})")
-            if col_e.button("📝", key=f"edit_btn_{idx}"):
-                st.session_state.edit_index = idx
-                st.rerun()
-            if col_d.button("🗑️", key=f"del_btn_{idx}"):
-                st.session_state.lancamentos = df.drop(idx).reset_index(drop=True)
-                st.rerun()
+            with st.container():
+                col_info, col_edit, col_del = st.columns([4, 0.5, 0.5])
+                
+                # Definindo cor baseada na natureza para facilitar visualização
+                emoji_nat = "💰" if row['Natureza'] in ['Ativo', 'Receita'] else "📉"
+                
+                with col_info:
+                    st.markdown(f"""
+                    **{emoji_nat} #{row['ID']} - {row['Descrição']}** **Natureza:** `{row['Natureza']}` | **Tipo:** *{row['Tipo']}* **Valor:** R$ {row['Valor']:,.2f}  
+                    *Histórico: {row['Justificativa'] if row['Justificativa'] else 'Sem histórico.'}*
+                    """)
+                
+                if col_edit.button("📝", key=f"edit_btn_{idx}", help="Editar lançamento"):
+                    st.session_state.edit_index = idx
+                    st.rerun()
+                
+                if col_del.button("🗑️", key=f"del_btn_{idx}", help="Excluir lançamento"):
+                    st.session_state.lancamentos = df.drop(idx).reset_index(drop=True)
+                    st.rerun()
+                
+                st.divider()
+
 else:
     st.info("Utilize a barra lateral para inserir o primeiro lançamento.")
