@@ -20,7 +20,7 @@ st.markdown("""
         border: 2px solid #28a745; font-weight: bold; background-color: #ffffff;
     }
     .total-box-error { border-color: #ff4b4b; }
-    .resumo-dre-linha { font-size: 1.1em; font-weight: bold; padding: 5px; border-radius: 5px; margin-bottom: 5px; }
+    .resumo-dre-linha { font-size: 1.1em; font-weight: bold; padding: 10px; border-radius: 5px; margin-bottom: 5px; }
     </style>
     """, unsafe_allow_html=True)
 
@@ -73,9 +73,9 @@ if not st.session_state.lancamentos.empty:
     df = st.session_state.lancamentos
 
     # Cálculos Prévios
-    df_rec = df[df['Natureza'] == 'Receita']
-    df_desp = df[df['Natureza'] == 'Despesa']
-    df_enc = df[df['Natureza'] == 'Encargos Financeiros']
+    df_rec = df[df['Natureza'] == 'Receita'].copy()
+    df_desp = df[df['Natureza'] == 'Despesa'].copy()
+    df_enc = df[df['Natureza'] == 'Encargos Financeiros'].copy()
 
     rec_tot = df_rec['Valor'].sum()
     desp_op = df_desp['Valor'].sum()
@@ -83,53 +83,61 @@ if not st.session_state.lancamentos.empty:
     ebitda = rec_tot - desp_op
     lucro_real = ebitda - enc_fin
 
-    # --- ABA DRE INTERATIVA (COM MENU DE DETALHAMENTO) ---
+    # Cálculo da Análise Vertical (AV) por linha
+    def calcular_av(valor):
+        return f"{(valor / rec_tot * 100):.2f}%" if rec_tot > 0 else "0.00%"
+
+    # --- ABA DRE INTERATIVA ---
     with tab_dre:
-        # Indicadores de Topo
+        # Indicadores de Topo (KPIs)
         c1, c2, c3, c4 = st.columns(4)
         c1.markdown('<p class="dre-header">RECEITA TOTAL</p>', unsafe_allow_html=True)
         c1.markdown(f'<p class="dre-value" style="color:#1E3A8A">R$ {rec_tot:,.2f}</p>', unsafe_allow_html=True)
+        
         c2.markdown('<p class="dre-header">EBITDA</p>', unsafe_allow_html=True)
         c2.markdown(f'<p class="dre-value" style="color:{"green" if ebitda >=0 else "red"}">R$ {ebitda:,.2f}</p>', unsafe_allow_html=True)
+        
         c3.markdown('<p class="dre-header">ENCARGOS FIN.</p>', unsafe_allow_html=True)
         c3.markdown(f'<p class="dre-value" style="color:#E11D48">R$ {enc_fin:,.2f}</p>', unsafe_allow_html=True)
+        
         c4.markdown('<p class="dre-header">LUCRO REAL</p>', unsafe_allow_html=True)
         c4.markdown(f'<p class="dre-value" style="color:{"#10B981" if lucro_real >=0 else "#EF4444"}">R$ {lucro_real:,.2f}</p>', unsafe_allow_html=True)
 
-        st.markdown("**Gráfico de Evolução de Resultado**")
-        st.bar_chart(pd.DataFrame({'Valor': [rec_tot, ebitda, lucro_real]}, index=['Receita', 'EBITDA', 'Lucro Real']))
-
-        st.subheader("📂 Menu de Detalhamento da DRE")
-        st.info("Clique nos menus abaixo para ver os lançamentos individuais de cada categoria.")
+        st.divider()
+        st.subheader("📂 Detalhamento com Análise Vertical (AV %)")
+        st.info("A coluna **AV %** indica o peso de cada lançamento em relação à Receita Total.")
 
         # MENU 1: RECEITAS
-        with st.expander(f"🟢 (=) RECEITA OPERACIONAL BRUTA: R$ {rec_tot:,.2f}", expanded=False):
+        with st.expander(f"🟢 (=) RECEITA OPERACIONAL BRUTA: R$ {rec_tot:,.2f} (100%)", expanded=True):
             if not df_rec.empty:
-                st.dataframe(df_rec[['Descrição', 'Valor', 'Justificativa']], use_container_width=True, hide_index=True)
+                df_rec['AV %'] = df_rec['Valor'].apply(calcular_av)
+                st.dataframe(df_rec[['Descrição', 'Valor', 'AV %', 'Justificativa']], use_container_width=True, hide_index=True)
             else:
                 st.write("Nenhuma receita lançada.")
 
         # MENU 2: DESPESAS OPERACIONAIS
-        with st.expander(f"🔴 (-) DESPESAS OPERACIONAIS: R$ {desp_op:,.2f}", expanded=False):
+        with st.expander(f"🔴 (-) DESPESAS OPERACIONAIS: R$ {desp_op:,.2f} ({calcular_av(desp_op)})", expanded=True):
             if not df_desp.empty:
-                st.dataframe(df_desp[['Descrição', 'Valor', 'Justificativa']], use_container_width=True, hide_index=True)
+                df_desp['AV %'] = df_desp['Valor'].apply(calcular_av)
+                st.dataframe(df_desp[['Descrição', 'Valor', 'AV %', 'Justificativa']], use_container_width=True, hide_index=True)
             else:
                 st.write("Nenhuma despesa operacional lançada.")
 
-        # LINHA DE SUBTOTAL (EBITDA)
-        st.markdown(f"<div class='resumo-dre-linha' style='background-color:#e1f5fe; color:#01579b;'>➔ (=) EBITDA: R$ {ebitda:,.2f}</div>", unsafe_allow_html=True)
+        # LINHA EBITDA
+        st.markdown(f"<div class='resumo-dre-linha' style='background-color:#e1f5fe; color:#01579b; border-left: 5px solid #01579b;'>➔ (=) EBITDA: R$ {ebitda:,.2f} ({calcular_av(ebitda)})</div>", unsafe_allow_html=True)
 
         # MENU 3: ENCARGOS FINANCEIROS
-        with st.expander(f"🟠 (-) ENCARGOS FINANCEIROS: R$ {enc_fin:,.2f}", expanded=False):
+        with st.expander(f"🟠 (-) ENCARGOS FINANCEIROS: R$ {enc_fin:,.2f} ({calcular_av(enc_fin)})", expanded=True):
             if not df_enc.empty:
-                st.dataframe(df_enc[['Descrição', 'Valor', 'Justificativa']], use_container_width=True, hide_index=True)
+                df_enc['AV %'] = df_enc['Valor'].apply(calcular_av)
+                st.dataframe(df_enc[['Descrição', 'Valor', 'AV %', 'Justificativa']], use_container_width=True, hide_index=True)
             else:
                 st.write("Nenhum encargo financeiro lançado.")
 
         # RESULTADO FINAL
-        cor_final = "#c8e6c9" if lucro_real >= 0 else "#ffcdd2"
-        texto_final = "LUCRO" if lucro_real >= 0 else "PREJUÍZO"
-        st.markdown(f"<div class='resumo-dre-linha' style='background-color:{cor_final}; color:#2e7d32; font-size:1.3em;'>🏆 (=) {texto_final} LÍQUIDO REAL: R$ {lucro_real:,.2f}</div>", unsafe_allow_html=True)
+        cor_f = "#c8e6c9" if lucro_real >= 0 else "#ffcdd2"
+        txt_f = "LUCRO" if lucro_real >= 0 else "PREJUÍZO"
+        st.markdown(f"<div class='resumo-dre-linha' style='background-color:{cor_f}; color:#2e7d32; font-size:1.3em; border-left: 5px solid #2e7d32;'>🏆 (=) {txt_f} LÍQUIDO REAL: R$ {lucro_real:,.2f} ({calcular_av(lucro_real)})</div>", unsafe_allow_html=True)
 
     # --- ABA RAZONETES ---
     with tab_raz:
@@ -168,7 +176,8 @@ if not st.session_state.lancamentos.empty:
     with tab_ges:
         for idx, row in df.iterrows():
             c1, c2, c3 = st.columns([4, 0.5, 0.5])
-            c1.write(f"**#{idx+1} {row['Descrição']}** | R$ {row['Valor']:,.2f} | {row['Justificativa']}")
+            c1.write(f"**#{idx+1} {row['Descrição']}** | {row['Natureza']} | R$ {row['Valor']:,.2f}")
+            st.markdown(f"<p class='justificativa-texto' style='margin-left: 0px;'>Justificativa: {row['Justificativa']}</p>", unsafe_allow_html=True)
             if c2.button("📝", key=f"e_{idx}"):
                 st.session_state.edit_index = idx
                 st.rerun()
@@ -177,4 +186,4 @@ if not st.session_state.lancamentos.empty:
                 st.rerun()
             st.divider()
 else:
-    st.info("Insira lançamentos para ativar a visualização.")
+    st.info("Insira lançamentos na barra lateral para ativar a visualização.")
