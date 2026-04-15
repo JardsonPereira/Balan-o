@@ -20,6 +20,7 @@ st.markdown("""
         border: 2px solid #28a745; font-weight: bold; background-color: #ffffff;
     }
     .total-box-error { border-color: #ff4b4b; }
+    .resumo-dre-linha { font-size: 1.1em; font-weight: bold; padding: 5px; border-radius: 5px; margin-bottom: 5px; }
     </style>
     """, unsafe_allow_html=True)
 
@@ -33,7 +34,7 @@ if 'lancamentos' not in st.session_state:
 if 'edit_index' not in st.session_state:
     st.session_state.edit_index = None
 
-# 3. Barra Lateral - Formulário
+# 3. Barra Lateral
 with st.sidebar:
     if st.session_state.edit_index is not None:
         st.header(f"📝 Editar Lançamento #{st.session_state.edit_index + 1}")
@@ -44,21 +45,19 @@ with st.sidebar:
         row_to_edit = None
         btn_label = "Confirmar Lançamento"
 
-    contas_existentes = sorted(st.session_state.lancamentos['Descrição'].unique().tolist())
-    opcoes = ["-- Selecione uma conta --"] + contas_existentes
-
     with st.form("form_contabil", clear_on_submit=True):
-        escolha_conta = st.selectbox("Escolher Conta", opcoes)
+        contas_existentes = sorted(st.session_state.lancamentos['Descrição'].unique().tolist())
+        escolha_conta = st.selectbox("Escolher Conta", ["-- Selecione --"] + contas_existentes)
         nova_conta_input = st.text_input("OU Nova Conta").upper().strip()
         
         lista_nat = ["Ativo", "Passivo", "Patrimônio Líquido", "Receita", "Despesa", "Encargos Financeiros"]
         natureza = st.selectbox("Natureza", lista_nat)
         tipo = st.radio("Operação", ["Débito", "Crédito"], horizontal=True)
         valor = st.number_input("Valor R$", min_value=0.00, format="%.2f")
-        justificativa = st.text_area("Justificativa / Histórico")
+        justificativa = st.text_area("Justificativa")
         
         if st.form_submit_button(btn_label, use_container_width=True):
-            nome_final = nova_conta_input if nova_conta_input else (escolha_conta if escolha_conta != "-- Selecione uma conta --" else None)
+            nome_final = nova_conta_input if nova_conta_input else (escolha_conta if escolha_conta != "-- Selecione --" else None)
             if nome_final and valor > 0:
                 if st.session_state.edit_index is not None:
                     st.session_state.lancamentos.iloc[st.session_state.edit_index] = [nome_final, natureza, tipo, valor, justificativa]
@@ -73,16 +72,20 @@ if not st.session_state.lancamentos.empty:
     tab_raz, tab_bal, tab_dre, tab_ges = st.tabs(["📊 Razonetes", "⚖️ Balancete", "📈 DRE Interativa", "⚙️ Gestão"])
     df = st.session_state.lancamentos
 
-    # Cálculos Base
-    rec_tot = df[df['Natureza'] == 'Receita']['Valor'].sum()
-    desp_op = df[df['Natureza'] == 'Despesa']['Valor'].sum()
-    enc_fin = df[df['Natureza'] == 'Encargos Financeiros']['Valor'].sum()
+    # Cálculos Prévios
+    df_rec = df[df['Natureza'] == 'Receita']
+    df_desp = df[df['Natureza'] == 'Despesa']
+    df_enc = df[df['Natureza'] == 'Encargos Financeiros']
+
+    rec_tot = df_rec['Valor'].sum()
+    desp_op = df_desp['Valor'].sum()
+    enc_fin = df_enc['Valor'].sum()
     ebitda = rec_tot - desp_op
     lucro_real = ebitda - enc_fin
 
-    # --- ABA DRE INTERATIVA ---
+    # --- ABA DRE INTERATIVA (COM MENU DE DETALHAMENTO) ---
     with tab_dre:
-        # Destaques Maiores
+        # Indicadores de Topo
         c1, c2, c3, c4 = st.columns(4)
         c1.markdown('<p class="dre-header">RECEITA TOTAL</p>', unsafe_allow_html=True)
         c1.markdown(f'<p class="dre-value" style="color:#1E3A8A">R$ {rec_tot:,.2f}</p>', unsafe_allow_html=True)
@@ -93,63 +96,71 @@ if not st.session_state.lancamentos.empty:
         c4.markdown('<p class="dre-header">LUCRO REAL</p>', unsafe_allow_html=True)
         c4.markdown(f'<p class="dre-value" style="color:{"#10B981" if lucro_real >=0 else "#EF4444"}">R$ {lucro_real:,.2f}</p>', unsafe_allow_html=True)
 
-        # Gráfico Nativo (Sem dependência de Plotly)
-        st.markdown("**Performance de Resultado**")
-        chart_data = pd.DataFrame({'Valor': [rec_tot, ebitda, lucro_real]}, index=['Receita', 'EBITDA', 'Lucro Real'])
-        st.bar_chart(chart_data)
+        st.markdown("**Gráfico de Evolução de Resultado**")
+        st.bar_chart(pd.DataFrame({'Valor': [rec_tot, ebitda, lucro_real]}, index=['Receita', 'EBITDA', 'Lucro Real']))
 
-        with st.expander("🔍 Detalhamento da DRE (Tabela)"):
-            dre_items = [
-                ["(=) RECEITA BRUTA", rec_tot, "100%"],
-                ["(-) DESPESAS OPERACIONAIS", -desp_op, f"{(desp_op/rec_tot*100):.1f}%" if rec_tot>0 else "0%"],
-                ["(=) EBITDA", ebitda, f"{(ebitda/rec_tot*100):.1f}%" if rec_tot>0 else "0%"],
-                ["(-) ENCARGOS FINANCEIROS", -enc_fin, f"{(enc_fin/rec_tot*100):.1f}%" if rec_tot>0 else "0%"],
-                ["(=) LUCRO LÍQUIDO REAL", lucro_real, f"{(lucro_real/rec_tot*100):.1f}%" if rec_tot>0 else "0%"]
-            ]
-            st.table(pd.DataFrame(dre_items, columns=["Indicador", "Valor (R$)", "AV (%)"]))
+        st.subheader("📂 Menu de Detalhamento da DRE")
+        st.info("Clique nos menus abaixo para ver os lançamentos individuais de cada categoria.")
+
+        # MENU 1: RECEITAS
+        with st.expander(f"🟢 (=) RECEITA OPERACIONAL BRUTA: R$ {rec_tot:,.2f}", expanded=False):
+            if not df_rec.empty:
+                st.dataframe(df_rec[['Descrição', 'Valor', 'Justificativa']], use_container_width=True, hide_index=True)
+            else:
+                st.write("Nenhuma receita lançada.")
+
+        # MENU 2: DESPESAS OPERACIONAIS
+        with st.expander(f"🔴 (-) DESPESAS OPERACIONAIS: R$ {desp_op:,.2f}", expanded=False):
+            if not df_desp.empty:
+                st.dataframe(df_desp[['Descrição', 'Valor', 'Justificativa']], use_container_width=True, hide_index=True)
+            else:
+                st.write("Nenhuma despesa operacional lançada.")
+
+        # LINHA DE SUBTOTAL (EBITDA)
+        st.markdown(f"<div class='resumo-dre-linha' style='background-color:#e1f5fe; color:#01579b;'>➔ (=) EBITDA: R$ {ebitda:,.2f}</div>", unsafe_allow_html=True)
+
+        # MENU 3: ENCARGOS FINANCEIROS
+        with st.expander(f"🟠 (-) ENCARGOS FINANCEIROS: R$ {enc_fin:,.2f}", expanded=False):
+            if not df_enc.empty:
+                st.dataframe(df_enc[['Descrição', 'Valor', 'Justificativa']], use_container_width=True, hide_index=True)
+            else:
+                st.write("Nenhum encargo financeiro lançado.")
+
+        # RESULTADO FINAL
+        cor_final = "#c8e6c9" if lucro_real >= 0 else "#ffcdd2"
+        texto_final = "LUCRO" if lucro_real >= 0 else "PREJUÍZO"
+        st.markdown(f"<div class='resumo-dre-linha' style='background-color:{cor_final}; color:#2e7d32; font-size:1.3em;'>🏆 (=) {texto_final} LÍQUIDO REAL: R$ {lucro_real:,.2f}</div>", unsafe_allow_html=True)
 
     # --- ABA RAZONETES ---
     with tab_raz:
         for conta in sorted(df['Descrição'].unique()):
-            with st.expander(f"Razonete: {conta}", expanded=True):
+            with st.expander(f"Razonete: {conta}"):
+                c_d, c_c = st.columns(2)
                 df_c = df[df['Descrição'] == conta]
-                col_d, col_c = st.columns(2)
-                with col_d:
-                    st.markdown("<p style='text-align:center; border-bottom:1px solid #555'>DÉBITO</p>", unsafe_allow_html=True)
-                    debs = df_c[df_c['Tipo'] == 'Débito']
-                    for i, r in debs.iterrows():
-                        st.caption(f"Ref #{i+1}: {r['Justificativa']}")
-                        st.button(f"R$ {r['Valor']:,.2f}", key=f"rd_{i}_{conta}", use_container_width=True)
-                    st.markdown(f"<p style='text-align:right'>Total D: R$ {debs['Valor'].sum():,.2f}</p>", unsafe_allow_html=True)
-                with col_c:
-                    st.markdown("<p style='text-align:center; border-bottom:1px solid #555'>CRÉDITO</p>", unsafe_allow_html=True)
-                    creds = df_c[df_c['Tipo'] == 'Crédito']
-                    for i, r in creds.iterrows():
-                        st.caption(f"Ref #{i+1}: {r['Justificativa']}")
-                        st.button(f"R$ {r['Valor']:,.2f}", key=f"rc_{i}_{conta}", use_container_width=True)
-                    st.markdown(f"<p style='text-align:right'>Total C: R$ {creds['Valor'].sum():,.2f}</p>", unsafe_allow_html=True)
-                
-                s = debs['Valor'].sum() - creds['Valor'].sum()
-                if s > 0: st.success(f"Saldo Devedor: R$ {abs(s):,.2f}")
-                elif s < 0: st.warning(f"Saldo Credor: R$ {abs(s):,.2f}")
+                v_d, v_c = df_c[df_c['Tipo'] == 'Débito']['Valor'].sum(), df_c[df_c['Tipo'] == 'Crédito']['Valor'].sum()
+                with c_d:
+                    st.write("**DÉBITO**")
+                    for i, r in df_c[df_c['Tipo'] == 'Débito'].iterrows(): st.caption(f"R$ {r['Valor']:,.2f} - {r['Justificativa']}")
+                with c_c:
+                    st.write("**CRÉDITO**")
+                    for i, r in df_c[df_c['Tipo'] == 'Crédito'].iterrows(): st.caption(f"R$ {r['Valor']:,.2f} - {r['Justificativa']}")
+                st.write(f"**Saldo: R$ {abs(v_d - v_c):,.2f} ({'Devedor' if v_d >= v_c else 'Credor'})**")
 
     # --- ABA BALANCETE ---
     with tab_bal:
-        st.subheader("Balancete Patrimonial")
         df_pat = df[df['Natureza'].isin(["Ativo", "Passivo", "Patrimônio Líquido"])]
         resumo = []
         for c in sorted(df_pat['Descrição'].unique()):
             d_c = df_pat[df_pat['Descrição'] == c]
-            v_d, v_c = d_c[d_c['Tipo'] == 'Débito']['Valor'].sum(), d_c[d_c['Tipo'] == 'Crédito']['Valor'].sum()
-            resumo.append({'Conta': c, 'Devedor': max(0.0, v_d-v_c), 'Credor': max(0.0, v_c-v_d)})
+            sd, sc = d_c[d_c['Tipo']=='Débito']['Valor'].sum(), d_c[d_c['Tipo']=='Crédito']['Valor'].sum()
+            resumo.append({'Conta': c, 'Devedor': max(0.0, sd-sc), 'Credor': max(0.0, sc-sd)})
         resumo.append({'Conta': 'RESULTADO DO PERÍODO', 'Devedor': abs(lucro_real) if lucro_real < 0 else 0, 'Credor': lucro_real if lucro_real > 0 else 0})
         df_b = pd.DataFrame(resumo)
         st.table(df_b.style.format({'Devedor': 'R$ {:,.2f}', 'Credor': 'R$ {:,.2f}'}))
         
         t_d, t_c = df_b['Devedor'].sum(), df_b['Credor'].sum()
         col_esp, col_dev, col_cred = st.columns([1.5, 1, 1])
-        equi = round(t_d, 2) == round(t_c, 2)
-        c_box = "total-box" if equi else "total-box total-box-error"
+        c_box = "total-box" if round(t_d, 2) == round(t_c, 2) else "total-box total-box-error"
         col_dev.markdown(f"<div class='{c_box}'>Total Devedor<br>R$ {t_d:,.2f}</div>", unsafe_allow_html=True)
         col_cred.markdown(f"<div class='{c_box}'>Total Credor<br>R$ {t_c:,.2f}</div>", unsafe_allow_html=True)
 
@@ -157,9 +168,7 @@ if not st.session_state.lancamentos.empty:
     with tab_ges:
         for idx, row in df.iterrows():
             c1, c2, c3 = st.columns([4, 0.5, 0.5])
-            with c1:
-                st.write(f"**#{idx+1} {row['Descrição']}** | {row['Tipo']}: R$ {row['Valor']:,.2f}")
-                st.markdown(f"<p class='justificativa-texto'>Justificativa: {row['Justificativa']}</p>", unsafe_allow_html=True)
+            c1.write(f"**#{idx+1} {row['Descrição']}** | R$ {row['Valor']:,.2f} | {row['Justificativa']}")
             if c2.button("📝", key=f"e_{idx}"):
                 st.session_state.edit_index = idx
                 st.rerun()
@@ -168,4 +177,4 @@ if not st.session_state.lancamentos.empty:
                 st.rerun()
             st.divider()
 else:
-    st.info("Aguardando lançamentos na barra lateral.")
+    st.info("Insira lançamentos para ativar a visualização.")
