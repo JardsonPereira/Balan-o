@@ -17,7 +17,7 @@ st.markdown("""
         border: 2px solid #28a745; font-weight: bold; background-color: #ffffff;
     }
     .total-box-error { border-color: #ff4b4b; }
-    .justificativa-texto { font-style: italic; color: #555; font-size: 0.9em; }
+    .justificativa-texto { font-style: italic; color: #555; font-size: 0.9em; margin-top: -10px; }
     </style>
     """, unsafe_allow_html=True)
 
@@ -60,7 +60,10 @@ with st.sidebar:
         
         valor_init = float(row_to_edit['Valor']) if row_to_edit is not None else 0.0
         valor = st.number_input("Valor R$", min_value=0.00, format="%.2f", value=valor_init)
-        justificativa = st.text_area("Justificativa", value=row_to_edit['Justificativa'] if row_to_edit is not None else "")
+        
+        # Restauração do campo de Justificativa no Form
+        just_init = row_to_edit['Justificativa'] if row_to_edit is not None else ""
+        justificativa = st.text_area("Justificativa / Histórico", value=just_init)
         
         if st.form_submit_button(btn_label, use_container_width=True):
             nome_final = nova_conta_input if nova_conta_input else (escolha_conta if escolha_conta != "-- Selecione uma conta --" else None)
@@ -78,7 +81,7 @@ if not st.session_state.lancamentos.empty:
     tab_raz, tab_bal, tab_dre, tab_ges = st.tabs(["📊 Razonetes", "⚖️ Balancete", "📈 DRE Profissional", "⚙️ Gestão"])
     df = st.session_state.lancamentos
 
-    # CÁLCULOS TÉCNICOS GERAIS
+    # Cálculos para DRE e Balancete
     df_rec = df[df['Natureza'] == 'Receita'].groupby('Descrição')['Valor'].sum()
     df_desp = df[df['Natureza'] == 'Despesa'].groupby('Descrição')['Valor'].sum()
     total_receita = df_rec.sum()
@@ -93,11 +96,15 @@ if not st.session_state.lancamentos.empty:
                 c1, c2 = st.columns(2)
                 df_c = df[df['Descrição'] == conta]
                 c1.write("**DÉBITO**")
-                for i, r in df_c[df_c['Tipo'] == 'Débito'].iterrows(): c1.caption(f"R$ {r['Valor']:,.2f} (#{i+1})")
+                for i, r in df_c[df_c['Tipo'] == 'Débito'].iterrows(): 
+                    c1.caption(f"Ref #{i+1}: {r['Justificativa']}") # Justificativa aqui
+                    c1.button(f"R$ {r['Valor']:,.2f}", key=f"rd_{i}_{conta}", use_container_width=True)
                 c2.write("**CRÉDITO**")
-                for i, r in df_c[df_c['Tipo'] == 'Crédito'].iterrows(): c2.caption(f"R$ {r['Valor']:,.2f} (#{i+1})")
+                for i, r in df_c[df_c['Tipo'] == 'Crédito'].iterrows(): 
+                    c2.caption(f"Ref #{i+1}: {r['Justificativa']}") # Justificativa aqui
+                    c2.button(f"R$ {r['Valor']:,.2f}", key=f"rc_{i}_{conta}", use_container_width=True)
 
-    # --- ABA BALANCETE (RESTAURADA COM COLUNAS DEVEDOR/CREDOR) ---
+    # --- ABA BALANCETE ---
     with tab_bal:
         st.subheader("Balancete de Verificação Patrimonial")
         df_pat = df[df['Natureza'].isin(["Ativo", "Passivo", "Patrimônio Líquido"])]
@@ -107,7 +114,6 @@ if not st.session_state.lancamentos.empty:
             v_d, v_c = d_c[d_c['Tipo'] == 'Débito']['Valor'].sum(), d_c[d_c['Tipo'] == 'Crédito']['Valor'].sum()
             resumo_bal.append({'Conta': c, 'Saldo Devedor': max(0.0, v_d - v_c), 'Saldo Credor': max(0.0, v_c - v_d)})
         
-        # Integrar Lucro/Prejuízo da DRE no Patrimônio Líquido
         if lucro_liquido > 0:
             resumo_bal.append({'Conta': 'LUCRO LÍQUIDO (DRE)', 'Saldo Devedor': 0.0, 'Saldo Credor': abs(lucro_liquido)})
         elif lucro_liquido < 0:
@@ -116,16 +122,14 @@ if not st.session_state.lancamentos.empty:
         df_final_bal = pd.DataFrame(resumo_bal)
         st.table(df_final_bal.style.format({'Saldo Devedor': 'R$ {:,.2f}', 'Saldo Credor': 'R$ {:,.2f}'}))
         
-        # Totais embaixo das colunas
         t_dev, t_cred = df_final_bal['Saldo Devedor'].sum(), df_final_bal['Saldo Credor'].sum()
         equilibrado = round(t_dev, 2) == round(t_cred, 2)
-        
         col_esp, col_dev, col_cred = st.columns([1.5, 1, 1])
         class_box = "total-box" if equilibrado else "total-box total-box-error"
         col_dev.markdown(f"<div class='{class_box}'>Total Devedor<br>R$ {t_dev:,.2f}</div>", unsafe_allow_html=True)
         col_cred.markdown(f"<div class='{class_box}'>Total Credor<br>R$ {t_cred:,.2f}</div>", unsafe_allow_html=True)
 
-    # --- ABA DRE PROFISSIONAL (COM CORREÇÃO DO ERRO) ---
+    # --- ABA DRE PROFISSIONAL ---
     with tab_dre:
         st.subheader("📈 Demonstração do Resultado")
         m1, m2, m3, m4 = st.columns(4)
@@ -144,7 +148,6 @@ if not st.session_state.lancamentos.empty:
 
         df_dre_f = pd.DataFrame(dre_data, columns=["Descrição", "Valor", "AV (%)"])
 
-        # Estilização robusta (evita applymap)
         def style_dre(row):
             color = "green" if row["Valor"] >= 0 else "red"
             weight = "bold" if "=" in row["Descrição"] else "normal"
@@ -152,19 +155,23 @@ if not st.session_state.lancamentos.empty:
 
         st.table(df_dre_f.style.format({"Valor": "R$ {:,.2f}"}).apply(style_dre, axis=1))
 
-    # --- ABA GESTÃO ---
+    # --- ABA GESTÃO (RESTAURADA COM JUSTIFICATIVA) ---
     with tab_ges:
+        st.subheader("Histórico de Lançamentos")
         for idx, row in df.iterrows():
-            c1, c2, c3 = st.columns([4, 0.5, 0.5])
-            with c1:
-                st.write(f"**#{idx+1} {row['Descrição']}** | {row['Tipo']}: R$ {row['Valor']:,.2f}")
-                st.caption(f"Justificativa: {row['Justificativa']}")
-            if c2.button("📝", key=f"e_{idx}"):
-                st.session_state.edit_index = idx
-                st.rerun()
-            if c3.button("🗑️", key=f"d_{idx}"):
-                st.session_state.lancamentos = df.drop(idx).reset_index(drop=True)
-                st.rerun()
-            st.divider()
+            with st.container():
+                c1, c2, c3 = st.columns([4, 0.5, 0.5])
+                with c1:
+                    st.write(f"**#{idx+1} {row['Descrição']}** | {row['Tipo']}: R$ {row['Valor']:,.2f}")
+                    # Restauração visual da justificativa
+                    st.markdown(f"<p class='justificativa-texto'>Justificativa: {row['Justificativa'] if row['Justificativa'] else 'Sem histórico'}</p>", unsafe_allow_html=True)
+                
+                if c2.button("📝", key=f"e_{idx}"):
+                    st.session_state.edit_index = idx
+                    st.rerun()
+                if c3.button("🗑️", key=f"d_{idx}"):
+                    st.session_state.lancamentos = df.drop(idx).reset_index(drop=True)
+                    st.rerun()
+                st.divider()
 else:
     st.info("Insira lançamentos para começar.")
