@@ -12,7 +12,17 @@ st.set_page_config(
 st.markdown("""
     <style>
     .main { background-color: #f5f7f9; }
-    .stMetric { background-color: #ffffff; padding: 15px; border-radius: 10px; border: 1px solid #e0e0e0; }
+    .total-box { 
+        text-align: center; 
+        padding: 10px; 
+        border-radius: 5px; 
+        border: 2px solid #28a745; 
+        font-weight: bold;
+        background-color: #ffffff;
+    }
+    .total-box-error { 
+        border-color: #ff4b4b; 
+    }
     </style>
     """, unsafe_allow_html=True)
 
@@ -75,7 +85,7 @@ if not st.session_state.lancamentos.empty:
     tab_raz, tab_bal, tab_dre, tab_ges = st.tabs(["📊 Razonetes", "⚖️ Balancete Patrimonial", "📈 DRE", "⚙️ Gestão"])
     df = st.session_state.lancamentos
 
-    # --- ABA RAZONETES (Todos os lançamentos) ---
+    # --- ABA RAZONETES ---
     with tab_raz:
         contas = sorted(df['Descrição'].unique())
         for conta in contas:
@@ -94,12 +104,9 @@ if not st.session_state.lancamentos.empty:
                 s = debs['Valor'].sum() - creds['Valor'].sum()
                 st.markdown(f"**Saldo: R$ {abs(s):,.2f} ({'Devedor' if s >= 0 else 'Credor'})**")
 
-    # --- ABA BALANCETE (Apenas Ativo, Passivo e PL) ---
+    # --- ABA BALANCETE PATRIMONIAL ---
     with tab_bal:
-        st.subheader("Balancete de Verificação (Contas Patrimoniais)")
-        st.caption("Nota: Receitas e Despesas foram movidas para a aba DRE.")
-        
-        # Filtro para excluir Receitas e Despesas
+        st.subheader("Balancete de Verificação (Apenas Contas Patrimoniais)")
         df_patrimonial = df[df['Natureza'].isin(["Ativo", "Passivo", "Patrimônio Líquido"])]
         
         if not df_patrimonial.empty:
@@ -112,15 +119,31 @@ if not st.session_state.lancamentos.empty:
                 s_d, s_c = max(0.0, v_d - v_c), max(0.0, v_c - v_d)
                 resumo_bal.append({'Conta': c, 'Natureza': nat, 'Saldo Devedor': s_d, 'Saldo Credor': s_c})
             
-            st.table(pd.DataFrame(resumo_bal).style.format({'Saldo Devedor': 'R$ {:,.2f}', 'Saldo Credor': 'R$ {:,.2f}'}))
-        else:
-            st.info("Nenhuma conta de Ativo, Passivo ou PL lançada.")
+            df_final_bal = pd.DataFrame(resumo_bal)
+            st.table(df_final_bal.style.format({'Saldo Devedor': 'R$ {:,.2f}', 'Saldo Credor': 'R$ {:,.2f}'}))
+            
+            # Totais do Balancete
+            total_devedor = df_final_bal['Saldo Devedor'].sum()
+            total_credor = df_final_bal['Saldo Credor'].sum()
+            
+            # Lógica de cor para equilíbrio
+            equilibrado = round(total_devedor, 2) == round(total_credor, 2)
+            css_class = "total-box" if equilibrado else "total-box total-box-error"
 
-    # --- ABA DRE (Apenas Receitas e Despesas) ---
+            c_espaco, c_td, c_tc = st.columns([1.5, 1, 1]) # Ajuste de proporção para alinhar com as colunas da tabela
+            with c_td:
+                st.markdown(f"<div class='{css_class}'>Total Devedor<br>R$ {total_devedor:,.2f}</div>", unsafe_allow_html=True)
+            with c_tc:
+                st.markdown(f"<div class='{css_class}'>Total Credor<br>R$ {total_credor:,.2f}</div>", unsafe_allow_html=True)
+            
+            if not equilibrado:
+                st.error(f"Atenção: Diferença de R$ {abs(total_devedor - total_credor):,.2f} detectada no balancete patrimonial.")
+        else:
+            st.info("Nenhuma conta patrimonial (Ativo, Passivo, PL) para exibir.")
+
+    # --- ABA DRE ---
     with tab_dre:
         st.subheader("📈 Demonstração do Resultado")
-        
-        # Filtro exclusivo para contas de resultado
         recs = df[df['Natureza'] == 'Receita'].groupby('Descrição')['Valor'].sum()
         desps = df[df['Natureza'] == 'Despesa'].groupby('Descrição')['Valor'].sum()
         
@@ -128,20 +151,20 @@ if not st.session_state.lancamentos.empty:
         with col1:
             st.markdown("**(+) RECEITAS**")
             for n, v in recs.items(): st.write(f"{n}: R$ {v:,.2f}")
-            st.markdown(f"--- \n **Total: R$ {recs.sum():,.2f}**")
-        
+            st.markdown(f"--- \n **Total Receitas: R$ {recs.sum():,.2f}**")
         with col2:
             st.markdown("**(-) DESPESAS**")
             for n, v in desps.items(): st.write(f"{n}: (R$ {v:,.2f})")
-            st.markdown(f"--- \n **Total: (R$ {desps.sum():,.2f})**")
+            st.markdown(f"--- \n **Total Despesas: (R$ {desps.sum():,.2f})**")
         
         res = recs.sum() - desps.sum()
+        st.divider()
         if res >= 0: st.success(f"### LUCRO LÍQUIDO: R$ {res:,.2f}")
         else: st.error(f"### PREJUÍZO LÍQUIDO: R$ {abs(res):,.2f}")
 
     # --- ABA GESTÃO ---
     with tab_ges:
-        st.subheader("Histórico")
+        st.subheader("Histórico e Gestão")
         for idx, row in df.iterrows():
             c1, c2, c3 = st.columns([4, 0.5, 0.5])
             c1.markdown(f"**#{idx+1} {row['Descrição']}** | {row['Natureza']} | {row['Tipo']}: R$ {row['Valor']:,.2f}")
