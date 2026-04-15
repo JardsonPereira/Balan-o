@@ -16,6 +16,7 @@ st.markdown("""
         text-align: center; padding: 10px; border-radius: 5px; 
         border: 2px solid #28a745; font-weight: bold; background-color: #ffffff;
     }
+    .total-box-error { border-color: #ff4b4b; }
     .justificativa-texto { font-style: italic; color: #555; font-size: 0.9em; }
     </style>
     """, unsafe_allow_html=True)
@@ -57,8 +58,8 @@ with st.sidebar:
         tipo_idx = 0 if row_to_edit is None or row_to_edit['Tipo'] == "Débito" else 1
         tipo = st.radio("Operação", ["Débito", "Crédito"], horizontal=True, index=tipo_idx)
         
-        valor_input = float(row_to_edit['Valor']) if row_to_edit is not None else 0.0
-        valor = st.number_input("Valor R$", min_value=0.00, format="%.2f", value=valor_input)
+        valor_init = float(row_to_edit['Valor']) if row_to_edit is not None else 0.0
+        valor = st.number_input("Valor R$", min_value=0.00, format="%.2f", value=valor_init)
         justificativa = st.text_area("Justificativa", value=row_to_edit['Justificativa'] if row_to_edit is not None else "")
         
         if st.form_submit_button(btn_label, use_container_width=True):
@@ -77,13 +78,12 @@ if not st.session_state.lancamentos.empty:
     tab_raz, tab_bal, tab_dre, tab_ges = st.tabs(["📊 Razonetes", "⚖️ Balancete", "📈 DRE Profissional", "⚙️ Gestão"])
     df = st.session_state.lancamentos
 
-    # --- CÁLCULOS GERAIS ---
+    # CÁLCULOS TÉCNICOS GERAIS
     df_rec = df[df['Natureza'] == 'Receita'].groupby('Descrição')['Valor'].sum()
     df_desp = df[df['Natureza'] == 'Despesa'].groupby('Descrição')['Valor'].sum()
     total_receita = df_rec.sum()
     total_despesa = df_desp.sum()
     lucro_liquido = total_receita - total_despesa
-    ebitda = lucro_liquido # Simplificado
     margem = (lucro_liquido / total_receita * 100) if total_receita > 0 else 0
 
     # --- ABA RAZONETES ---
@@ -97,47 +97,60 @@ if not st.session_state.lancamentos.empty:
                 c2.write("**CRÉDITO**")
                 for i, r in df_c[df_c['Tipo'] == 'Crédito'].iterrows(): c2.caption(f"R$ {r['Valor']:,.2f} (#{i+1})")
 
-    # --- ABA BALANCETE ---
+    # --- ABA BALANCETE (RESTAURADA COM COLUNAS DEVEDOR/CREDOR) ---
     with tab_bal:
+        st.subheader("Balancete de Verificação Patrimonial")
         df_pat = df[df['Natureza'].isin(["Ativo", "Passivo", "Patrimônio Líquido"])]
-        resumo = []
+        resumo_bal = []
         for c in sorted(df_pat['Descrição'].unique()):
             d_c = df_pat[df_pat['Descrição'] == c]
             v_d, v_c = d_c[d_c['Tipo'] == 'Débito']['Valor'].sum(), d_c[d_c['Tipo'] == 'Crédito']['Valor'].sum()
-            resumo.append({'Conta': c, 'Saldo Devedor': max(0, v_d-v_c), 'Saldo Credor': max(0, v_c-v_d)})
-        resumo.append({'Conta': 'RESULTADO DO PERÍODO', 'Saldo Devedor': abs(lucro_liquido) if lucro_liquido < 0 else 0, 'Saldo Credor': lucro_liquido if lucro_liquido > 0 else 0})
-        st.table(pd.DataFrame(resumo).style.format({'Saldo Devedor': 'R$ {:,.2f}', 'Saldo Credor': 'R$ {:,.2f}'}))
+            resumo_bal.append({'Conta': c, 'Saldo Devedor': max(0.0, v_d - v_c), 'Saldo Credor': max(0.0, v_c - v_d)})
+        
+        # Integrar Lucro/Prejuízo da DRE no Patrimônio Líquido
+        if lucro_liquido > 0:
+            resumo_bal.append({'Conta': 'LUCRO LÍQUIDO (DRE)', 'Saldo Devedor': 0.0, 'Saldo Credor': abs(lucro_liquido)})
+        elif lucro_liquido < 0:
+            resumo_bal.append({'Conta': 'PREJUÍZO LÍQUIDO (DRE)', 'Saldo Devedor': abs(lucro_liquido), 'Saldo Credor': 0.0})
 
-    # --- ABA DRE PROFISSIONAL (CORRIGIDA) ---
+        df_final_bal = pd.DataFrame(resumo_bal)
+        st.table(df_final_bal.style.format({'Saldo Devedor': 'R$ {:,.2f}', 'Saldo Credor': 'R$ {:,.2f}'}))
+        
+        # Totais embaixo das colunas
+        t_dev, t_cred = df_final_bal['Saldo Devedor'].sum(), df_final_bal['Saldo Credor'].sum()
+        equilibrado = round(t_dev, 2) == round(t_cred, 2)
+        
+        col_esp, col_dev, col_cred = st.columns([1.5, 1, 1])
+        class_box = "total-box" if equilibrado else "total-box total-box-error"
+        col_dev.markdown(f"<div class='{class_box}'>Total Devedor<br>R$ {t_dev:,.2f}</div>", unsafe_allow_html=True)
+        col_cred.markdown(f"<div class='{class_box}'>Total Credor<br>R$ {t_cred:,.2f}</div>", unsafe_allow_html=True)
+
+    # --- ABA DRE PROFISSIONAL (COM CORREÇÃO DO ERRO) ---
     with tab_dre:
         st.subheader("📈 Demonstração do Resultado")
-        
         m1, m2, m3, m4 = st.columns(4)
         m1.metric("Receita Bruta", f"R$ {total_receita:,.2f}")
-        m2.metric("EBITDA", f"R$ {ebitda:,.2f}")
+        m2.metric("EBITDA", f"R$ {lucro_liquido:,.2f}")
         m3.metric("Lucro Líquido", f"R$ {lucro_liquido:,.2f}")
         m4.metric("Margem Líquida", f"{margem:.2f}%")
 
-        dre_list = []
-        dre_list.append(["(=) RECEITA OPERACIONAL BRUTA", total_receita, "100.00%"])
+        dre_data = [["(=) RECEITA OPERACIONAL BRUTA", total_receita, "100.00%"]]
         for n, v in df_rec.items():
-            dre_list.append([f"   (+) {n}", v, f"{(v/total_receita*100):.2f}%" if total_receita > 0 else "0.00%"])
-        
-        dre_list.append(["(-) DESPESAS OPERACIONAIS", -total_despesa, f"{(total_despesa/total_receita*100):.2f}%" if total_receita > 0 else "0.00%"])
+            dre_data.append([f"   (+) {n}", v, f"{(v/total_receita*100):.2f}%" if total_receita > 0 else "0.00%"])
+        dre_data.append(["(-) DESPESAS OPERACIONAIS", -total_despesa, f"{(total_despesa/total_receita*100):.2f}%" if total_receita > 0 else "0.00%"])
         for n, v in df_desp.items():
-            dre_list.append([f"   (-) {n}", -v, f"{(v/total_receita*100):.2f}%" if total_receita > 0 else "0.00%"])
-        
-        dre_list.append(["(=) RESULTADO LÍQUIDO", lucro_liquido, f"{margem:.2f}%"])
+            dre_data.append([f"   (-) {n}", -v, f"{(v/total_receita*100):.2f}%" if total_receita > 0 else "0.00%"])
+        dre_data.append(["(=) RESULTADO LÍQUIDO", lucro_liquido, f"{margem:.2f}%"])
 
-        df_dre_final = pd.DataFrame(dre_list, columns=["Descrição", "Valor", "Análise Vertical (AV)"])
+        df_dre_f = pd.DataFrame(dre_data, columns=["Descrição", "Valor", "AV (%)"])
 
-        # Formatação manual para evitar erro de applymap/map
-        def format_dre(row):
+        # Estilização robusta (evita applymap)
+        def style_dre(row):
             color = "green" if row["Valor"] >= 0 else "red"
-            bold = "font-weight: bold" if "=" in row["Descrição"] else ""
-            return [bold, f"color: {color}; {bold}", bold]
+            weight = "bold" if "=" in row["Descrição"] else "normal"
+            return ["", f"color: {color}; font-weight: {weight}", f"font-weight: {weight}"]
 
-        st.table(df_dre_final.style.format({"Valor": "R$ {:,.2f}"}).apply(lambda x: format_dre(x), axis=1))
+        st.table(df_dre_f.style.format({"Valor": "R$ {:,.2f}"}).apply(style_dre, axis=1))
 
     # --- ABA GESTÃO ---
     with tab_ges:
@@ -154,4 +167,4 @@ if not st.session_state.lancamentos.empty:
                 st.rerun()
             st.divider()
 else:
-    st.info("Insira lançamentos na barra lateral para gerar os relatórios.")
+    st.info("Insira lançamentos para começar.")
