@@ -8,16 +8,21 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 
-# --- CSS PARA ROLAGEM E ESTILO ---
+# --- CSS PARA CORREÇÃO DE ROLAGEM E ESTILO VISUAL ---
 st.markdown("""
     <style>
+    /* GARANTE A ROLAGEM DA PÁGINA */
     html, body, [data-testid="stAppViewContainer"], .main {
         overflow: auto !important;
         height: auto !important;
     }
+    
+    /* Espaço extra no fim da página para evitar cortes */
     .main .block-container {
         padding-bottom: 200px !important;
     }
+
+    /* Estilização dos Cards de Gestão */
     .gestao-card {
         background-color: white;
         padding: 15px;
@@ -34,14 +39,17 @@ st.markdown("""
         font-size: 0.75em;
         font-weight: bold;
     }
+    
+    /* DRE e Cabeçalhos */
     .dre-header { font-size: 16px !important; font-weight: bold !important; color: #1E3A8A; margin: 0; }
     .dre-value { font-size: 24px !important; font-weight: 900 !important; margin-bottom: 15px; }
     .resumo-dre-linha { font-size: 1.1em; font-weight: bold; padding: 12px; border-radius: 8px; margin-bottom: 8px; }
-    .total-box { 
-        text-align: center; padding: 10px; border-radius: 5px; 
-        border: 2px solid #28a745; font-weight: bold; background-color: #ffffff;
+    
+    /* Botões pequenos */
+    .stButton > button {
+        padding: 2px 10px;
+        font-size: 14px;
     }
-    .total-box-error { border-color: #ff4b4b; }
     </style>
     """, unsafe_allow_html=True)
 
@@ -55,7 +63,7 @@ if 'lancamentos' not in st.session_state:
 if 'edit_index' not in st.session_state:
     st.session_state.edit_index = None
 
-# 3. Barra Lateral
+# 3. Barra Lateral (Lógica de Inserção e Edição)
 with st.sidebar:
     lista_nat = ["Ativo", "Passivo", "Patrimônio Líquido", "Receita", "Despesa", "Encargos Financeiros"]
     
@@ -74,7 +82,7 @@ with st.sidebar:
         contas_existentes = sorted(st.session_state.lancamentos['Descrição'].unique().tolist())
         idx_conta = (contas_existentes.index(row_edit['Descrição']) + 1) if (row_edit is not None and row_edit['Descrição'] in contas_existentes) else 0
         escolha_conta = st.selectbox("Conta Existente", ["-- Selecione --"] + contas_existentes, index=idx_conta)
-        nova_conta_input = st.text_input("Nova Conta").upper().strip()
+        nova_conta_input = st.text_input("OU Nova Conta").upper().strip()
         
         idx_nat = lista_nat.index(row_edit['Natureza']) if row_edit is not None else 0
         natureza = st.selectbox("Natureza", lista_nat, index=idx_nat)
@@ -85,7 +93,7 @@ with st.sidebar:
         valor = st.number_input("Valor (R$)", min_value=0.0, value=float(row_edit['Valor']) if row_edit is not None else 0.0, format="%.2f")
         justificativa = st.text_area("Justificativa", value=row_edit['Justificativa'] if row_edit is not None else "")
         
-        if st.form_submit_button("Confirmar", use_container_width=True):
+        if st.form_submit_button("Confirmar Lançamento", use_container_width=True):
             nome_final = nova_conta_input if nova_conta_input else (escolha_conta if escolha_conta != "-- Selecione --" else None)
             if nome_final and valor > 0:
                 if st.session_state.edit_index is not None:
@@ -109,7 +117,7 @@ if not st.session_state.lancamentos.empty:
     lucro_real = ebitda - enc_fin
     def calcular_av(v): return f"{(v/rec_tot*100):.2f}%" if rec_tot > 0 else "0.00%"
 
-    # --- ABA DRE (Restaurada ao Original) ---
+    # --- ABA DRE DETALHADA ---
     with tab_dre:
         c1, c2, c3, c4 = st.columns(4)
         c1.markdown(f'<p class="dre-header">RECEITA TOTAL</p><p class="dre-value" style="color:#1E3A8A">R$ {rec_tot:,.2f}</p>', unsafe_allow_html=True)
@@ -134,28 +142,33 @@ if not st.session_state.lancamentos.empty:
         cor_f = "#c8e6c9" if lucro_real >= 0 else "#ffcdd2"
         st.markdown(f"<div class='resumo-dre-linha' style='background-color:{cor_f}; color:#2e7d32; border-left: 5px solid #2e7d32;'>🏆 (=) {'LUCRO' if lucro_real >= 0 else 'PREJUÍZO'} LÍQUIDO REAL: R$ {lucro_real:,.2f} ({calcular_av(lucro_real)})</div>", unsafe_allow_html=True)
 
-    # --- ABA BALANCETE (Corrigida para mostrar todas as contas) ---
+    # --- ABA BALANCETE INTERATIVO ---
     with tab_bal:
-        st.subheader("⚖️ Balancete de Verificação")
+        st.subheader("⚖️ Balancete de Verificação Interativo")
         resumo_balancete = []
         for conta in sorted(df['Descrição'].unique()):
             d_c = df[df['Descrição'] == conta]
             v_d = d_c[d_c['Tipo'] == 'Débito']['Valor'].sum()
             v_c = d_c[d_c['Tipo'] == 'Crédito']['Valor'].sum()
-            resumo_balancete.append({
-                'Conta': conta, 
-                'Devedor': max(0.0, v_d - v_c), 
-                'Credor': max(0.0, v_c - v_d)
-            })
+            sd, sc = max(0.0, v_d - v_c), max(0.0, v_c - v_d)
+            if sd > 0 or sc > 0:
+                resumo_balancete.append({'Conta': conta, 'Natureza': d_c['Natureza'].iloc[0], 'Devedor': sd, 'Credor': sc})
         
         df_b = pd.DataFrame(resumo_balancete)
-        st.table(df_b.style.format({'Devedor': 'R$ {:,.2f}', 'Credor': 'R$ {:,.2f}'}))
+        c_tab, c_grf = st.columns([1.5, 1])
         
+        with c_tab:
+            st.dataframe(df_b.style.format({'Devedor': 'R$ {:,.2f}', 'Credor': 'R$ {:,.2f}'}), use_container_width=True, hide_index=True)
+        
+        with c_grf:
+            df_chart = df_b.melt(id_vars=['Conta'], value_vars=['Devedor', 'Credor'], var_name='Tipo', value_name='Valor')
+            st.bar_chart(df_chart[df_chart['Valor']>0], x="Conta", y="Valor", color="Tipo", use_container_width=True)
+
         t_d, t_c = df_b['Devedor'].sum(), df_b['Credor'].sum()
         col_dev, col_cred = st.columns(2)
-        c_box = "total-box" if round(t_d, 2) == round(t_c, 2) else "total-box total-box-error"
-        col_dev.markdown(f"<div class='{c_box}'>Total Devedor<br>R$ {t_d:,.2f}</div>", unsafe_allow_html=True)
-        col_cred.markdown(f"<div class='{c_box}'>Total Credor<br>R$ {t_c:,.2f}</div>", unsafe_allow_html=True)
+        status_cor = "#28a745" if round(t_d, 2) == round(t_c, 2) else "#ff4b4b"
+        col_dev.markdown(f"<div style='text-align: center; padding: 15px; border-radius: 10px; border: 2px solid {status_cor}; background: white;'>TOTAL DEVEDOR<br><strong style='font-size: 20px;'>R$ {t_d:,.2f}</strong></div>", unsafe_allow_html=True)
+        col_cred.markdown(f"<div style='text-align: center; padding: 15px; border-radius: 10px; border: 2px solid {status_cor}; background: white;'>TOTAL CREDOR<br><strong style='font-size: 20px;'>R$ {t_c:,.2f}</strong></div>", unsafe_allow_html=True)
 
     # --- ABA RAZONETES ---
     with tab_raz:
@@ -170,7 +183,7 @@ if not st.session_state.lancamentos.empty:
                 for i, r in df_c[df_c['Tipo'] == 'Crédito'].iterrows(): c_c.caption(f"Ref #{i+1}: R$ {r['Valor']:,.2f}")
                 st.write(f"**Saldo: R$ {abs(v_d - v_c):,.2f} ({'Devedor' if v_d >= v_c else 'Credor'})**")
 
-    # --- ABA GESTÃO ---
+    # --- ABA GESTÃO COMPACTA ---
     with tab_ges:
         st.subheader("📋 Gestão de Lançamentos")
         for idx, row in df.iterrows():
