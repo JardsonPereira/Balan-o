@@ -117,6 +117,83 @@ if not st.session_state.lancamentos.empty:
     lucro_real = ebitda - enc_fin
     def calcular_av(v): return f"{(v/rec_tot*100):.2f}%" if rec_tot > 0 else "0.00%"
 
+    # --- ABA BALANCETE ANALÍTICO (MELHORADO) ---
+    with tab_bal:
+        st.subheader("⚖️ Dashboard de Verificação")
+        
+        # Preparação dos dados
+        resumo_balancete = []
+        for conta in sorted(df['Descrição'].unique()):
+            d_c = df[df['Descrição'] == conta]
+            v_d, v_c = d_c[d_c['Tipo'] == 'Débito']['Valor'].sum(), d_c[d_c['Tipo'] == 'Crédito']['Valor'].sum()
+            sd, sc = max(0.0, v_d - v_c), max(0.0, v_c - v_d)
+            if sd > 0 or sc > 0:
+                resumo_balancete.append({
+                    'Conta': conta, 
+                    'Natureza': d_c['Natureza'].iloc[0], 
+                    'Devedor': sd, 
+                    'Credor': sc, 
+                    'Saldo Absoluto': sd if sd > 0 else sc
+                })
+        
+        df_b = pd.DataFrame(resumo_balancete)
+        
+        # 1. Filtro Segmentado por Natureza
+        naturas = ["Todas"] + sorted(df_b['Natureza'].unique().tolist())
+        escolha = st.pills("Visualizar Grupo:", naturas, default="Todas")
+        
+        df_f = df_b if escolha == "Todas" else df_b[df_b['Natureza'] == escolha]
+        total_f = df_f['Saldo Absoluto'].sum()
+
+        # 2. Métricas Dinâmicas
+        m1, m2, m3 = st.columns(3)
+        m1.metric("Contas", len(df_f))
+        m2.metric("Soma do Grupo", f"R$ {total_f:,.2f}")
+        m3.metric("Maior Lançamento", f"R$ {df_f['Saldo Absoluto'].max():,.2f}")
+
+        # 3. Tabela com Gráfico de Representatividade (Progress Column)
+        df_f['Peso %'] = (df_f['Saldo Absoluto'] / total_f) if total_f > 0 else 0
+        
+        st.dataframe(
+            df_f.style.format({
+                'Devedor': 'R$ {:,.2f}', 
+                'Credor': 'R$ {:,.2f}', 
+                'Saldo Absoluto': 'R$ {:,.2f}',
+                'Peso %': '{:.2%}'
+            }),
+            column_config={
+                "Peso %": st.column_config.ProgressColumn(
+                    "Representatividade",
+                    help="Peso desta conta no grupo selecionado",
+                    format="%.2f%%",
+                    min_value=0,
+                    max_value=1,
+                ),
+            },
+            use_container_width=True,
+            hide_index=True
+        )
+
+        # 4. Verificação de Equilíbrio
+        t_d, t_c = df_b['Devedor'].sum(), df_b['Credor'].sum()
+        if round(t_d, 2) == round(t_c, 2):
+            st.success(f"✅ Balancete em Equilíbrio! Débitos = Créditos (R$ {t_d:,.2f})")
+        else:
+            st.error(f"⚠️ Diferença Detectada! Débito: R$ {t_d:,.2f} | Crédito: R$ {t_c:,.2f} (Dif: R$ {abs(t_d-t_c):,.2f})")
+
+    # --- ABA RAZONETES ---
+    with tab_raz:
+        for conta in sorted(df['Descrição'].unique()):
+            with st.expander(f"📖 Razonete: {conta}"):
+                c_d, c_c = st.columns(2)
+                df_c = df[df['Descrição'] == conta]
+                v_d, v_c = df_c[df_c['Tipo'] == 'Débito']['Valor'].sum(), df_c[df_c['Tipo'] == 'Crédito']['Valor'].sum()
+                c_d.write("**DÉBITO**")
+                for i, r in df_c[df_c['Tipo'] == 'Débito'].iterrows(): c_d.caption(f"Ref #{i+1}: R$ {r['Valor']:,.2f}")
+                c_c.write("**CRÉDITO**")
+                for i, r in df_c[df_c['Tipo'] == 'Crédito'].iterrows(): c_c.caption(f"Ref #{i+1}: R$ {r['Valor']:,.2f}")
+                st.write(f"**Saldo: R$ {abs(v_d - v_c):,.2f} ({'Devedor' if v_d >= v_c else 'Credor'})**")
+
     # --- ABA DRE DETALHADA ---
     with tab_dre:
         c1, c2, c3, c4 = st.columns(4)
@@ -141,59 +218,6 @@ if not st.session_state.lancamentos.empty:
         st.markdown(f"<div class='resumo-dre-linha' style='background-color:#e1f5fe; color:#01579b; border-left: 5px solid #01579b;'>➔ (=) EBITDA: R$ {ebitda:,.2f} ({calcular_av(ebitda)})</div>", unsafe_allow_html=True)
         cor_f = "#c8e6c9" if lucro_real >= 0 else "#ffcdd2"
         st.markdown(f"<div class='resumo-dre-linha' style='background-color:{cor_f}; color:#2e7d32; border-left: 5px solid #2e7d32;'>🏆 (=) {'LUCRO' if lucro_real >= 0 else 'PREJUÍZO'} LÍQUIDO REAL: R$ {lucro_real:,.2f} ({calcular_av(lucro_real)})</div>", unsafe_allow_html=True)
-
-    # --- ABA BALANCETE ANALÍTICO ---
-    with tab_bal:
-        st.subheader("⚖️ Balancete Analítico por Natureza")
-        resumo_balancete = []
-        for conta in sorted(df['Descrição'].unique()):
-            d_c = df[df['Descrição'] == conta]
-            v_d, v_c = d_c[d_c['Tipo'] == 'Débito']['Valor'].sum(), d_c[d_c['Tipo'] == 'Crédito']['Valor'].sum()
-            sd, sc = max(0.0, v_d - v_c), max(0.0, v_c - v_d)
-            if sd > 0 or sc > 0:
-                resumo_balancete.append({'Conta': conta, 'Natureza': d_c['Natureza'].iloc[0], 'Devedor': sd, 'Credor': sc, 'Saldo Final': sd if sd > 0 else sc})
-        
-        df_b = pd.DataFrame(resumo_balancete)
-        
-        # Filtro por Natureza
-        lista_naturas = ["Todas"] + sorted(df_b['Natureza'].unique().tolist())
-        filtro_nat = st.pills("Filtrar por Grupo:", lista_naturas, default="Todas")
-        df_filtrado = df_b if filtro_nat == "Todas" else df_b[df_b['Natureza'] == filtro_nat]
-
-        # Métricas
-        m1, m2, m3 = st.columns(3)
-        total_grupo = df_filtrado['Saldo Final'].sum()
-        m1.metric("Contas no Grupo", len(df_filtrado))
-        m2.metric("Volume Financeiro", f"R$ {total_grupo:,.2f}")
-        m3.metric("Maior Saldo", f"R$ {df_filtrado['Saldo Final'].max():,.2f}")
-
-        # Tabela com Barra de Progresso
-        df_display = df_filtrado.copy()
-        df_display['% do Grupo'] = (df_display['Saldo Final'] / total_grupo) if total_grupo > 0 else 0
-        st.dataframe(
-            df_display.style.format({'Devedor': 'R$ {:,.2f}', 'Credor': 'R$ {:,.2f}', 'Saldo Final': 'R$ {:,.2f}', '% do Grupo': '{:.2%}'}),
-            column_config={"% do Grupo": st.column_config.ProgressColumn("Representatividade", format="%.2f%%", min_value=0, max_value=1)},
-            use_container_width=True, hide_index=True
-        )
-
-        t_d, t_c = df_b['Devedor'].sum(), df_b['Credor'].sum()
-        if round(t_d, 2) == round(t_c, 2):
-            st.success(f"⚖️ **Equilíbrio Confirmado:** Débitos e Créditos em R$ {t_d:,.2f}")
-        else:
-            st.error(f"⚠️ **Desequilíbrio:** Diferença de R$ {abs(t_d - t_c):,.2f}")
-
-    # --- ABA RAZONETES ---
-    with tab_raz:
-        for conta in sorted(df['Descrição'].unique()):
-            with st.expander(f"📖 Razonete: {conta}"):
-                c_d, c_c = st.columns(2)
-                df_c = df[df['Descrição'] == conta]
-                v_d, v_c = df_c[df_c['Tipo'] == 'Débito']['Valor'].sum(), df_c[df_c['Tipo'] == 'Crédito']['Valor'].sum()
-                c_d.write("**DÉBITO**")
-                for i, r in df_c[df_c['Tipo'] == 'Débito'].iterrows(): c_d.caption(f"Ref #{i+1}: R$ {r['Valor']:,.2f}")
-                c_c.write("**CRÉDITO**")
-                for i, r in df_c[df_c['Tipo'] == 'Crédito'].iterrows(): c_c.caption(f"Ref #{i+1}: R$ {r['Valor']:,.2f}")
-                st.write(f"**Saldo: R$ {abs(v_d - v_c):,.2f} ({'Devedor' if v_d >= v_c else 'Credor'})**")
 
     # --- ABA GESTÃO COMPACTA ---
     with tab_ges:
