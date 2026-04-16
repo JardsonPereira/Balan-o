@@ -8,10 +8,17 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 
-# Estilização Global e Melhoria Visual dos Cards
+# Estilização Global e CORREÇÃO DE ROLAGEM
 st.markdown("""
     <style>
-    .stApp { overflow-y: auto; }
+    /* GARANTE A ROLAGEM DA PÁGINA */
+    html, body, [data-testid="stAppearanceMirror"] {
+        overflow: visible !important;
+        height: auto !important;
+    }
+    .stApp {
+        overflow-y: auto !important;
+    }
     
     /* Estilização dos Cards de Gestão */
     .gestao-card {
@@ -19,25 +26,22 @@ st.markdown("""
         padding: 15px;
         border-radius: 10px;
         border-left: 5px solid #1E3A8A;
-        box-shadow: 0 2px 4px rgba(0,0,0,0.05);
-        margin-bottom: 10px;
+        box-shadow: 0 2px 8px rgba(0,0,0,0.08);
+        margin-bottom: 5px;
     }
     .badge-natureza {
-        background-color: #E2E8F0;
+        background-color: #f1f5f9;
         color: #475569;
-        padding: 2px 8px;
+        padding: 4px 10px;
         border-radius: 12px;
         font-size: 0.75em;
         font-weight: bold;
-        text-transform: uppercase;
     }
-    .operacao-debito { color: #1E3A8A; font-weight: bold; }
-    .operacao-credito { color: #10B981; font-weight: bold; }
     
-    /* Estilos DRE e Balancete */
+    /* Estilos de Texto e Valores */
     .dre-header { font-size: 16px !important; font-weight: bold !important; color: #1E3A8A; margin-bottom: 0px; }
     .dre-value { font-size: 24px !important; font-weight: 900 !important; margin-bottom: 15px; }
-    .resumo-dre-linha { font-size: 1.1em; font-weight: bold; padding: 10px; border-radius: 5px; margin-bottom: 5px; }
+    .resumo-dre-linha { font-size: 1.1em; font-weight: bold; padding: 12px; border-radius: 8px; margin-bottom: 8px; }
     .total-box { 
         text-align: center; padding: 10px; border-radius: 5px; 
         border: 2px solid #28a745; font-weight: bold; background-color: #ffffff;
@@ -99,7 +103,7 @@ with st.sidebar:
 
 # 4. Interface Principal
 if not st.session_state.lancamentos.empty:
-    tab_raz, tab_bal, tab_dre, tab_ges = st.tabs(["📊 Razonetes", "⚖️ Balancete", "📈 DRE", "⚙️ Gestão de Lançamentos"])
+    tab_raz, tab_bal, tab_dre, tab_ges = st.tabs(["📊 Razonetes", "⚖️ Balancete", "📈 DRE", "⚙️ Gestão"])
     df = st.session_state.lancamentos
 
     # --- Cálculos Reutilizados ---
@@ -110,7 +114,6 @@ if not st.session_state.lancamentos.empty:
     lucro_real = ebitda - enc_fin
     def calcular_av(valor): return f"{(valor / rec_tot * 100):.2f}%" if rec_tot > 0 else "0.00%"
 
-    # --- ABAS (DRE, Razonetes e Balancete mantidos conforme anterior) ---
     with tab_dre:
         c1, c2, c3, c4 = st.columns(4)
         c1.markdown(f'<p class="dre-header">RECEITA TOTAL</p><p class="dre-value" style="color:#1E3A8A">R$ {rec_tot:,.2f}</p>', unsafe_allow_html=True)
@@ -140,42 +143,38 @@ if not st.session_state.lancamentos.empty:
         resumo.append({'Conta': 'RESULTADO DO PERÍODO', 'Devedor': abs(lucro_real) if lucro_real < 0 else 0.0, 'Credor': lucro_real if lucro_real > 0 else 0.0})
         st.table(pd.DataFrame(resumo).style.format({'Devedor': 'R$ {:,.2f}', 'Credor': 'R$ {:,.2f}'}))
 
-    # --- ABA GESTÃO (VISUAL MELHORADO) ---
+    # --- ABA GESTÃO (VISUAL COMPACTO E ELEGANTE) ---
     with tab_ges:
-        st.markdown("### 📋 Histórico de Lançamentos")
-        
+        st.subheader("📋 Histórico Gerencial")
         for idx, row in df.iterrows():
-            # Container estilizado como card
-            cor_linha = "#1E3A8A" if row['Tipo'] == "Débito" else "#10B981"
-            simbolo = "⬇️" if row['Tipo'] == "Débito" else "⬆️"
+            cor_operacao = "#1E3A8A" if row['Tipo'] == "Débito" else "#10B981"
+            simbolo = "▼" if row['Tipo'] == "Débito" else "▲"
             
-            with st.container():
-                st.markdown(f"""
-                <div class="gestao-card" style="border-left-color: {cor_linha}">
-                    <div style="display: flex; justify-content: space-between; align-items: center;">
-                        <span style="font-size: 1.1em; font-weight: bold;">{idx+1}. {row['Descrição']}</span>
-                        <span class="badge-natureza">{row['Natureza']}</span>
-                    </div>
-                    <div style="margin-top: 8px;">
-                        <span class="{'operacao-debito' if row['Tipo'] == 'Débito' else 'operacao-credito'}">
-                            {simbolo} {row['Tipo']}: R$ {row['Valor']:,.2f}
-                        </span>
-                    </div>
-                    <div style="font-size: 0.85em; color: #64748b; margin-top: 5px;">
-                        <strong>Justificativa:</strong> {row['Justificativa'] if row['Justificativa'] else 'Sem histórico.'}
-                    </div>
+            # Card Principal em HTML
+            st.markdown(f"""
+            <div class="gestao-card" style="border-left-color: {cor_operacao}">
+                <div style="display: flex; justify-content: space-between;">
+                    <span style="font-weight: bold; font-size: 1.05em;">{idx+1}. {row['Descrição']}</span>
+                    <span class="badge-natureza">{row['Natureza']}</span>
                 </div>
-                """, unsafe_allow_html=True)
-                
-                # Botões de Ação integrados logo abaixo do card (ou dentro se preferir)
-                b1, b2, _ = st.columns([0.1, 0.1, 0.8])
-                if b1.button("✏️", key=f"edit_{idx}", help="Editar este lançamento"):
-                    st.session_state.edit_index = idx
-                    st.rerun()
-                if b2.button("🗑️", key=f"del_{idx}", help="Excluir este lançamento"):
-                    st.session_state.lancamentos = df.drop(idx).reset_index(drop=True)
-                    st.rerun()
-                st.markdown("<br>", unsafe_allow_html=True)
+                <div style="color: {cor_operacao}; font-weight: 800; margin: 5px 0;">
+                    {simbolo} {row['Tipo']}: R$ {row['Valor']:,.2f}
+                </div>
+                <div style="font-size: 0.85em; color: #64748b;">
+                    <i>{row['Justificativa'] if row['Justificativa'] else 'Sem histórico registrado.'}</i>
+                </div>
+            </div>
+            """, unsafe_allow_html=True)
+            
+            # Botões de Ação
+            col_b1, col_b2, _ = st.columns([0.05, 0.05, 0.9])
+            if col_b1.button("✏️", key=f"ed_{idx}"):
+                st.session_state.edit_index = idx
+                st.rerun()
+            if col_b2.button("🗑️", key=f"de_{idx}"):
+                st.session_state.lancamentos = df.drop(idx).reset_index(drop=True)
+                st.rerun()
+            st.write("") # Espaçador
 
 else:
-    st.info("👋 Bem-vindo! Comece inserindo um lançamento na barra lateral.")
+    st.info("👋 Use a barra lateral para inserir seus primeiros lançamentos contábeis!")
