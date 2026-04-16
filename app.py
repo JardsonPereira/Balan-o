@@ -8,18 +8,23 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 
-# Estilização Global e CORREÇÃO DE ROLAGEM
+# --- SOLUÇÃO DEFINITIVA PARA ROLAGEM ---
 st.markdown("""
     <style>
-    /* GARANTE A ROLAGEM DA PÁGINA */
-    html, body, [data-testid="stAppearanceMirror"] {
+    /* 1. Força o scroll em todos os níveis possíveis */
+    html, body, [data-testid="stAppViewContainer"], .main, .stApp {
         overflow: visible !important;
         height: auto !important;
     }
-    .stApp {
-        overflow-y: auto !important;
+
+    /* 2. Remove a limitação de altura do bloco de conteúdo principal */
+    .main .block-container {
+        max-width: 95rem;
+        padding-top: 2rem;
+        padding-bottom: 10rem; /* Espaço extra no final para não "colar" no rodapé */
+        overflow: visible !important;
     }
-    
+
     /* Estilização dos Cards de Gestão */
     .gestao-card {
         background-color: white;
@@ -37,8 +42,6 @@ st.markdown("""
         font-size: 0.75em;
         font-weight: bold;
     }
-    
-    /* Estilos de Texto e Valores */
     .dre-header { font-size: 16px !important; font-weight: bold !important; color: #1E3A8A; margin-bottom: 0px; }
     .dre-value { font-size: 24px !important; font-weight: 900 !important; margin-bottom: 15px; }
     .resumo-dre-linha { font-size: 1.1em; font-weight: bold; padding: 12px; border-radius: 8px; margin-bottom: 8px; }
@@ -106,7 +109,7 @@ if not st.session_state.lancamentos.empty:
     tab_raz, tab_bal, tab_dre, tab_ges = st.tabs(["📊 Razonetes", "⚖️ Balancete", "📈 DRE", "⚙️ Gestão"])
     df = st.session_state.lancamentos
 
-    # --- Cálculos Reutilizados ---
+    # Cálculos Reutilizados
     rec_tot = df[df['Natureza'] == 'Receita']['Valor'].sum()
     desp_op = df[df['Natureza'] == 'Despesa']['Valor'].sum()
     enc_fin = df[df['Natureza'] == 'Encargos Financeiros']['Valor'].sum()
@@ -143,38 +146,39 @@ if not st.session_state.lancamentos.empty:
         resumo.append({'Conta': 'RESULTADO DO PERÍODO', 'Devedor': abs(lucro_real) if lucro_real < 0 else 0.0, 'Credor': lucro_real if lucro_real > 0 else 0.0})
         st.table(pd.DataFrame(resumo).style.format({'Devedor': 'R$ {:,.2f}', 'Credor': 'R$ {:,.2f}'}))
 
-    # --- ABA GESTÃO (VISUAL COMPACTO E ELEGANTE) ---
     with tab_ges:
         st.subheader("📋 Histórico Gerencial")
-        for idx, row in df.iterrows():
-            cor_operacao = "#1E3A8A" if row['Tipo'] == "Débito" else "#10B981"
-            simbolo = "▼" if row['Tipo'] == "Débito" else "▲"
-            
-            # Card Principal em HTML
-            st.markdown(f"""
-            <div class="gestao-card" style="border-left-color: {cor_operacao}">
-                <div style="display: flex; justify-content: space-between;">
-                    <span style="font-weight: bold; font-size: 1.05em;">{idx+1}. {row['Descrição']}</span>
-                    <span class="badge-natureza">{row['Natureza']}</span>
+        # Container extra para garantir que a gestão não corte
+        with st.container():
+            for idx, row in df.iterrows():
+                cor_operacao = "#1E3A8A" if row['Tipo'] == "Débito" else "#10B981"
+                simbolo = "▼" if row['Tipo'] == "Débito" else "▲"
+                
+                st.markdown(f"""
+                <div class="gestao-card" style="border-left-color: {cor_operacao}">
+                    <div style="display: flex; justify-content: space-between;">
+                        <span style="font-weight: bold; font-size: 1.05em;">{idx+1}. {row['Descrição']}</span>
+                        <span class="badge-natureza">{row['Natureza']}</span>
+                    </div>
+                    <div style="color: {cor_operacao}; font-weight: 800; margin: 5px 0;">
+                        {simbolo} {row['Tipo']}: R$ {row['Valor']:,.2f}
+                    </div>
+                    <div style="font-size: 0.85em; color: #64748b;">
+                        <i>{row['Justificativa'] if row['Justificativa'] else 'Sem histórico registrado.'}</i>
+                    </div>
                 </div>
-                <div style="color: {cor_operacao}; font-weight: 800; margin: 5px 0;">
-                    {simbolo} {row['Tipo']}: R$ {row['Valor']:,.2f}
-                </div>
-                <div style="font-size: 0.85em; color: #64748b;">
-                    <i>{row['Justificativa'] if row['Justificativa'] else 'Sem histórico registrado.'}</i>
-                </div>
-            </div>
-            """, unsafe_allow_html=True)
-            
-            # Botões de Ação
-            col_b1, col_b2, _ = st.columns([0.05, 0.05, 0.9])
-            if col_b1.button("✏️", key=f"ed_{idx}"):
-                st.session_state.edit_index = idx
-                st.rerun()
-            if col_b2.button("🗑️", key=f"de_{idx}"):
-                st.session_state.lancamentos = df.drop(idx).reset_index(drop=True)
-                st.rerun()
-            st.write("") # Espaçador
+                """, unsafe_allow_html=True)
+                
+                col_b1, col_b2, _ = st.columns([0.05, 0.05, 0.9])
+                if col_b1.button("✏️", key=f"ed_{idx}"):
+                    st.session_state.edit_index = idx
+                    st.rerun()
+                if col_b2.button("🗑️", key=f"de_{idx}"):
+                    st.session_state.lancamentos = df.drop(idx).reset_index(drop=True)
+                    st.rerun()
+                st.write("") 
+            # Espaço extra no fim da aba
+            st.markdown("<br><br><br>", unsafe_allow_html=True)
 
 else:
-    st.info("👋 Use a barra lateral para inserir seus primeiros lançamentos contábeis!")
+    st.info("👋
