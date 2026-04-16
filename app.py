@@ -63,7 +63,7 @@ if 'lancamentos' not in st.session_state:
 if 'edit_index' not in st.session_state:
     st.session_state.edit_index = None
 
-# 3. Barra Lateral (Lógica de Inserção e Edição)
+# 3. Barra Lateral
 with st.sidebar:
     lista_nat = ["Ativo", "Passivo", "Patrimônio Líquido", "Receita", "Despesa", "Encargos Financeiros"]
     
@@ -106,7 +106,7 @@ with st.sidebar:
 
 # 4. Interface Principal
 if not st.session_state.lancamentos.empty:
-    tab_raz, tab_bal, tab_dre, tab_ges = st.tabs(["📊 Razonetes", "⚖️ Balancete", "📈 DRE Detalhada", "⚙️ Gestão"])
+    tab_raz, tab_bal, tab_dre, tab_ges = st.tabs(["📊 Razonetes", "⚖️ Balancete Analítico", "📈 DRE Detalhada", "⚙️ Gestão"])
     df = st.session_state.lancamentos
 
     # --- Cálculos Base ---
@@ -142,33 +142,45 @@ if not st.session_state.lancamentos.empty:
         cor_f = "#c8e6c9" if lucro_real >= 0 else "#ffcdd2"
         st.markdown(f"<div class='resumo-dre-linha' style='background-color:{cor_f}; color:#2e7d32; border-left: 5px solid #2e7d32;'>🏆 (=) {'LUCRO' if lucro_real >= 0 else 'PREJUÍZO'} LÍQUIDO REAL: R$ {lucro_real:,.2f} ({calcular_av(lucro_real)})</div>", unsafe_allow_html=True)
 
-    # --- ABA BALANCETE INTERATIVO ---
+    # --- ABA BALANCETE ANALÍTICO ---
     with tab_bal:
-        st.subheader("⚖️ Balancete de Verificação Interativo")
+        st.subheader("⚖️ Balancete Analítico por Natureza")
         resumo_balancete = []
         for conta in sorted(df['Descrição'].unique()):
             d_c = df[df['Descrição'] == conta]
-            v_d = d_c[d_c['Tipo'] == 'Débito']['Valor'].sum()
-            v_c = d_c[d_c['Tipo'] == 'Crédito']['Valor'].sum()
+            v_d, v_c = d_c[d_c['Tipo'] == 'Débito']['Valor'].sum(), d_c[d_c['Tipo'] == 'Crédito']['Valor'].sum()
             sd, sc = max(0.0, v_d - v_c), max(0.0, v_c - v_d)
             if sd > 0 or sc > 0:
-                resumo_balancete.append({'Conta': conta, 'Natureza': d_c['Natureza'].iloc[0], 'Devedor': sd, 'Credor': sc})
+                resumo_balancete.append({'Conta': conta, 'Natureza': d_c['Natureza'].iloc[0], 'Devedor': sd, 'Credor': sc, 'Saldo Final': sd if sd > 0 else sc})
         
         df_b = pd.DataFrame(resumo_balancete)
-        c_tab, c_grf = st.columns([1.5, 1])
         
-        with c_tab:
-            st.dataframe(df_b.style.format({'Devedor': 'R$ {:,.2f}', 'Credor': 'R$ {:,.2f}'}), use_container_width=True, hide_index=True)
-        
-        with c_grf:
-            df_chart = df_b.melt(id_vars=['Conta'], value_vars=['Devedor', 'Credor'], var_name='Tipo', value_name='Valor')
-            st.bar_chart(df_chart[df_chart['Valor']>0], x="Conta", y="Valor", color="Tipo", use_container_width=True)
+        # Filtro por Natureza
+        lista_naturas = ["Todas"] + sorted(df_b['Natureza'].unique().tolist())
+        filtro_nat = st.pills("Filtrar por Grupo:", lista_naturas, default="Todas")
+        df_filtrado = df_b if filtro_nat == "Todas" else df_b[df_b['Natureza'] == filtro_nat]
+
+        # Métricas
+        m1, m2, m3 = st.columns(3)
+        total_grupo = df_filtrado['Saldo Final'].sum()
+        m1.metric("Contas no Grupo", len(df_filtrado))
+        m2.metric("Volume Financeiro", f"R$ {total_grupo:,.2f}")
+        m3.metric("Maior Saldo", f"R$ {df_filtrado['Saldo Final'].max():,.2f}")
+
+        # Tabela com Barra de Progresso
+        df_display = df_filtrado.copy()
+        df_display['% do Grupo'] = (df_display['Saldo Final'] / total_grupo) if total_grupo > 0 else 0
+        st.dataframe(
+            df_display.style.format({'Devedor': 'R$ {:,.2f}', 'Credor': 'R$ {:,.2f}', 'Saldo Final': 'R$ {:,.2f}', '% do Grupo': '{:.2%}'}),
+            column_config={"% do Grupo": st.column_config.ProgressColumn("Representatividade", format="%.2f%%", min_value=0, max_value=1)},
+            use_container_width=True, hide_index=True
+        )
 
         t_d, t_c = df_b['Devedor'].sum(), df_b['Credor'].sum()
-        col_dev, col_cred = st.columns(2)
-        status_cor = "#28a745" if round(t_d, 2) == round(t_c, 2) else "#ff4b4b"
-        col_dev.markdown(f"<div style='text-align: center; padding: 15px; border-radius: 10px; border: 2px solid {status_cor}; background: white;'>TOTAL DEVEDOR<br><strong style='font-size: 20px;'>R$ {t_d:,.2f}</strong></div>", unsafe_allow_html=True)
-        col_cred.markdown(f"<div style='text-align: center; padding: 15px; border-radius: 10px; border: 2px solid {status_cor}; background: white;'>TOTAL CREDOR<br><strong style='font-size: 20px;'>R$ {t_c:,.2f}</strong></div>", unsafe_allow_html=True)
+        if round(t_d, 2) == round(t_c, 2):
+            st.success(f"⚖️ **Equilíbrio Confirmado:** Débitos e Créditos em R$ {t_d:,.2f}")
+        else:
+            st.error(f"⚠️ **Desequilíbrio:** Diferença de R$ {abs(t_d - t_c):,.2f}")
 
     # --- ABA RAZONETES ---
     with tab_raz:
