@@ -140,11 +140,6 @@ if not st.session_state.lancamentos.empty:
         
         df_b = pd.DataFrame(resumo_balancete)
 
-        # Gráfico de Composição
-        st.write("**Composição por Natureza das Contas**")
-        df_comp = df_b.groupby('Natureza')['Saldo Final'].sum().reset_index()
-        st.bar_chart(df_comp, x="Natureza", y="Saldo Final", color="Natureza", use_container_width=True)
-
         col_auditoria, col_dados = st.columns([1, 2])
 
         with col_auditoria:
@@ -170,7 +165,7 @@ if not st.session_state.lancamentos.empty:
                 use_container_width=True, hide_index=True
             )
             
-            # --- ADIÇÃO DOS TOTAIS ---
+            # --- RESULTADO DE SALDOS TOTAIS ---
             st.markdown("---")
             c_res1, c_res2 = st.columns(2)
             t_d, t_c = df_b['Devedor'].sum(), df_b['Credor'].sum()
