@@ -117,9 +117,9 @@ if not st.session_state.lancamentos.empty:
     lucro_real = ebitda - enc_fin
     def calcular_av(v): return f"{(v/rec_tot*100):.2f}%" if rec_tot > 0 else "0.00%"
 
-    # --- ABA BALANCETE (TODAS AS CONTAS INCLUÍDAS) ---
+    # --- ABA BALANCETE (SEM SALDO FINAL) ---
     with tab_bal:
-        st.subheader("⚖️ Central de Auditoria e Balancete (Completo)")
+        st.subheader("⚖️ Central de Auditoria e Balancete")
 
         resumo_balancete = []
         for conta in sorted(df['Descrição'].unique()):
@@ -132,7 +132,6 @@ if not st.session_state.lancamentos.empty:
                     'Natureza': d_c['Natureza'].iloc[0], 
                     'Devedor': sd, 
                     'Credor': sc,
-                    'Saldo Final': sd if sd > 0 else sc,
                     'Alerta': (sd > 0 and d_c['Natureza'].iloc[0] in ['Passivo', 'Receita', 'Patrimônio Líquido']) or 
                               (sc > 0 and d_c['Natureza'].iloc[0] in ['Ativo', 'Despesa', 'Encargos Financeiros'])
                 })
@@ -158,8 +157,9 @@ if not st.session_state.lancamentos.empty:
 
         with col_dados:
             st.markdown("**Saldos de Verificação**")
+            # Exibição sem a coluna Saldo Final e sem a coluna Alerta
             st.dataframe(
-                df_b.drop(columns=['Alerta']).style.format({'Devedor': 'R$ {:,.2f}', 'Credor': 'R$ {:,.2f}', 'Saldo Final': 'R$ {:,.2f}'}),
+                df_b.drop(columns=['Alerta']).style.format({'Devedor': 'R$ {:,.2f}', 'Credor': 'R$ {:,.2f}'}),
                 use_container_width=True, hide_index=True
             )
             
@@ -172,7 +172,7 @@ if not st.session_state.lancamentos.empty:
         busca = st.text_input("🔍 Localizar conta no balancete:").upper()
         if busca:
             res_busca = df_b[df_b['Conta'].str.contains(busca)]
-            if not res_busca.empty: st.table(res_busca[['Conta', 'Natureza', 'Saldo Final']])
+            if not res_busca.empty: st.table(res_busca[['Conta', 'Natureza', 'Devedor', 'Credor']])
 
     # --- ABA DRE DETALHADA ---
     with tab_dre:
@@ -205,7 +205,7 @@ if not st.session_state.lancamentos.empty:
         cor_f = "#c8e6c9" if lucro_real >= 0 else "#ffcdd2"
         st.markdown(f"<div class='resumo-dre-linha' style='background-color:{cor_f}; color:#2e7d32; border-left: 5px solid #2e7d32;'>🏆 (=) {'LUCRO' if lucro_real >= 0 else 'PREJUÍZO'} LÍQUIDO REAL: R$ {lucro_real:,.2f} ({calcular_av(lucro_real)})</div>", unsafe_allow_html=True)
 
-    # --- ABA RAZONETES (TODAS AS CONTAS) ---
+    # --- ABA RAZONETES ---
     with tab_raz:
         for conta in sorted(df['Descrição'].unique()):
             df_c = df[df['Descrição'] == conta]
