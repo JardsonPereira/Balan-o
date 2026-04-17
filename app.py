@@ -200,12 +200,14 @@ if not st.session_state.lancamentos.empty:
         cor_f = "#c8e6c9" if lucro_real >= 0 else "#ffcdd2"
         st.markdown(f"<div class='resumo-dre-linha' style='background-color:{cor_f}; color:#2e7d32; border-left: 5px solid #2e7d32;'>🏆 (=) {'LUCRO' if lucro_real >= 0 else 'PREJUÍZO'} LÍQUIDO REAL: R$ {lucro_real:,.2f} ({calcular_av(lucro_real)})</div>", unsafe_allow_html=True)
 
-    # --- ABA RAZONETES (JUSTIFICATIVA ADICIONADA) ---
+    # --- ABA RAZONETES (NATUREZA ADICIONADA AO TÍTULO) ---
     with tab_raz:
         for conta in sorted(df['Descrição'].unique()):
-            with st.expander(f"📖 Razonete: {conta}"):
+            df_c = df[df['Descrição'] == conta]
+            natureza_conta = df_c['Natureza'].iloc[0] # Captura a natureza da conta
+            
+            with st.expander(f"📖 Razonete: {conta} | 🏷️ Natureza: {natureza_conta}"):
                 c_d, c_c = st.columns(2)
-                df_c = df[df['Descrição'] == conta]
                 v_d, v_c = df_c[df_c['Tipo'] == 'Débito']['Valor'].sum(), df_c[df_c['Tipo'] == 'Crédito']['Valor'].sum()
                 
                 c_d.markdown("#### **DÉBITO**")
