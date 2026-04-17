@@ -109,7 +109,11 @@ if not st.session_state.lancamentos.empty:
     tab_raz, tab_bal, tab_dre, tab_ges = st.tabs(["📊 Razonetes", "⚖️ Auditoria & Balancete", "📈 DRE Detalhada", "⚙️ Gestão"])
     df = st.session_state.lancamentos
 
-    # --- Cálculos Base ---
+    # --- Filtro para separar Contas Patrimoniais de Resultado (Despesas) ---
+    naturezas_excluidas = ["Despesa", "Encargos Financeiros"]
+    df_patrimonial = df[~df['Natureza'].isin(naturezas_excluidas)]
+
+    # --- Cálculos Base para DRE (Usa o DF Original) ---
     rec_tot = df[df['Natureza'] == 'Receita']['Valor'].sum()
     desp_op = df[df['Natureza'] == 'Despesa']['Valor'].sum()
     enc_fin = df[df['Natureza'] == 'Encargos Financeiros']['Valor'].sum()
@@ -117,13 +121,13 @@ if not st.session_state.lancamentos.empty:
     lucro_real = ebitda - enc_fin
     def calcular_av(v): return f"{(v/rec_tot*100):.2f}%" if rec_tot > 0 else "0.00%"
 
-    # --- ABA BALANCETE ---
+    # --- ABA BALANCETE (Apenas Ativo, Passivo, PL e Receita) ---
     with tab_bal:
-        st.subheader("⚖️ Central de Auditoria e Balancete")
+        st.subheader("⚖️ Central de Auditoria e Balancete (Contas Patrimoniais e Receitas)")
 
         resumo_balancete = []
-        for conta in sorted(df['Descrição'].unique()):
-            d_c = df[df['Descrição'] == conta]
+        for conta in sorted(df_patrimonial['Descrição'].unique()):
+            d_c = df_patrimonial[df_patrimonial['Descrição'] == conta]
             v_d, v_c = d_c[d_c['Tipo'] == 'Débito']['Valor'].sum(), d_c[d_c['Tipo'] == 'Crédito']['Valor'].sum()
             sd, sc = max(0.0, v_d - v_c), max(0.0, v_c - v_d)
             if sd > 0 or sc > 0:
@@ -134,46 +138,39 @@ if not st.session_state.lancamentos.empty:
                     'Credor': sc,
                     'Saldo Final': sd if sd > 0 else sc,
                     'Alerta': (sd > 0 and d_c['Natureza'].iloc[0] in ['Passivo', 'Receita', 'Patrimônio Líquido']) or 
-                              (sc > 0 and d_c['Natureza'].iloc[0] in ['Ativo', 'Despesa', 'Encargos Financeiros'])
+                              (sc > 0 and d_c['Natureza'].iloc[0] in ['Ativo'])
                 })
         
-        df_b = pd.DataFrame(resumo_balancete)
-        col_auditoria, col_dados = st.columns([1, 2])
+        if resumo_balancete:
+            df_b = pd.DataFrame(resumo_balancete)
+            col_auditoria, col_dados = st.columns([1, 2])
 
-        with col_auditoria:
-            st.markdown("🔍 **Auditoria Automática**")
-            alertas = df_b[df_b['Alerta'] == True]
-            if not alertas.empty:
-                for _, alt in alertas.iterrows():
-                    st.warning(f"**{alt['Conta']}**: Saldo invertido ({alt['Natureza']})")
-            else:
-                st.success("Saldos coerentes com a natureza.")
-            
-            t_d, t_c = df_b['Devedor'].sum(), df_b['Credor'].sum()
-            dif = round(abs(t_d - t_c), 2)
-            if dif == 0:
-                st.info(f"✅ Partidas Dobradas OK (R$ {t_d:,.2f})")
-            else:
-                st.error(f"❌ Erro de Fechamento: R$ {dif:,.2f}")
+            with col_auditoria:
+                st.markdown("🔍 **Auditoria Automática**")
+                alertas = df_b[df_b['Alerta'] == True]
+                if not alertas.empty:
+                    for _, alt in alertas.iterrows():
+                        st.warning(f"**{alt['Conta']}**: Saldo invertido ({alt['Natureza']})")
+                else:
+                    st.success("Saldos coerentes.")
+                
+                t_d, t_c = df_b['Devedor'].sum(), df_b['Credor'].sum()
+                dif = round(abs(t_d - t_c), 2)
+                st.info(f"Soma Devedor: R$ {t_d:,.2f} | Soma Credor: R$ {t_c:,.2f}")
 
-        with col_dados:
-            st.markdown("**Saldos de Verificação**")
-            st.dataframe(
-                df_b.drop(columns=['Alerta']).style.format({'Devedor': 'R$ {:,.2f}', 'Credor': 'R$ {:,.2f}', 'Saldo Final': 'R$ {:,.2f}'}),
-                use_container_width=True, hide_index=True
-            )
-            
-            st.markdown("---")
-            c_res1, c_res2 = st.columns(2)
-            t_d, t_c = df_b['Devedor'].sum(), df_b['Credor'].sum()
-            c_res1.metric("Total Devedor", f"R$ {t_d:,.2f}")
-            c_res2.metric("Total Credor", f"R$ {t_c:,.2f}")
-
-        st.write("---")
-        busca = st.text_input("🔍 Localizar conta no balancete:").upper()
-        if busca:
-            res_busca = df_b[df_b['Conta'].str.contains(busca)]
-            if not res_busca.empty: st.table(res_busca[['Conta', 'Natureza', 'Saldo Final']])
+            with col_dados:
+                st.markdown("**Saldos de Verificação**")
+                st.dataframe(
+                    df_b.drop(columns=['Alerta']).style.format({'Devedor': 'R$ {:,.2f}', 'Credor': 'R$ {:,.2f}', 'Saldo Final': 'R$ {:,.2f}'}),
+                    use_container_width=True, hide_index=True
+                )
+                
+                st.markdown("---")
+                c_res1, c_res2 = st.columns(2)
+                c_res1.metric("Total Devedor", f"R$ {t_d:,.2f}")
+                c_res2.metric("Total Credor", f"R$ {t_c:,.2f}")
+        else:
+            st.warning("Nenhuma conta patrimonial lançada.")
 
     # --- ABA DRE DETALHADA ---
     with tab_dre:
@@ -196,15 +193,21 @@ if not st.session_state.lancamentos.empty:
                 df_desp['AV %'] = df_desp['Valor'].apply(calcular_av)
                 st.table(df_desp[['Descrição', 'Valor', 'AV %']])
 
+        with st.expander(f"🔴 (-) ENCARGOS FINANCEIROS: R$ {enc_fin:,.2f} ({calcular_av(enc_fin)})", expanded=True):
+            df_enc = df[df['Natureza'] == 'Encargos Financeiros'].copy()
+            if not df_enc.empty:
+                df_enc['AV %'] = df_enc['Valor'].apply(calcular_av)
+                st.table(df_enc[['Descrição', 'Valor', 'AV %']])
+
         st.markdown(f"<div class='resumo-dre-linha' style='background-color:#e1f5fe; color:#01579b; border-left: 5px solid #01579b;'>➔ (=) EBITDA: R$ {ebitda:,.2f} ({calcular_av(ebitda)})</div>", unsafe_allow_html=True)
         cor_f = "#c8e6c9" if lucro_real >= 0 else "#ffcdd2"
         st.markdown(f"<div class='resumo-dre-linha' style='background-color:{cor_f}; color:#2e7d32; border-left: 5px solid #2e7d32;'>🏆 (=) {'LUCRO' if lucro_real >= 0 else 'PREJUÍZO'} LÍQUIDO REAL: R$ {lucro_real:,.2f} ({calcular_av(lucro_real)})</div>", unsafe_allow_html=True)
 
-    # --- ABA RAZONETES (NATUREZA ADICIONADA AO TÍTULO) ---
+    # --- ABA RAZONETES (Exclui Despesas e Encargos) ---
     with tab_raz:
-        for conta in sorted(df['Descrição'].unique()):
-            df_c = df[df['Descrição'] == conta]
-            natureza_conta = df_c['Natureza'].iloc[0] # Captura a natureza da conta
+        for conta in sorted(df_patrimonial['Descrição'].unique()):
+            df_c = df_patrimonial[df_patrimonial['Descrição'] == conta]
+            natureza_conta = df_c['Natureza'].iloc[0]
             
             with st.expander(f"📖 Razonete: {conta} | 🏷️ Natureza: {natureza_conta}"):
                 c_d, c_c = st.columns(2)
@@ -225,9 +228,9 @@ if not st.session_state.lancamentos.empty:
                 st.divider()
                 st.write(f"**Saldo Final: R$ {abs(v_d - v_c):,.2f} ({'Devedor' if v_d >= v_c else 'Credor'})**")
 
-    # --- ABA GESTÃO COMPACTA ---
+    # --- ABA GESTÃO COMPACTA (Mantém todos para edição) ---
     with tab_ges:
-        st.subheader("📋 Gestão de Lançamentos")
+        st.subheader("📋 Gestão de Lançamentos (Completo)")
         for idx, row in df.iterrows():
             cor_op = "#1E3A8A" if row['Tipo'] == "Débito" else "#10B981"
             st.markdown(f"""
