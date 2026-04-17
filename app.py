@@ -117,7 +117,7 @@ if not st.session_state.lancamentos.empty:
     lucro_real = ebitda - enc_fin
     def calcular_av(v): return f"{(v/rec_tot*100):.2f}%" if rec_tot > 0 else "0.00%"
 
-    # --- ABA BALANCETE (MODELO DASHBOARD E AUDITORIA) ---
+    # --- ABA BALANCETE ---
     with tab_bal:
         st.subheader("⚖️ Central de Auditoria e Balancete")
 
@@ -134,8 +134,8 @@ if not st.session_state.lancamentos.empty:
                     'Devedor': sd, 
                     'Credor': sc,
                     'Saldo Final': sd if sd > 0 else sc,
-                    'Alerta': (sd > 0 and d_c['Natureza'].iloc[0] in ['Passivo', 'Receita']) or 
-                              (sc > 0 and d_c['Natureza'].iloc[0] in ['Ativo', 'Despesa'])
+                    'Alerta': (sd > 0 and d_c['Natureza'].iloc[0] in ['Passivo', 'Receita', 'Patrimônio Líquido']) or 
+                              (sc > 0 and d_c['Natureza'].iloc[0] in ['Ativo', 'Despesa', 'Encargos Financeiros'])
                 })
         
         df_b = pd.DataFrame(resumo_balancete)
@@ -169,6 +169,13 @@ if not st.session_state.lancamentos.empty:
                 df_b.drop(columns=['Alerta']).style.format({'Devedor': 'R$ {:,.2f}', 'Credor': 'R$ {:,.2f}', 'Saldo Final': 'R$ {:,.2f}'}),
                 use_container_width=True, hide_index=True
             )
+            
+            # --- ADIÇÃO DOS TOTAIS ---
+            st.markdown("---")
+            c_res1, c_res2 = st.columns(2)
+            t_d, t_c = df_b['Devedor'].sum(), df_b['Credor'].sum()
+            c_res1.metric("Total Devedor", f"R$ {t_d:,.2f}")
+            c_res2.metric("Total Credor", f"R$ {t_c:,.2f}")
 
         st.write("---")
         busca = st.text_input("🔍 Localizar conta no balancete:").upper()
