@@ -121,7 +121,6 @@ if not st.session_state.lancamentos.empty:
     with tab_bal:
         st.subheader("⚖️ Central de Auditoria e Balancete")
 
-        # Processamento de Saldos
         resumo_balancete = []
         for conta in sorted(df['Descrição'].unique()):
             d_c = df[df['Descrição'] == conta]
@@ -139,7 +138,6 @@ if not st.session_state.lancamentos.empty:
                 })
         
         df_b = pd.DataFrame(resumo_balancete)
-
         col_auditoria, col_dados = st.columns([1, 2])
 
         with col_auditoria:
@@ -165,7 +163,6 @@ if not st.session_state.lancamentos.empty:
                 use_container_width=True, hide_index=True
             )
             
-            # --- RESULTADO DE SALDOS TOTAIS ---
             st.markdown("---")
             c_res1, c_res2 = st.columns(2)
             t_d, t_c = df_b['Devedor'].sum(), df_b['Credor'].sum()
@@ -203,18 +200,28 @@ if not st.session_state.lancamentos.empty:
         cor_f = "#c8e6c9" if lucro_real >= 0 else "#ffcdd2"
         st.markdown(f"<div class='resumo-dre-linha' style='background-color:{cor_f}; color:#2e7d32; border-left: 5px solid #2e7d32;'>🏆 (=) {'LUCRO' if lucro_real >= 0 else 'PREJUÍZO'} LÍQUIDO REAL: R$ {lucro_real:,.2f} ({calcular_av(lucro_real)})</div>", unsafe_allow_html=True)
 
-    # --- ABA RAZONETES ---
+    # --- ABA RAZONETES (JUSTIFICATIVA ADICIONADA) ---
     with tab_raz:
         for conta in sorted(df['Descrição'].unique()):
             with st.expander(f"📖 Razonete: {conta}"):
                 c_d, c_c = st.columns(2)
                 df_c = df[df['Descrição'] == conta]
                 v_d, v_c = df_c[df_c['Tipo'] == 'Débito']['Valor'].sum(), df_c[df_c['Tipo'] == 'Crédito']['Valor'].sum()
-                c_d.write("**DÉBITO**")
-                for i, r in df_c[df_c['Tipo'] == 'Débito'].iterrows(): c_d.caption(f"Ref #{i+1}: R$ {r['Valor']:,.2f}")
-                c_c.write("**CRÉDITO**")
-                for i, r in df_c[df_c['Tipo'] == 'Crédito'].iterrows(): c_c.caption(f"Ref #{i+1}: R$ {r['Valor']:,.2f}")
-                st.write(f"**Saldo: R$ {abs(v_d - v_c):,.2f} ({'Devedor' if v_d >= v_c else 'Credor'})**")
+                
+                c_d.markdown("#### **DÉBITO**")
+                for i, r in df_c[df_c['Tipo'] == 'Débito'].iterrows(): 
+                    c_d.caption(f"Ref #{i+1}: R$ {r['Valor']:,.2f}")
+                    if r['Justificativa']:
+                        c_d.markdown(f"<div style='font-size: 0.8em; color: #64748b; margin-bottom: 10px; padding-left: 10px; border-left: 2px solid #ddd;'>{r['Justificativa']}</div>", unsafe_allow_html=True)
+                
+                c_c.markdown("#### **CRÉDITO**")
+                for i, r in df_c[df_c['Tipo'] == 'Crédito'].iterrows(): 
+                    c_c.caption(f"Ref #{i+1}: R$ {r['Valor']:,.2f}")
+                    if r['Justificativa']:
+                        c_c.markdown(f"<div style='font-size: 0.8em; color: #64748b; margin-bottom: 10px; padding-left: 10px; border-left: 2px solid #ddd;'>{r['Justificativa']}</div>", unsafe_allow_html=True)
+                
+                st.divider()
+                st.write(f"**Saldo Final: R$ {abs(v_d - v_c):,.2f} ({'Devedor' if v_d >= v_c else 'Credor'})**")
 
     # --- ABA GESTÃO COMPACTA ---
     with tab_ges:
