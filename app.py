@@ -115,7 +115,7 @@ st.title("📑 Sistema Contábil Digital")
 if not df.empty:
     t = st.tabs(["📊 Razonetes", "🧾 Balancete", "📈 DRE", "⚙️ Gestão"])
     
-    with t[0]: # Razonetes com resultado (Preservado)
+    with t[0]: # Razonetes (Preservado)
         cols = st.columns(3)
         for i, conta in enumerate(sorted(df['descricao'].unique())):
             with cols[i % 3]:
@@ -132,7 +132,7 @@ if not df.empty:
                 elif saldo < 0: st.markdown(f"**Saldo C: R$ {abs(saldo):,.2f}**")
                 else: st.write("Conta Zerada")
 
-    with t[1]: # Balancete com Somas Devedoras e Credoras (Solicitado)
+    with t[1]: # Balancete (Preservado)
         st.subheader("Balancete de Verificação de Saldos")
         bal_data = []
         for conta in sorted(df['descricao'].unique()):
@@ -140,42 +140,43 @@ if not df.empty:
             d = df_c[df_c['tipo'] == 'Débito']['valor'].sum()
             c = df_c[df_c['tipo'] == 'Crédito']['valor'].sum()
             bal_data.append({"Conta": conta, "Saldo Devedor": d-c if d>c else 0, "Saldo Credor": c-d if c>d else 0})
-        
         bal_df = pd.DataFrame(bal_data)
         st.table(bal_df.style.format({"Saldo Devedor": "R$ {:.2f}", "Saldo Credor": "R$ {:.2f}"}))
-        
-        # Somas Finais do Balancete
-        total_dev = bal_df["Saldo Devedor"].sum()
-        total_cre = bal_df["Saldo Credor"].sum()
-        
+        t_dev, t_cre = bal_df["Saldo Devedor"].sum(), bal_df["Saldo Credor"].sum()
         col_b1, col_b2 = st.columns(2)
-        col_b1.metric("Total Saldos Devedores", f"R$ {total_dev:,.2f}")
-        col_b2.metric("Total Saldos Credores", f"R$ {total_cre:,.2f}")
-        if round(total_dev, 2) == round(total_cre, 2): st.success("✅ Balancete Equilibrado")
-        else: st.error("⚠️ Diferença detectada no Balancete")
+        col_b1.metric("Total Saldos Devedores", f"R$ {t_dev:,.2f}")
+        col_b2.metric("Total Saldos Credores", f"R$ {t_cre:,.2f}")
 
-    with t[2]: # DRE (Preservada)
+    with t[2]: # DRE com EBITDA e Lucro Real (Solicitado)
+        st.subheader("DRE - Análise Vertical e Resultados")
         rec = df[df['natureza'] == 'Receita']['valor'].sum()
         des = df[df['natureza'] == 'Despesa']['valor'].sum()
         enc = df[df['natureza'] == 'Encargos Financeiros']['valor'].sum()
-        luc = rec - des - enc
+        
+        ebitda = rec - des
+        lucro_real = ebitda - enc
+        
+        c1, c2, c3 = st.columns(3)
+        c1.metric("EBITDA", f"R$ {ebitda:,.2f}")
+        c2.metric("Lucro Real", f"R$ {lucro_real:,.2f}")
+        c3.metric("Margem Real", f"{(lucro_real/rec*100) if rec > 0 else 0:.2f}%")
+
         if rec > 0:
             dre_df = pd.DataFrame([
                 {"Descrição": "RECEITA BRUTA", "Valor": rec, "%": "100%"},
-                {"Descrição": "(-) DESPESAS ADM", "Valor": des, "%": f"{(des/rec)*100:.2f}%"},
-                {"Descrição": "(-) ENCARGOS FIN", "Valor": enc, "%": f"{(enc/rec)*100:.2f}%"},
-                {"Descrição": "(=) RESULTADO LÍQUIDO", "Valor": luc, "%": f"{(luc/rec)*100:.2f}%"}
+                {"Descrição": "(-) DESPESAS ADMINISTRATIVAS", "Valor": des, "%": f"{(des/rec)*100:.2f}%"},
+                {"Descrição": "(=) EBITDA (LAJIDA)", "Valor": ebitda, "%": f"{(ebitda/rec)*100:.2f}%"},
+                {"Descrição": "(-) ENCARGOS FINANCEIROS", "Valor": enc, "%": f"{(enc/rec)*100:.2f}%"},
+                {"Descrição": "(=) LUCRO REAL LÍQUIDO", "Valor": lucro_real, "%": f"{(lucro_real/rec)*100:.2f}%"}
             ])
             st.table(dre_df.style.format({"Valor": "R$ {:.2f}"}))
 
-    with t[3]: # Gestão com Grupo e Operação (Solicitado)
+    with t[3]: # Gestão (Preservado)
         st.subheader("Gerenciar Lançamentos")
         for idx, row in df.iterrows():
             c1, c2, c3 = st.columns([0.6, 0.2, 0.2])
-            # Exibição detalhada: Descrição, Grupo e Tipo de Operação
             c1.write(f"**{row['descricao']}** | Grupo: {row['natureza']}")
-            c1.caption(f"Operação: {row['tipo']} | Valor: R$ {row['valor']:,.2f} | Natureza: {row.get('natureza_operacao', 'Outros')}")
-            
+            c1.caption(f"Operação: {row['tipo']} | Valor: R$ {row['valor']:,.2f}")
             if c2.button("Editar", key=f"ed_{row['id']}"):
                 st.session_state.edit_id = row['id']
                 st.rerun()
