@@ -72,7 +72,7 @@ def carregar_dados():
 
 df = carregar_dados()
 
-# --- FORMULÁRIO ---
+# --- FORMULÁRIO COM LISTA AMPLIADA ---
 with st.sidebar:
     st.divider()
     if st.session_state.edit_id:
@@ -83,8 +83,33 @@ with st.sidebar:
         item_edit = {"descricao": "", "natureza": "Ativo", "tipo": "Débito", "valor": 0.01, "justificativa": "", "natureza_operacao": "Outros"}
 
     with st.form("contabil", clear_on_submit=True):
-        nat_op_list = ["Compra de Mercadorias", "Venda de Serviços", "Pagamento de Despesas", "Recebimento de Clientes", "Outros"]
-        natureza_op = st.selectbox("Natureza da Operação", nat_op_list)
+        # LISTA AMPLIADA DE NATUREZAS (CONFORME PRÁTICA CONTÁBIL)
+        nat_op_list = [
+            "Integralização de Capital Social",
+            "Venda de Mercadorias (À Vista)",
+            "Venda de Mercadorias (A Prazo)",
+            "Prestação de Serviços",
+            "Compra de Mercadorias para Estoque",
+            "Compra de Bens (Imobilizado)",
+            "Pagamento de Fornecedores",
+            "Recebimento de Duplicatas (Clientes)",
+            "Pagamento de Salários e Encargos",
+            "Pagamento de Tributos/Impostos",
+            "Pagamento de Aluguel/Condomínio",
+            "Pagamento de Despesas Utilitárias (Luz/Água/Internet)",
+            "Apropriação de Juros Passivos",
+            "Recebimento de Receitas Financeiras",
+            "Amortização de Empréstimos",
+            "Distribuição de Lucros/Dividendos",
+            "Ajustes de Exercícios Anteriores",
+            "Depreciação/Amortização",
+            "Outros"
+        ]
+        
+        # Verifica se o valor antigo existe na lista para evitar erro no selectbox
+        idx_op = nat_op_list.index(item_edit['natureza_operacao']) if item_edit.get('natureza_operacao') in nat_op_list else 18
+        
+        natureza_op = st.selectbox("Natureza da Operação", nat_op_list, index=idx_op)
         desc = st.text_input("Nome da Conta", value=item_edit['descricao']).upper().strip()
         nat_list = ["Ativo", "Passivo", "Patrimônio Líquido", "Receita", "Despesa", "Encargos Financeiros"]
         nat = st.selectbox("Grupo (Natureza)", nat_list, index=nat_list.index(item_edit['natureza']))
@@ -102,7 +127,7 @@ with st.sidebar:
             st.rerun()
 
 # --- INTERFACE ---
-st.title("📑 Sistema Contábil")
+st.title("📑 Painel Contábil")
 
 if not df.empty:
     t = st.tabs(["📊 Razonetes", "🧾 Balancete", "📈 DRE", "⚙️ Gestão"])
@@ -111,7 +136,7 @@ if not df.empty:
         for conta in sorted(df['descricao'].unique()):
             df_c = df[df['descricao'] == conta]
             with st.expander(f"📖 {conta}"):
-                st.table(df_c[['tipo', 'valor', 'justificativa']])
+                st.table(df_c[['natureza_operacao', 'tipo', 'valor', 'justificativa']])
 
     with t[1]: # Balancete
         bal_data = []
@@ -130,15 +155,13 @@ if not df.empty:
         fig = plotly_go.Figure(plotly_go.Waterfall(x=["Receita", "Despesas", "Encargos", "LUCRO"], y=[rec, -desp, -enc, 0], measure=["relative", "relative", "relative", "total"]))
         st.plotly_chart(fig, use_container_width=True)
 
-    with t[3]: # Gestão (SOLICITAÇÃO ATUAL)
+    with t[3]: # Gestão
         st.subheader("Gerenciar Lançamentos")
         for idx, row in df.iterrows():
             c1, c2, c3 = st.columns([0.6, 0.2, 0.2])
-            
-            # Formatação visual: Grupo e Operação destacados
             label_operacao = "🔵 D" if row['tipo'] == "Débito" else "🔴 C"
             c1.write(f"**{row['descricao']}** | {row['natureza']} ({label_operacao})")
-            c1.caption(f"Valor: R$ {row['valor']:,.2f} | Natureza Op: {row.get('natureza_operacao', 'Geral')}")
+            c1.caption(f"**Natureza:** {row.get('natureza_operacao', 'Outros')} | **Valor:** R$ {row['valor']:,.2f}")
             
             if c2.button("Editar", key=f"ed_{row['id']}", use_container_width=True):
                 st.session_state.edit_id = row['id']
