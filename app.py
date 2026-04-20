@@ -1,151 +1,176 @@
 import streamlit as st
 import pandas as pd
-from supabase import create_client, Client
+import subprocess
+import sys
+import os
 
-# --- 1. CONFIGURAÇÃO DE PÁGINA ---
-st.set_page_config(
-    page_title="Contabilidade Digital Pro", 
-    layout="wide", 
-    initial_sidebar_state="expanded"
-)
-
-# --- 2. CONEXÃO COM SUPABASE ---
-# As chaves devem estar nas Secrets do Streamlit Cloud
+# --- 1. GARANTIA DE INSTALAÇÃO ---
 try:
+    from supabase import create_client, Client
+except ImportError:
+    subprocess.check_call([sys.executable, "-m", "pip", "install", "supabase"])
+    from supabase import create_client, Client
+
+# --- 2. CONFIGURAÇÃO DA PÁGINA ---
+st.set_page_config(page_title="Sistema Contábil Integrado", layout="wide")
+
+# --- 3. CONEXÃO COM SUPABASE ---
+try:
+    # Lembre-se: SUPABASE_URL (https://...) e SUPABASE_KEY (anon public)
     url: str = st.secrets["SUPABASE_URL"]
     key: str = st.secrets["SUPABASE_KEY"]
     supabase: Client = create_client(url, key)
-except Exception as e:
-    st.error("Erro nas Secrets: Verifique se SUPABASE_URL e SUPABASE_KEY estão configuradas.")
+except Exception:
+    st.error("🚨 Erro de conexão! Verifique as Secrets no Streamlit Cloud.")
     st.stop()
 
-# --- 3. ESTILIZAÇÃO CSS ---
+# --- 4. ESTILIZAÇÃO CSS ---
 st.markdown("""
     <style>
-    .gestao-card { background-color: white; padding: 15px; border-radius: 10px; border-left: 5px solid #1E3A8A; 
-                   box-shadow: 0 2px 8px rgba(0,0,0,0.08); margin-bottom: 8px; }
-    .badge-natureza { background-color: #f1f5f9; color: #475569; padding: 4px 10px; border-radius: 12px; font-size: 0.75em; font-weight: bold; }
-    .resumo-dre-linha { font-size: 1.1em; font-weight: bold; padding: 12px; border-radius: 8px; margin-bottom: 8px; }
+    .dre-card { background-color: #f8f9fa; padding: 20px; border-radius: 10px; border-left: 5px solid #1E3A8A; margin-bottom: 10px; }
+    .percent-text { color: #6c757d; font-size: 0.9em; font-weight: normal; }
     </style>
     """, unsafe_allow_html=True)
 
-# --- 4. SISTEMA DE AUTENTICAÇÃO ---
+# --- 5. SISTEMA DE AUTENTICAÇÃO ---
 if 'user' not in st.session_state:
     st.session_state.user = None
 
-def area_login():
+def gerenciar_acesso():
     st.sidebar.title("🔐 Acesso ao Sistema")
-    escolha = st.sidebar.radio("Selecione", ["Login", "Criar Nova Conta"])
-    email = st.sidebar.text_input("E-mail")
-    senha = st.sidebar.text_input("Senha", type="password")
+    menu = st.sidebar.radio("Selecione uma opção", ["Login", "Criar Conta", "Recuperar Senha"])
+    
+    email = st.sidebar.text_input("E-mail").lower().strip()
 
-    if escolha == "Criar Nova Conta":
-        if st.sidebar.button("Registrar"):
+    if menu == "Criar Conta":
+        senha = st.sidebar.text_input("Defina uma Senha", type="password")
+        if st.sidebar.button("Cadastrar Usuário", use_container_width=True):
+            if email and senha:
+                try:
+                    supabase.auth.sign_up({"email": email, "password": senha})
+                    st.sidebar.success("✅ Conta criada com sucesso!")
+                    st.sidebar.info("Se não conseguir logar, verifique se o Supabase exige confirmação por e-mail.")
+                except Exception as e:
+                    if "already registered" in str(e).lower():
+                        st.sidebar.warning("⚠️ Este e-mail já possui cadastro. Use a opção de Login.")
+                    else:
+                        st.sidebar.error(f"Erro: {e}")
+            else:
+                st.sidebar.error("Preencha todos os campos.")
+
+    elif menu == "Login":
+        senha = st.sidebar.text_input("Sua Senha", type="password")
+        if st.sidebar.button("Entrar", use_container_width=True):
             try:
-                supabase.auth.sign_up({"email": email, "password": senha})
-                st.sidebar.success("Conta criada! Verifique seu e-mail e faça login.")
-            except Exception as e:
-                st.sidebar.error(f"Erro ao cadastrar: {e}")
-    else:
-        if st.sidebar.button("Entrar"):
-            try:
-                auth_res = supabase.auth.sign_in_with_password({"email": email, "password": senha})
-                st.session_state.user = auth_res.user
+                res = supabase.auth.sign_in_with_password({"email": email, "password": senha})
+                st.session_state.user = res.user
                 st.rerun()
             except Exception:
-                st.sidebar.error("E-mail ou senha incorretos.")
+                st.sidebar.error("❌ E-mail ou senha inválidos.")
 
-# Se não estiver logado, para o código aqui e mostra apenas o login
+    elif menu == "Recuperar Senha":
+        st.sidebar.info("Enviaremos um link para redefinir sua senha.")
+        if st.sidebar.button("Enviar E-mail de Recuperação", use_container_width=True):
+            if email:
+                try:
+                    supabase.auth.reset_password_for_email(email)
+                    st.sidebar.success(f"📧 Link enviado para {email}")
+                except Exception as e:
+                    st.sidebar.error(f"Erro ao enviar: {e}")
+            else:
+                st.sidebar.warning("Informe o e-mail cadastrado.")
+
+# Verificação de Bloqueio
 if st.session_state.user is None:
-    area_login()
-    st.info("👋 Bem-vindo! Utilize a barra lateral para acessar sua conta ou criar uma nova.")
+    gerenciar_acesso()
+    st.info("👋 Bem-vindo! Faça login na barra lateral para acessar seus dados contábeis.")
     st.stop()
 
-# --- 5. INTERFACE DO SISTEMA (PÓS-LOGIN) ---
+# --- 6. INTERFACE DO SISTEMA (LOGADO) ---
 user_id = st.session_state.user.id
-st.sidebar.write(f"Conectado como: **{st.session_state.user.email}**")
-if st.sidebar.button("Sair (Logout)"):
+st.sidebar.write(f"👤 Logado: **{st.session_state.user.email}**")
+if st.sidebar.button("Sair / Logout"):
     st.session_state.user = None
     st.rerun()
 
-st.title("📑 Sistema Contábil Integrado")
-
-# Funções de Banco de Dados
-def carregar_lancamentos():
-    # Busca apenas os dados do usuário logado
+# --- 7. BUSCA DE DADOS ---
+def carregar_dados():
     res = supabase.table("lancamentos").select("*").eq("user_id", user_id).execute()
     return pd.DataFrame(res.data)
 
-df_db = carregar_lancamentos()
+df = carregar_dados()
 
-# --- 6. BARRA LATERAL: ENTRADA DE DADOS ---
+# --- 8. LANÇAMENTOS (BARRA LATERAL) ---
 with st.sidebar:
     st.divider()
     st.header("➕ Novo Lançamento")
     with st.form("form_contabil", clear_on_submit=True):
-        contas_existentes = sorted(df_db['descricao'].unique().tolist()) if not df_db.empty else []
-        escolha_conta = st.selectbox("Conta Existente", ["-- Selecione --"] + contas_existentes)
-        nova_conta = st.text_input("OU Nova Conta").upper().strip()
-        
-        natureza = st.selectbox("Natureza", ["Ativo", "Passivo", "Patrimônio Líquido", "Receita", "Despesa", "Encargos Financeiros"])
+        desc = st.text_input("Nome da Conta").upper().strip()
+        nat = st.selectbox("Natureza", ["Ativo", "Passivo", "Patrimônio Líquido", "Receita", "Despesa"])
         tipo = st.radio("Operação", ["Débito", "Crédito"], horizontal=True)
-        valor = st.number_input("Valor (R$)", min_value=0.0, format="%.2f")
-        justificativa = st.text_area("Justificativa")
+        valor = st.number_input("Valor (R$)", min_value=0.01, format="%.2f")
+        just = st.text_area("Justificativa / Histórico")
         
-        if st.form_submit_button("Confirmar Dados", use_container_width=True):
-            nome_final = nova_conta if nova_conta else (escolha_conta if escolha_conta != "-- Selecione --" else None)
-            if nome_final and valor > 0:
-                novo_registro = {
-                    "user_id": user_id,
-                    "descricao": nome_final,
-                    "natureza": natureza,
-                    "tipo": tipo,
-                    "valor": valor,
-                    "justificativa": justificativa
-                }
-                supabase.table("lancamentos").insert(novo_registro).execute()
-                st.success("Lançamento realizado!")
+        if st.form_submit_button("Confirmar Lançamento", use_container_width=True):
+            if desc:
+                supabase.table("lancamentos").insert({
+                    "user_id": user_id, "descricao": desc, "natureza": nat,
+                    "tipo": tipo, "valor": valor, "justificativa": just
+                }).execute()
                 st.rerun()
 
-# --- 7. PAINEL PRINCIPAL (TABS) ---
-if not df_db.empty:
-    tab_raz, tab_bal, tab_dre, tab_ges = st.tabs(["📊 Razonetes", "⚖️ Balancete", "📈 DRE", "⚙️ Gestão"])
-    
-    with tab_raz:
-        for conta in sorted(df_db['descricao'].unique()):
-            df_c = df_db[df_db['descricao'] == conta]
-            with st.expander(f"📖 Razonete: {conta} | {df_c['natureza'].iloc[0]}"):
-                c_d, c_c = st.columns(2)
+# --- 9. PAINEL PRINCIPAL ---
+st.title("📊 Painel de Controle Contábil")
+
+if not df.empty:
+    tab1, tab2, tab3 = st.tabs(["📖 Razonetes", "📈 DRE (Resultado)", "⚙️ Gestão"])
+
+    with tab1:
+        st.subheader("Livro Razão Digital")
+        for conta in sorted(df['descricao'].unique()):
+            df_c = df[df['descricao'] == conta]
+            with st.expander(f"Conta: {conta} ({df_c['natureza'].iloc[0]})"):
+                col_d, col_c = st.columns(2)
                 v_d = df_c[df_c['tipo'] == 'Débito']['valor'].sum()
                 v_c = df_c[df_c['tipo'] == 'Crédito']['valor'].sum()
                 
-                c_d.markdown("**DÉBITO**")
-                for _, r in df_c[df_c['tipo'] == 'Débito'].iterrows(): 
-                    c_d.caption(f"R$ {float(r['valor']):,.2f}")
+                col_d.write("**DÉBITO**")
+                for _, r in df_c[df_c['tipo'] == 'Débito'].iterrows():
+                    col_d.caption(f"R$ {float(r['valor']):,.2f} - {r['justificativa']}")
                 
-                c_c.markdown("**CRÉDITO**")
-                for _, r in df_c[df_c['tipo'] == 'Crédito'].iterrows(): 
-                    c_c.caption(f"R$ {float(r['valor']):,.2f}")
+                col_c.write("**CRÉDITO**")
+                for _, r in df_c[df_c['tipo'] == 'Crédito'].iterrows():
+                    col_c.caption(f"R$ {float(r['valor']):,.2f} - {r['justificativa']}")
                 
                 st.divider()
-                st.write(f"**Saldo Final: R$ {abs(v_d - v_c):,.2f} ({'Devedor' if v_d >= v_c else 'Credor'})**")
+                st.write(f"**Saldo: R$ {abs(v_d - v_c):,.2f}**")
 
-    with tab_ges:
-        st.subheader("📋 Histórico de Lançamentos")
-        for _, row in df_db.iterrows():
-            with st.container():
-                col_info, col_del = st.columns([0.85, 0.15])
-                col_info.markdown(f"""
-                <div class="gestao-card">
-                    <b>{row['descricao']}</b> ({row['natureza']})<br>
-                    <span style="color: {'blue' if row['tipo'] == 'Débito' else 'green'}">
-                        {row['tipo']}: R$ {float(row['valor']):,.2f}
-                    </span><br>
-                    <small><i>{row['justificativa']}</i></small>
-                </div>
-                """, unsafe_allow_html=True)
-                if col_del.button("🗑️", key=f"del_{row['id']}"):
-                    supabase.table("lancamentos").delete().eq("id", row['id']).execute()
-                    st.rerun()
+    with tab2:
+        st.subheader("Análise de Resultado")
+        rec = df[df['natureza'] == 'Receita']['valor'].sum()
+        desp = df[df['natureza'] == 'Despesa']['valor'].sum()
+        lucro = rec - desp
+        
+        c1, c2, c3 = st.columns(3)
+        c1.metric("Receita Total", f"R$ {rec:,.2f}")
+        c2.metric("Despesa Total", f"R$ {desp:,.2f}")
+        c3.metric("Resultado Líquido", f"R$ {lucro:,.2f}")
+
+        # Análise Vertical
+        if rec > 0:
+            st.markdown('<div class="dre-card">', unsafe_allow_html=True)
+            st.write(f"**Receita Operacional:** 100%")
+            st.write(f"**Despesas:** -{(desp/rec)*100:.2f}%")
+            st.write(f"**Margem de Lucro:** {(lucro/rec)*100:.2f}%")
+            st.markdown('</div>', unsafe_allow_html=True)
+
+    with tab3:
+        st.subheader("Excluir Lançamentos")
+        for idx, row in df.iterrows():
+            c_info, c_btn = st.columns([0.8, 0.2])
+            c_info.write(f"🗑️ {row['descricao']} | {row['tipo']} | R$ {float(row['valor']):,.2f}")
+            if c_btn.button("Excluir", key=f"del_{row['id']}"):
+                supabase.table("lancamentos").delete().eq("id", row['id']).execute()
+                st.rerun()
 else:
-    st.warning("Nenhum lançamento registrado para este usuário.")
+    st.warning("Nenhum lançamento encontrado para este usuário.")
