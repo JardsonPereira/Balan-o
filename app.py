@@ -11,7 +11,7 @@ except ImportError:
     from supabase import create_client, Client
 
 # --- CONFIGURAÇÃO E CONEXÃO ---
-st.set_page_config(page_title="Contabilidade Digital", layout="wide")
+st.set_page_config(page_title="Sistema Contábil Integrado", layout="wide")
 
 try:
     url: str = st.secrets["SUPABASE_URL"]
@@ -35,7 +35,7 @@ def gerenciar_acesso():
         if st.sidebar.button("Cadastrar"):
             try:
                 supabase.auth.sign_up({"email": email, "password": senha})
-                st.sidebar.success("Conta criada! Se o login falhar, verifique o e-mail ou desative a confirmação no Supabase.")
+                st.sidebar.success("Conta criada! Tente logar.")
             except Exception as e:
                 st.sidebar.error(f"Erro: {e}")
 
@@ -77,13 +77,19 @@ def buscar_dados():
 
 df = buscar_dados()
 
-# --- LANÇAMENTOS (CORRIGIDO) ---
+# --- LANÇAMENTOS ---
 with st.sidebar:
     st.divider()
     st.header("➕ Novo Lançamento")
     with st.form("contabil", clear_on_submit=True):
-        desc = st.text_input("Nome da Conta").upper().strip()
-        nat = st.selectbox("Natureza", ["Ativo", "Passivo", "Patrimônio Líquido", "Receita", "Despesa"])
+        desc = st.text_input("Nome da Conta (ex: Juros Passivos)").upper().strip()
+        
+        # ADICIONADO: Encargos Financeiros na lista
+        nat = st.selectbox("Natureza", [
+            "Ativo", "Passivo", "Patrimônio Líquido", 
+            "Receita", "Despesa", "Encargos Financeiros"
+        ])
+        
         tipo = st.radio("Operação", ["Débito", "Crédito"], horizontal=True)
         valor = st.number_input("Valor (R$)", min_value=0.01, format="%.2f")
         just = st.text_area("Justificativa")
@@ -91,25 +97,17 @@ with st.sidebar:
         if st.form_submit_button("Confirmar Lançamento", use_container_width=True):
             if desc:
                 try:
-                    # Tenta inserir e captura o resultado
-                    dados_lancamento = {
-                        "user_id": user_id, 
-                        "descricao": desc, 
-                        "natureza": nat,
-                        "tipo": tipo, 
-                        "valor": valor, 
-                        "justificativa": just
-                    }
-                    resultado = supabase.table("lancamentos").insert(dados_lancamento).execute()
+                    supabase.table("lancamentos").insert({
+                        "user_id": user_id, "descricao": desc, "natureza": nat,
+                        "tipo": tipo, "valor": valor, "justificativa": just
+                    }).execute()
                     st.success("✅ Lançamento realizado!")
                     st.rerun()
                 except Exception as e:
                     st.error(f"❌ Erro ao gravar: {e}")
-            else:
-                st.warning("Preencha o nome da conta.")
 
-# --- DASHBOARD ---
-st.title("📑 Sistema Contábil Digital")
+# --- DASHBOARD PRINCIPAL ---
+st.title("📑 Painel Contábil Digital")
 
 if not df.empty:
     t1, t2, t3 = st.tabs(["📊 Razonetes", "📈 DRE (Resultado)", "⚙️ Gestão"])
@@ -117,7 +115,7 @@ if not df.empty:
     with t1:
         for conta in sorted(df['descricao'].unique()):
             df_c = df[df['descricao'] == conta]
-            with st.expander(f"📖 Conta: {conta}"):
+            with st.expander(f"📖 Conta: {conta} ({df_c['natureza'].iloc[0]})"):
                 c_d, c_c = st.columns(2)
                 v_d = df_c[df_c['tipo'] == 'Débito']['valor'].sum()
                 v_c = df_c[df_c['tipo'] == 'Crédito']['valor'].sum()
@@ -134,29 +132,35 @@ if not df.empty:
                 st.write(f"**Saldo: R$ {abs(v_d - v_c):,.2f}**")
 
     with t2:
+        # CÁLCULOS DRE
         rec = df[df['natureza'] == 'Receita']['valor'].sum()
-        desp = df[df['natureza'] == 'Despesa']['valor'].sum()
-        lucro = rec - desp
+        desp_adm = df[df['natureza'] == 'Despesa']['valor'].sum()
+        encargos = df[df['natureza'] == 'Encargos Financeiros']['valor'].sum()
         
-        st.subheader("Análise de Resultado Líquido")
+        # Resultado Operacional antes dos encargos
+        res_op = rec - desp_adm
+        lucro_final = res_op - encargos
+        
+        st.subheader("Demonstração do Resultado")
         col1, col2, col3 = st.columns(3)
-        col1.metric("Receita Total", f"R$ {rec:,.2f}")
-        col2.metric("Despesa Total", f"R$ {desp:,.2f}")
-        col3.metric("Resultado", f"R$ {lucro:,.2f}")
+        col1.metric("Receita Bruta", f"R$ {rec:,.2f}")
+        col2.metric("Encargos Financeiros", f"R$ {encargos:,.2f}", delta_color="inverse")
+        col3.metric("Lucro/Prejuízo Líquido", f"R$ {lucro_final:,.2f}")
 
         if rec > 0:
             st.divider()
-            st.write("**📊 Análise Vertical:**")
-            st.info(f"A despesa representa **{(desp/rec)*100:.2f}%** da receita.")
-            st.info(f"A margem líquida é de **{(lucro/rec)*100:.2f}%**.")
+            st.write("**📊 Análise Vertical (Sobre a Receita):**")
+            st.info(f"Despesas Administrativas: **{(desp_adm/rec)*100:.2f}%**")
+            st.info(f"Encargos Financeiros: **{(encargos/rec)*100:.2f}%**")
+            st.success(f"Margem Líquida Final: **{(lucro_final/rec)*100:.2f}%**")
 
     with t3:
-        st.subheader("Histórico de Lançamentos")
+        st.subheader("Histórico")
         for idx, row in df.iterrows():
             c1, c2 = st.columns([0.8, 0.2])
-            c1.write(f"🗑️ {row['descricao']} | R$ {float(row['valor']):,.2f}")
+            c1.write(f"🗑️ {row['descricao']} | {row['natureza']} | R$ {float(row['valor']):,.2f}")
             if c2.button("Apagar", key=f"del_{row['id']}"):
                 supabase.table("lancamentos").delete().eq("id", row['id']).execute()
                 st.rerun()
 else:
-    st.info("Nenhum lançamento encontrado. Comece pela barra lateral.")
+    st.info("Nenhum lançamento encontrado.")
