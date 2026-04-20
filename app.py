@@ -55,13 +55,6 @@ def gerenciar_acesso():
                 st.rerun()
             except Exception:
                 st.sidebar.error("Credenciais inválidas.")
-    elif menu == "Recuperar Senha":
-        if st.sidebar.button("Enviar link"):
-            try:
-                supabase.auth.reset_password_for_email(email)
-                st.sidebar.success("Link enviado!")
-            except Exception as e:
-                st.sidebar.error(f"Erro: {e}")
 
 if st.session_state.user is None:
     gerenciar_acesso()
@@ -75,112 +68,92 @@ if st.sidebar.button("Sair"):
     st.rerun()
 
 def carregar_dados():
-    res = supabase.table("lancamentos").select("*").eq("user_id", user_id).execute()
-    return pd.DataFrame(res.data)
+    try:
+        res = supabase.table("lancamentos").select("*").eq("user_id", user_id).execute()
+        return pd.DataFrame(res.data)
+    except Exception:
+        return pd.DataFrame()
 
 df = carregar_dados()
 
-# --- FORMULÁRIO COM NATUREZA DA OPERAÇÃO ---
+# --- FORMULÁRIO ---
 with st.sidebar:
     st.divider()
     if st.session_state.edit_id:
-        st.header("📝 Editar Lançamento")
+        st.header("📝 Editar")
         item_edit = df[df['id'] == st.session_state.edit_id].iloc[0]
-        btn_label = "Atualizar"
     else:
-        st.header("➕ Novo Lançamento")
-        item_edit = {"descricao": "", "natureza": "Ativo", "tipo": "Débito", "valor": 0.01, "justificativa": "", "natureza_operacao": "Operação Geral"}
-        btn_label = "Confirmar"
+        st.header("➕ Novo")
+        item_edit = {"descricao": "", "natureza": "Ativo", "tipo": "Débito", "valor": 0.01, "justificativa": "", "natureza_operacao": "Outros"}
 
     with st.form("contabil", clear_on_submit=True):
-        # NOVO CAMPO: Natureza da Operação
-        natureza_op_list = [
-            "Compra de Mercadorias", "Venda de Mercadorias/Serviços", 
-            "Pagamento de Despesas", "Recebimento de Clientes", 
-            "Integralização de Capital", "Empréstimos/Financiamentos", 
-            "Ajustes Contábeis", "Outros"
-        ]
-        natureza_op = st.selectbox("Natureza da Operação", natureza_op_list, 
-                                   index=natureza_op_list.index(item_edit.get('natureza_operacao', "Outros")))
+        nat_op_list = ["Compra de Mercadorias", "Venda de Serviços", "Pagamento de Despesas", "Recebimento de Clientes", "Outros"]
+        # Usa .get() para evitar erro se a coluna ainda não existir nos dados antigos
+        natureza_op = st.selectbox("Natureza da Operação", nat_op_list, index=0)
         
-        desc = st.text_input("Nome da Conta (Razão)", value=item_edit['descricao']).upper().strip()
-        
+        desc = st.text_input("Nome da Conta", value=item_edit['descricao']).upper().strip()
         nat_list = ["Ativo", "Passivo", "Patrimônio Líquido", "Receita", "Despesa", "Encargos Financeiros"]
-        nat = st.selectbox("Grupo Contábil", nat_list, index=nat_list.index(item_edit['natureza']))
-        
+        nat = st.selectbox("Grupo", nat_list, index=nat_list.index(item_edit['natureza']))
         tipo = st.radio("Operação", ["Débito", "Crédito"], index=0 if item_edit['tipo'] == "Débito" else 1, horizontal=True)
-        valor = st.number_input("Valor (R$)", min_value=0.01, value=float(item_edit['valor']), format="%.2f")
-        just = st.text_area("Histórico / Justificativa", value=item_edit['justificativa'])
+        valor = st.number_input("Valor", min_value=0.01, value=float(item_edit['valor']))
+        just = st.text_area("Justificativa", value=item_edit['justificativa'])
         
-        if st.form_submit_button(btn_label, use_container_width=True):
-            if desc:
-                payload = {
-                    "user_id": user_id, 
-                    "descricao": desc, 
-                    "natureza": nat, 
-                    "tipo": tipo, 
-                    "valor": valor, 
-                    "justificativa": just,
-                    "natureza_operacao": natureza_op # Enviando o novo campo
-                }
+        if st.form_submit_button("Confirmar"):
+            payload = {
+                "user_id": user_id, "descricao": desc, "natureza": nat, 
+                "tipo": tipo, "valor": valor, "justificativa": just,
+                "natureza_operacao": natureza_op
+            }
+            try:
                 if st.session_state.edit_id:
                     supabase.table("lancamentos").update(payload).eq("id", st.session_state.edit_id).execute()
                     st.session_state.edit_id = None
                 else:
                     supabase.table("lancamentos").insert(payload).execute()
                 st.rerun()
+            except Exception as e:
+                st.error(f"Erro ao salvar: {e}. Tente rodar o comando SQL no Supabase.")
 
-# --- INTERFACE PRINCIPAL ---
-st.title("📑 Painel Contábil Digital")
+# --- INTERFACE ---
+st.title("📑 Sistema Contábil")
 
 if not df.empty:
-    tabs = st.tabs(["📊 Razonetes", "🧾 Balancete", "📈 DRE Interativa", "⚙️ Gestão"])
+    t = st.tabs(["📊 Razonetes", "🧾 Balancete", "📈 DRE", "⚙️ Gestão"])
     
-    with tabs[0]: # Razonetes
+    with t[0]:
         for conta in sorted(df['descricao'].unique()):
             df_c = df[df['descricao'] == conta]
-            with st.expander(f"📖 {conta} ({df_c['natureza'].iloc[0]})"):
-                # Exibindo a natureza da operação na tabela
-                st.table(df_c[['natureza_operacao', 'tipo', 'valor', 'justificativa']])
+            with st.expander(f"📖 {conta}"):
+                # Exibe a natureza_operacao se ela existir no DF
+                colunas = ['tipo', 'valor', 'justificativa']
+                if 'natureza_operacao' in df.columns: colunas.insert(0, 'natureza_operacao')
+                st.table(df_c[colunas])
 
-    with tabs[1]: # Balancete
-        balancete_data = []
+    with t[1]:
+        bal_data = []
         for conta in sorted(df['descricao'].unique()):
             df_c = df[df['descricao'] == conta]
             d = df_c[df_c['tipo'] == 'Débito']['valor'].sum()
             c = df_c[df_c['tipo'] == 'Crédito']['valor'].sum()
-            balancete_data.append({"Conta": conta, "Débito": d, "Crédito": c})
-        bal_df = pd.DataFrame(balancete_data)
-        st.table(bal_df.style.format({"Débito": "R$ {:.2f}", "Crédito": "R$ {:.2f}"}))
-        if round(bal_df["Débito"].sum(), 2) == round(bal_df["Crédito"].sum(), 2):
-            st.success("✅ Balancete em Equilíbrio!")
-        else:
-            st.error("⚠️ Balancete Desequilibrado!")
+            bal_data.append({"Conta": conta, "Débito": d, "Crédito": c})
+        st.table(pd.DataFrame(bal_data))
 
-    with tabs[2]: # DRE
+    with t[2]:
         rec = df[df['natureza'] == 'Receita']['valor'].sum()
         desp = df[df['natureza'] == 'Despesa']['valor'].sum()
         enc = df[df['natureza'] == 'Encargos Financeiros']['valor'].sum()
         lucro = rec - desp - enc
-        fig = plotly_go.Figure(plotly_go.Waterfall(
-            x = ["Receita", "Despesas", "Encargos", "LUCRO"],
-            measure = ["relative", "relative", "relative", "total"],
-            y = [rec, -desp, -enc, 0]
-        ))
+        fig = plotly_go.Figure(plotly_go.Waterfall(x=["Receita", "Despesas", "Encargos", "LUCRO"], y=[rec, -desp, -enc, 0], measure=["relative", "relative", "relative", "total"]))
         st.plotly_chart(fig, use_container_width=True)
 
-    with tabs[3]: # Gestão
-        st.subheader("Gerenciar Lançamentos")
+    with t[3]:
         for idx, row in df.iterrows():
-            col1, col2, col3 = st.columns([0.6, 0.2, 0.2])
-            # Mostrando a natureza da operação na linha de gestão
-            col1.write(f"🏷️ **{row.get('natureza_operacao', 'Op.')}** | {row['descricao']} | R$ {row['valor']:.2f}")
-            
-            if col2.button("Editar", key=f"edit_{row['id']}"):
+            c1, c2, c3 = st.columns([0.6, 0.2, 0.2])
+            op_label = row.get('natureza_operacao', 'Geral')
+            c1.write(f"🏷️ {op_label} | {row['descricao']} | R$ {row['valor']:.2f}")
+            if c2.button("Editar", key=f"ed_{row['id']}"):
                 st.session_state.edit_id = row['id']
                 st.rerun()
-            if col3.button("Excluir", key=f"del_{row['id']}"):
+            if c3.button("Excluir", key=f"del_{row['id']}"):
                 supabase.table("lancamentos").delete().eq("id", row['id']).execute()
                 st.rerun()
-else:
-    st.info("Aguardando lançamentos.")
