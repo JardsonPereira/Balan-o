@@ -4,7 +4,7 @@ import subprocess
 import sys
 import os
 
-# --- GARANTIA DE INSTALAÇÃO (BOOTSTRAP) ---
+# --- GARANTIA DE INSTALAÇÃO ---
 def install_and_import(package):
     try:
         return __import__(package)
@@ -12,12 +12,11 @@ def install_and_import(package):
         subprocess.check_call([sys.executable, "-m", "pip", "install", package])
         return __import__(package)
 
-# Importações com garantia
 plotly_go = install_and_import("plotly").graph_objects
 from supabase import create_client, Client
 
 # --- CONFIGURAÇÃO ---
-st.set_page_config(page_title="Sistema Contábil Interativo", layout="wide")
+st.set_page_config(page_title="Sistema Contábil Integrado", layout="wide")
 
 try:
     url: str = st.secrets["SUPABASE_URL"]
@@ -33,10 +32,10 @@ if 'user' not in st.session_state:
 
 def gerenciar_acesso():
     st.sidebar.title("🔐 Acesso")
-    aba = st.sidebar.radio("Escolha", ["Login", "Criar Conta", "Recuperar Senha"])
+    menu = st.sidebar.radio("Escolha", ["Login", "Criar Conta", "Recuperar Senha"])
     email = st.sidebar.text_input("E-mail").lower().strip()
 
-    if aba == "Criar Conta":
+    if menu == "Criar Conta":
         senha = st.sidebar.text_input("Senha", type="password")
         if st.sidebar.button("Cadastrar"):
             try:
@@ -44,7 +43,7 @@ def gerenciar_acesso():
                 st.sidebar.success("Conta criada! Tente logar.")
             except Exception as e:
                 st.sidebar.error(f"Erro: {e}")
-    elif aba == "Login":
+    elif menu == "Login":
         senha = st.sidebar.text_input("Senha", type="password")
         if st.sidebar.button("Entrar"):
             try:
@@ -53,8 +52,8 @@ def gerenciar_acesso():
                 st.rerun()
             except Exception:
                 st.sidebar.error("Credenciais inválidas.")
-    elif aba == "Recuperar Senha":
-        if st.sidebar.button("Enviar link de recuperação"):
+    elif menu == "Recuperar Senha":
+        if st.sidebar.button("Enviar link"):
             try:
                 supabase.auth.reset_password_for_email(email)
                 st.sidebar.success("Link enviado!")
@@ -97,52 +96,66 @@ with st.sidebar:
 st.title("📑 Painel Contábil Digital")
 
 if not df.empty:
-    t1, t2, t3 = st.tabs(["📊 Razonetes", "📈 DRE Interativa", "⚙️ Gestão"])
+    t1, t2, t3, t4 = st.tabs(["📊 Razonetes", "🧾 Balancete", "📈 DRE Interativa", "⚙️ Gestão"])
     
     with t1:
+        st.subheader("Livro Razão")
         for conta in sorted(df['descricao'].unique()):
             df_c = df[df['descricao'] == conta]
             with st.expander(f"📖 {conta} ({df_c['natureza'].iloc[0]})"):
                 st.table(df_c[['tipo', 'valor', 'justificativa']])
 
     with t2:
+        st.subheader("Balancete de Verificação")
+        
+        # Lógica do Balancete
+        balancete_data = []
+        for conta in sorted(df['descricao'].unique()):
+            df_c = df[df['descricao'] == conta]
+            debitos = df_c[df_c['tipo'] == 'Débito']['valor'].sum()
+            creditos = df_c[df_c['tipo'] == 'Crédito']['valor'].sum()
+            balancete_data.append({
+                "Conta": conta,
+                "Débito (Devedor)": debitos,
+                "Crédito (Credor)": creditos
+            })
+        
+        bal_df = pd.DataFrame(balancete_data)
+        st.table(bal_df.style.format({"Débito (Devedor)": "R$ {:.2f}", "Crédito (Credor)": "R$ {:.2f}"}))
+        
+        total_d = bal_df["Débito (Devedor)"].sum()
+        total_c = bal_df["Crédito (Credor)"].sum()
+        
+        c1, c2 = st.columns(2)
+        c1.metric("Total Devedor", f"R$ {total_d:,.2f}")
+        c2.metric("Total Credor", f"R$ {total_c:,.2f}")
+        
+        if round(total_d, 2) == round(total_c, 2):
+            st.success("✅ Balancete em Equilíbrio: Débitos e Créditos conferem!")
+        else:
+            st.error("⚠️ Balancete Desequilibrado: Verifique as partidas dobradas.")
+
+    with t3:
         rec = df[df['natureza'] == 'Receita']['valor'].sum()
         desp = df[df['natureza'] == 'Despesa']['valor'].sum()
         enc = df[df['natureza'] == 'Encargos Financeiros']['valor'].sum()
         lucro = rec - desp - enc
         
-        # Métricas interativas
-        c1, c2, c3, c4 = st.columns(4)
+        # Gráficos e Métricas (Mantidos da versão anterior)
+        c1, c2, c3 = st.columns(3)
         c1.metric("Receita", f"R$ {rec:,.2f}")
-        c2.metric("Despesas", f"R$ {desp:,.2f}", delta_color="inverse")
-        c3.metric("Encargos", f"R$ {enc:,.2f}", delta_color="inverse")
-        c4.metric("Lucro Líquido", f"R$ {lucro:,.2f}", delta=f"{(lucro/rec*100) if rec>0 else 0:.1f}%")
+        c2.metric("Custos/Gastos", f"R$ {desp+enc:,.2f}", delta_color="inverse")
+        c3.metric("Lucro Líquido", f"R$ {lucro:,.2f}")
 
-        col_left, col_right = st.columns(2)
-        
-        with col_left:
-            st.write("**Fluxo de Resultado**")
-            fig = plotly_go.Figure(plotly_go.Waterfall(
-                x = ["Receita", "Despesas", "Encargos", "LUCRO"],
-                measure = ["relative", "relative", "relative", "total"],
-                y = [rec, -desp, -enc, 0],
-                text = [f"R${rec}", f"-R${desp}", f"-R${enc}", f"R${lucro}"],
-                connector = {"line":{"color":"#444"}}
-            ))
-            st.plotly_chart(fig, use_container_width=True)
+        fig = plotly_go.Figure(plotly_go.Waterfall(
+            x = ["Receita", "Despesas", "Encargos", "LUCRO"],
+            measure = ["relative", "relative", "relative", "total"],
+            y = [rec, -desp, -enc, 0],
+            connector = {"line":{"color":"#444"}}
+        ))
+        st.plotly_chart(fig, use_container_width=True)
 
-        with col_right:
-            st.write("**Análise Vertical**")
-            if rec > 0:
-                st.write(f"Despesas: **{(desp/rec)*100:.1f}%** da Receita")
-                st.write(f"Encargos: **{(enc/rec)*100:.1f}%** da Receita")
-                st.write(f"Margem Líquida: **{(lucro/rec)*100:.1f}%**")
-                # Gráfico de Pizza
-                fig_pie = plotly_go.Figure(data=[plotly_go.Pie(labels=['Lucro', 'Despesas', 'Encargos'], 
-                                                            values=[max(0, lucro), desp, enc], hole=.3)])
-                st.plotly_chart(fig_pie, use_container_width=True)
-
-    with t3:
+    with t4:
         for idx, row in df.iterrows():
             c1, c2 = st.columns([0.8, 0.2])
             c1.write(f"{row['descricao']} | R$ {row['valor']:.2f}")
@@ -150,4 +163,4 @@ if not df.empty:
                 supabase.table("lancamentos").delete().eq("id", row['id']).execute()
                 st.rerun()
 else:
-    st.info("Aguardando lançamentos...")
+    st.info("Aguardando lançamentos para gerar o Balancete.")
