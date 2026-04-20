@@ -72,7 +72,7 @@ def carregar_dados():
 
 df = carregar_dados()
 
-# --- FORMULÁRIO COM LISTA AMPLIADA ---
+# --- FORMULÁRIO COM ENCARGOS FINANCEIROS ---
 with st.sidebar:
     st.divider()
     if st.session_state.edit_id:
@@ -83,39 +83,38 @@ with st.sidebar:
         item_edit = {"descricao": "", "natureza": "Ativo", "tipo": "Débito", "valor": 0.01, "justificativa": "", "natureza_operacao": "Outros"}
 
     with st.form("contabil", clear_on_submit=True):
-        # LISTA AMPLIADA DE NATUREZAS (CONFORME PRÁTICA CONTÁBIL)
+        # LISTA DE NATUREZAS ATUALIZADA
         nat_op_list = [
             "Integralização de Capital Social",
-            "Venda de Mercadorias (À Vista)",
-            "Venda de Mercadorias (A Prazo)",
-            "Prestação de Serviços",
-            "Compra de Mercadorias para Estoque",
-            "Compra de Bens (Imobilizado)",
+            "Venda de Mercadorias/Serviços",
+            "Compra de Mercadorias/Bens",
             "Pagamento de Fornecedores",
-            "Recebimento de Duplicatas (Clientes)",
-            "Pagamento de Salários e Encargos",
-            "Pagamento de Tributos/Impostos",
-            "Pagamento de Aluguel/Condomínio",
-            "Pagamento de Despesas Utilitárias (Luz/Água/Internet)",
-            "Apropriação de Juros Passivos",
+            "Recebimento de Clientes",
+            "Pagamento de Salários/Encargos Sociais",
+            "Pagamento de Impostos/Contribuições",
+            "Pagamento de Aluguel/Utilitários",
+            "Pagamento de Juros/Multas (Encargos Financeiros)", # Adicionado
+            "Tarifas e Taxas Bancárias (Encargos Financeiros)",   # Adicionado
+            "Variações Monetárias Passivas (Encargos Financeiros)", # Adicionado
             "Recebimento de Receitas Financeiras",
             "Amortização de Empréstimos",
-            "Distribuição de Lucros/Dividendos",
-            "Ajustes de Exercícios Anteriores",
+            "Distribuição de Lucros",
             "Depreciação/Amortização",
             "Outros"
         ]
         
-        # Verifica se o valor antigo existe na lista para evitar erro no selectbox
-        idx_op = nat_op_list.index(item_edit['natureza_operacao']) if item_edit.get('natureza_operacao') in nat_op_list else 18
+        idx_op = nat_op_list.index(item_edit['natureza_operacao']) if item_edit.get('natureza_operacao') in nat_op_list else 15
         
         natureza_op = st.selectbox("Natureza da Operação", nat_op_list, index=idx_op)
         desc = st.text_input("Nome da Conta", value=item_edit['descricao']).upper().strip()
+        
+        # Grupos Contábeis
         nat_list = ["Ativo", "Passivo", "Patrimônio Líquido", "Receita", "Despesa", "Encargos Financeiros"]
         nat = st.selectbox("Grupo (Natureza)", nat_list, index=nat_list.index(item_edit['natureza']))
+        
         tipo = st.radio("Operação", ["Débito", "Crédito"], index=0 if item_edit['tipo'] == "Débito" else 1, horizontal=True)
         valor = st.number_input("Valor", min_value=0.01, value=float(item_edit['valor']))
-        just = st.text_area("Justificativa", value=item_edit['justificativa'])
+        just = st.text_area("Justificativa/Histórico", value=item_edit['justificativa'])
         
         if st.form_submit_button("Confirmar"):
             payload = {"user_id": user_id, "descricao": desc, "natureza": nat, "tipo": tipo, "valor": valor, "justificativa": just, "natureza_operacao": natureza_op}
@@ -127,7 +126,7 @@ with st.sidebar:
             st.rerun()
 
 # --- INTERFACE ---
-st.title("📑 Painel Contábil")
+st.title("📑 Painel Contábil Digital")
 
 if not df.empty:
     t = st.tabs(["📊 Razonetes", "🧾 Balancete", "📈 DRE", "⚙️ Gestão"])
@@ -135,7 +134,7 @@ if not df.empty:
     with t[0]: # Razonetes
         for conta in sorted(df['descricao'].unique()):
             df_c = df[df['descricao'] == conta]
-            with st.expander(f"📖 {conta}"):
+            with st.expander(f"📖 {conta} ({df_c['natureza'].iloc[0]})"):
                 st.table(df_c[['natureza_operacao', 'tipo', 'valor', 'justificativa']])
 
     with t[1]: # Balancete
@@ -146,27 +145,33 @@ if not df.empty:
             c = df_c[df_c['tipo'] == 'Crédito']['valor'].sum()
             bal_data.append({"Conta": conta, "Débito": d, "Crédito": c})
         st.table(pd.DataFrame(bal_data))
+        if round(sum(i['Débito'] for i in bal_data),2) == round(sum(i['Crédito'] for i in bal_data),2):
+            st.success("✅ Balancete Equilibrado")
 
     with t[2]: # DRE
         rec = df[df['natureza'] == 'Receita']['valor'].sum()
         desp = df[df['natureza'] == 'Despesa']['valor'].sum()
         enc = df[df['natureza'] == 'Encargos Financeiros']['valor'].sum()
         lucro = rec - desp - enc
-        fig = plotly_go.Figure(plotly_go.Waterfall(x=["Receita", "Despesas", "Encargos", "LUCRO"], y=[rec, -desp, -enc, 0], measure=["relative", "relative", "relative", "total"]))
+        
+        st.metric("Lucro/Prejuízo Líquido", f"R$ {lucro:,.2f}")
+        fig = plotly_go.Figure(plotly_go.Waterfall(
+            x=["Receita", "Despesas", "Encargos", "LUCRO"], 
+            y=[rec, -desp, -enc, 0], 
+            measure=["relative", "relative", "relative", "total"]
+        ))
         st.plotly_chart(fig, use_container_width=True)
 
     with t[3]: # Gestão
-        st.subheader("Gerenciar Lançamentos")
         for idx, row in df.iterrows():
             c1, c2, c3 = st.columns([0.6, 0.2, 0.2])
-            label_operacao = "🔵 D" if row['tipo'] == "Débito" else "🔴 C"
-            c1.write(f"**{row['descricao']}** | {row['natureza']} ({label_operacao})")
-            c1.caption(f"**Natureza:** {row.get('natureza_operacao', 'Outros')} | **Valor:** R$ {row['valor']:,.2f}")
-            
-            if c2.button("Editar", key=f"ed_{row['id']}", use_container_width=True):
+            tag = "🔴" if row['tipo'] == "Crédito" else "🔵"
+            c1.write(f"**{row['descricao']}** | {row['natureza']} ({tag} {row['tipo'][0]})")
+            c1.caption(f"Op: {row.get('natureza_operacao', 'Outros')} | R$ {row['valor']:,.2f}")
+            if c2.button("Editar", key=f"e_{row['id']}"):
                 st.session_state.edit_id = row['id']
                 st.rerun()
-            if c3.button("Excluir", key=f"del_{row['id']}", use_container_width=True):
+            if c3.button("Excluir", key=f"d_{row['id']}"):
                 supabase.table("lancamentos").delete().eq("id", row['id']).execute()
                 st.rerun()
             st.divider()
