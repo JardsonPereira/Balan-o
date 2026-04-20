@@ -2,7 +2,6 @@ import streamlit as st
 import pandas as pd
 import subprocess
 import sys
-import os
 
 # --- GARANTIA DE INSTALAÇÃO ---
 def install_and_import(package):
@@ -12,7 +11,6 @@ def install_and_import(package):
         subprocess.check_call([sys.executable, "-m", "pip", "install", package])
         return __import__(package)
 
-plotly_go = install_and_import("plotly").graph_objects
 from supabase import create_client, Client
 
 # --- CONFIGURAÇÃO ---
@@ -90,7 +88,12 @@ with st.sidebar:
         else:
             desc = conta_sel
 
-        nat_op_list = ["Venda de Mercadorias/Serviços", "Compra de Mercadorias/Bens", "Pagamento de Salários", "Encargos Financeiros", "Outros"]
+        nat_op_list = [
+            "Integralização de Capital", "Venda de Mercadorias/Serviços", 
+            "Compra de Mercadorias/Bens", "Pagamento de Salários", 
+            "Pagamento de Juros/Multas (Encargos Financeiros)", 
+            "Tarifas Bancárias (Encargos Financeiros)", "Outros"
+        ]
         natureza_op = st.selectbox("Natureza da Operação", nat_op_list)
         
         nat_list = ["Ativo", "Passivo", "Patrimônio Líquido", "Receita", "Despesa", "Encargos Financeiros"]
@@ -112,7 +115,7 @@ with st.sidebar:
 st.title("📑 Sistema Contábil Digital")
 
 if not df.empty:
-    t = st.tabs(["📊 Razonetes", "🧾 Balancete", "📈 DRE Interativa", "⚙️ Gestão"])
+    t = st.tabs(["📊 Razonetes", "🧾 Balancete", "📈 DRE", "⚙️ Gestão"])
     
     with t[0]: # Razonetes
         cols = st.columns(3)
@@ -133,38 +136,33 @@ if not df.empty:
             bal_data.append({"Conta": conta, "Devedor": d-c if d>c else 0, "Credor": c-d if c>d else 0})
         st.table(pd.DataFrame(bal_data))
 
-    with t[2]: # DRE INTERATIVA (NOVIDADE)
-        st.subheader("Análise Dinâmica de Resultado")
+    with t[2]: # DRE SEM GRÁFICOS
+        st.subheader("Demonstração do Resultado (DRE)")
         
-        # Cálculos
         receita = df[df['natureza'] == 'Receita']['valor'].sum()
         despesa = df[df['natureza'] == 'Despesa']['valor'].sum()
         encargos = df[df['natureza'] == 'Encargos Financeiros']['valor'].sum()
         lucro = receita - despesa - encargos
         
-        # Cards de métricas
         c1, c2, c3, c4 = st.columns(4)
-        c1.metric("Receita Total", f"R$ {receita:,.2f}")
-        c2.metric("Despesas Adm.", f"R$ {despesa:,.2f}", delta_color="inverse")
-        c3.metric("Encargos Fin.", f"R$ {encargos:,.2f}", delta_color="inverse")
-        c4.metric("Lucro Líquido", f"R$ {lucro:,.2f}", delta=f"{(lucro/receita*100) if receita > 0 else 0:.1f}%")
+        c1.metric("Receita Bruta", f"R$ {receita:,.2f}")
+        c2.metric("Despesas Adm.", f"R$ {despesa:,.2f}")
+        c3.metric("Encargos Fin.", f"R$ {encargos:,.2f}")
+        c4.metric("Resultado Líquido", f"R$ {lucro:,.2f}")
 
-        # Gráfico Waterfall
-        fig = plotly_go.Figure(plotly_go.Waterfall(
-            name = "DRE", orientation = "v",
-            measure = ["relative", "relative", "relative", "total"],
-            x = ["Receita", "Despesas", "Encargos", "LUCRO FINAL"],
-            y = [receita, -despesa, -encargos, 0],
-            connector = {"line":{"color":"rgb(63, 63, 63)"}},
-        ))
-        st.plotly_chart(fig, use_container_width=True)
-
-        # Análise Vertical
+        st.divider()
+        st.write("**Análise Vertical (Percentual em relação à Receita)**")
+        
         if receita > 0:
-            st.write("**Análise Vertical (Impacto sobre a Receita)**")
-            st.progress(1.0, text=f"Receita: 100%")
-            st.progress(min(despesa/receita, 1.0), text=f"Despesas: {(despesa/receita)*100:.1f}%")
-            st.progress(min(encargos/receita, 1.0), text=f"Encargos: {(encargos/receita)*100:.1f}%")
+            dre_final = pd.DataFrame([
+                {"Descrição": "RECEITA OPERACIONAL BRUTA", "Valor": receita, "%": "100.00%"},
+                {"Descrição": "(-) DESPESAS ADMINISTRATIVAS", "Valor": despesa, "%": f"{(despesa/receita)*100:.2f}%"},
+                {"Descrição": "(-) ENCARGOS FINANCEIROS", "Valor": encargos, "%": f"{(encargos/receita)*100:.2f}%"},
+                {"Descrição": "(=) LUCRO/PREJUÍZO LÍQUIDO", "Valor": lucro, "%": f"{(lucro/receita)*100:.2f}%"}
+            ])
+            st.table(dre_final.style.format({"Valor": "R$ {:.2f}"}))
+        else:
+            st.warning("Lance uma 'Receita' para visualizar a análise percentual.")
 
     with t[3]: # Gestão
         for idx, row in df.iterrows():
