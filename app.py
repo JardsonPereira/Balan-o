@@ -2,6 +2,7 @@ import streamlit as st
 import pandas as pd
 import subprocess
 import sys
+import os
 
 # --- GARANTIA DE INSTALAÇÃO ---
 def install_and_import(package):
@@ -83,17 +84,9 @@ with st.sidebar:
         opcoes_conta = ["+ Adicionar Nova Conta"] + contas_existentes
         conta_sel = st.selectbox("Selecione a Conta", opcoes_conta)
         
-        if conta_sel == "+ Adicionar Nova Conta":
-            desc = st.text_input("Nome da Nova Conta").upper().strip()
-        else:
-            desc = conta_sel
+        desc = st.text_input("Nome da Nova Conta").upper().strip() if conta_sel == "+ Adicionar Nova Conta" else conta_sel
 
-        nat_op_list = [
-            "Integralização de Capital", "Venda de Mercadorias/Serviços", 
-            "Compra de Mercadorias/Bens", "Pagamento de Salários", 
-            "Pagamento de Juros/Multas (Encargos Financeiros)", 
-            "Tarifas Bancárias (Encargos Financeiros)", "Outros"
-        ]
+        nat_op_list = ["Integralização de Capital", "Venda de Mercadorias/Serviços", "Compra de Mercadorias/Bens", "Pagamento de Salários", "Encargos Financeiros", "Outros"]
         natureza_op = st.selectbox("Natureza da Operação", nat_op_list)
         
         nat_list = ["Ativo", "Passivo", "Patrimônio Líquido", "Receita", "Despesa", "Encargos Financeiros"]
@@ -117,15 +110,43 @@ st.title("📑 Sistema Contábil Digital")
 if not df.empty:
     t = st.tabs(["📊 Razonetes", "🧾 Balancete", "📈 DRE", "⚙️ Gestão"])
     
-    with t[0]: # Razonetes
+    with t[0]: # RAZONETES COM RESULTADO FINAL
+        st.subheader("Livro Razão (Razonetes)")
         cols = st.columns(3)
         for i, conta in enumerate(sorted(df['descricao'].unique())):
             with cols[i % 3]:
                 df_c = df[df['descricao'] == conta]
-                st.markdown(f"<div style='text-align:center; font-weight:bold; border-bottom:2px solid black;'>{conta}</div>", unsafe_allow_html=True)
+                
+                # Título da Conta
+                st.markdown(f"<div style='text-align:center; font-weight:bold; border-bottom:2px solid black; background-color:#f8f9fa;'>{conta}</div>", unsafe_allow_html=True)
+                
+                # Movimentação
                 c_d, c_c = st.columns(2)
-                for v in df_c[df_c['tipo'] == 'Débito']['valor']: c_d.write(f"D: {v:,.2f}")
-                for v in df_c[df_c['tipo'] == 'Crédito']['valor']: c_c.write(f"C: {v:,.2f}")
+                v_deb = df_c[df_c['tipo'] == 'Débito']['valor'].tolist()
+                v_cre = df_c[df_c['tipo'] == 'Crédito']['valor'].tolist()
+                
+                with c_d:
+                    st.markdown("<p style='text-align:center; color:blue; font-size:11px;'>Débito</p>", unsafe_allow_html=True)
+                    for v in v_deb: st.write(f"R$ {v:,.2f}")
+                with c_c:
+                    st.markdown("<p style='text-align:center; color:red; font-size:11px;'>Crédito</p>", unsafe_allow_html=True)
+                    for v in v_cre: st.write(f"R$ {v:,.2f}")
+                
+                # Totais e Resultado Final do Razonete
+                total_d = sum(v_deb)
+                total_c = sum(v_cre)
+                saldo = total_d - total_c
+                
+                st.markdown("<div style='border-top:1px solid gray;'></div>", unsafe_allow_html=True)
+                res_d, res_c = st.columns(2)
+                
+                if saldo > 0:
+                    res_d.markdown(f"**Saldo: R$ {saldo:,.2f}**")
+                elif saldo < 0:
+                    res_c.markdown(f"**Saldo: R$ {abs(saldo):,.2f}**")
+                else:
+                    st.write("<p style='text-align:center;'>Conta Zerada</p>", unsafe_allow_html=True)
+                st.write("") # Espaçador
 
     with t[1]: # Balancete
         bal_data = []
@@ -134,35 +155,29 @@ if not df.empty:
             d = df_c[df_c['tipo'] == 'Débito']['valor'].sum()
             c = df_c[df_c['tipo'] == 'Crédito']['valor'].sum()
             bal_data.append({"Conta": conta, "Devedor": d-c if d>c else 0, "Credor": c-d if c>d else 0})
-        st.table(pd.DataFrame(bal_data))
+        st.table(pd.DataFrame(bal_data).style.format({"Devedor": "R$ {:.2f}", "Credor": "R$ {:.2f}"}))
 
-    with t[2]: # DRE SEM GRÁFICOS
-        st.subheader("Demonstração do Resultado (DRE)")
-        
-        receita = df[df['natureza'] == 'Receita']['valor'].sum()
-        despesa = df[df['natureza'] == 'Despesa']['valor'].sum()
-        encargos = df[df['natureza'] == 'Encargos Financeiros']['valor'].sum()
-        lucro = receita - despesa - encargos
+    with t[2]: # DRE
+        st.subheader("DRE (Análise Vertical)")
+        rec = df[df['natureza'] == 'Receita']['valor'].sum()
+        des = df[df['natureza'] == 'Despesa']['valor'].sum()
+        enc = df[df['natureza'] == 'Encargos Financeiros']['valor'].sum()
+        luc = rec - des - enc
         
         c1, c2, c3, c4 = st.columns(4)
-        c1.metric("Receita Bruta", f"R$ {receita:,.2f}")
-        c2.metric("Despesas Adm.", f"R$ {despesa:,.2f}")
-        c3.metric("Encargos Fin.", f"R$ {encargos:,.2f}")
-        c4.metric("Resultado Líquido", f"R$ {lucro:,.2f}")
+        c1.metric("Receita", f"R$ {rec:,.2f}")
+        c2.metric("Despesas", f"R$ {des:,.2f}")
+        c3.metric("Encargos", f"R$ {enc:,.2f}")
+        c4.metric("Lucro", f"R$ {luc:,.2f}")
 
-        st.divider()
-        st.write("**Análise Vertical (Percentual em relação à Receita)**")
-        
-        if receita > 0:
+        if rec > 0:
             dre_final = pd.DataFrame([
-                {"Descrição": "RECEITA OPERACIONAL BRUTA", "Valor": receita, "%": "100.00%"},
-                {"Descrição": "(-) DESPESAS ADMINISTRATIVAS", "Valor": despesa, "%": f"{(despesa/receita)*100:.2f}%"},
-                {"Descrição": "(-) ENCARGOS FINANCEIROS", "Valor": encargos, "%": f"{(encargos/receita)*100:.2f}%"},
-                {"Descrição": "(=) LUCRO/PREJUÍZO LÍQUIDO", "Valor": lucro, "%": f"{(lucro/receita)*100:.2f}%"}
+                {"Descrição": "RECEITA BRUTA", "Valor": rec, "%": "100%"},
+                {"Descrição": "(-) DESPESAS ADM", "Valor": des, "%": f"{(des/rec)*100:.2f}%"},
+                {"Descrição": "(-) ENCARGOS FIN", "Valor": enc, "%": f"{(enc/rec)*100:.2f}%"},
+                {"Descrição": "(=) RESULTADO LÍQUIDO", "Valor": luc, "%": f"{(luc/rec)*100:.2f}%"}
             ])
             st.table(dre_final.style.format({"Valor": "R$ {:.2f}"}))
-        else:
-            st.warning("Lance uma 'Receita' para visualizar a análise percentual.")
 
     with t[3]: # Gestão
         for idx, row in df.iterrows():
