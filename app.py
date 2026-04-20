@@ -80,42 +80,55 @@ def carregar_dados():
 
 df = carregar_dados()
 
-# --- FORMULÁRIO DE LANÇAMENTO / EDIÇÃO ---
+# --- FORMULÁRIO COM NATUREZA DA OPERAÇÃO ---
 with st.sidebar:
     st.divider()
     if st.session_state.edit_id:
         st.header("📝 Editar Lançamento")
-        # Busca dados do item a ser editado
         item_edit = df[df['id'] == st.session_state.edit_id].iloc[0]
-        btn_label = "Atualizar Lançamento"
+        btn_label = "Atualizar"
     else:
         st.header("➕ Novo Lançamento")
-        item_edit = {"descricao": "", "natureza": "Ativo", "tipo": "Débito", "valor": 0.01, "justificativa": ""}
-        btn_label = "Confirmar Lançamento"
+        item_edit = {"descricao": "", "natureza": "Ativo", "tipo": "Débito", "valor": 0.01, "justificativa": "", "natureza_operacao": "Operação Geral"}
+        btn_label = "Confirmar"
 
     with st.form("contabil", clear_on_submit=True):
-        desc = st.text_input("Nome da Conta", value=item_edit['descricao']).upper().strip()
+        # NOVO CAMPO: Natureza da Operação
+        natureza_op_list = [
+            "Compra de Mercadorias", "Venda de Mercadorias/Serviços", 
+            "Pagamento de Despesas", "Recebimento de Clientes", 
+            "Integralização de Capital", "Empréstimos/Financiamentos", 
+            "Ajustes Contábeis", "Outros"
+        ]
+        natureza_op = st.selectbox("Natureza da Operação", natureza_op_list, 
+                                   index=natureza_op_list.index(item_edit.get('natureza_operacao', "Outros")))
+        
+        desc = st.text_input("Nome da Conta (Razão)", value=item_edit['descricao']).upper().strip()
+        
         nat_list = ["Ativo", "Passivo", "Patrimônio Líquido", "Receita", "Despesa", "Encargos Financeiros"]
-        nat = st.selectbox("Natureza", nat_list, index=nat_list.index(item_edit['natureza']))
+        nat = st.selectbox("Grupo Contábil", nat_list, index=nat_list.index(item_edit['natureza']))
+        
         tipo = st.radio("Operação", ["Débito", "Crédito"], index=0 if item_edit['tipo'] == "Débito" else 1, horizontal=True)
         valor = st.number_input("Valor (R$)", min_value=0.01, value=float(item_edit['valor']), format="%.2f")
-        just = st.text_area("Justificativa", value=item_edit['justificativa'])
+        just = st.text_area("Histórico / Justificativa", value=item_edit['justificativa'])
         
-        submitted = st.form_submit_button(btn_label, use_container_width=True)
-        
-        if submitted and desc:
-            payload = {"user_id": user_id, "descricao": desc, "natureza": nat, "tipo": tipo, "valor": valor, "justificativa": just}
-            if st.session_state.edit_id:
-                supabase.table("lancamentos").update(payload).eq("id", st.session_state.edit_id).execute()
-                st.session_state.edit_id = None # Limpa o modo edição
-            else:
-                supabase.table("lancamentos").insert(payload).execute()
-            st.rerun()
-    
-    if st.session_state.edit_id:
-        if st.button("Cancelar Edição", use_container_width=True):
-            st.session_state.edit_id = None
-            st.rerun()
+        if st.form_submit_button(btn_label, use_container_width=True):
+            if desc:
+                payload = {
+                    "user_id": user_id, 
+                    "descricao": desc, 
+                    "natureza": nat, 
+                    "tipo": tipo, 
+                    "valor": valor, 
+                    "justificativa": just,
+                    "natureza_operacao": natureza_op # Enviando o novo campo
+                }
+                if st.session_state.edit_id:
+                    supabase.table("lancamentos").update(payload).eq("id", st.session_state.edit_id).execute()
+                    st.session_state.edit_id = None
+                else:
+                    supabase.table("lancamentos").insert(payload).execute()
+                st.rerun()
 
 # --- INTERFACE PRINCIPAL ---
 st.title("📑 Painel Contábil Digital")
@@ -127,7 +140,8 @@ if not df.empty:
         for conta in sorted(df['descricao'].unique()):
             df_c = df[df['descricao'] == conta]
             with st.expander(f"📖 {conta} ({df_c['natureza'].iloc[0]})"):
-                st.table(df_c[['tipo', 'valor', 'justificativa']])
+                # Exibindo a natureza da operação na tabela
+                st.table(df_c[['natureza_operacao', 'tipo', 'valor', 'justificativa']])
 
     with tabs[1]: # Balancete
         balancete_data = []
@@ -155,16 +169,16 @@ if not df.empty:
         ))
         st.plotly_chart(fig, use_container_width=True)
 
-    with tabs[3]: # Gestão (Edição e Exclusão)
+    with tabs[3]: # Gestão
         st.subheader("Gerenciar Lançamentos")
         for idx, row in df.iterrows():
             col1, col2, col3 = st.columns([0.6, 0.2, 0.2])
-            col1.write(f"📝 {row['descricao']} | R$ {row['valor']:.2f}")
+            # Mostrando a natureza da operação na linha de gestão
+            col1.write(f"🏷️ **{row.get('natureza_operacao', 'Op.')}** | {row['descricao']} | R$ {row['valor']:.2f}")
             
             if col2.button("Editar", key=f"edit_{row['id']}"):
                 st.session_state.edit_id = row['id']
                 st.rerun()
-                
             if col3.button("Excluir", key=f"del_{row['id']}"):
                 supabase.table("lancamentos").delete().eq("id", row['id']).execute()
                 st.rerun()
