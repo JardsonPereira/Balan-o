@@ -26,10 +26,13 @@ except Exception:
     st.error("Erro de conexão. Verifique as Secrets.")
     st.stop()
 
-# --- AUTENTICAÇÃO ---
+# --- ESTADOS DO SISTEMA ---
 if 'user' not in st.session_state:
     st.session_state.user = None
+if 'edit_id' not in st.session_state:
+    st.session_state.edit_id = None
 
+# --- AUTENTICAÇÃO ---
 def gerenciar_acesso():
     st.sidebar.title("🔐 Acesso")
     menu = st.sidebar.radio("Escolha", ["Login", "Criar Conta", "Recuperar Senha"])
@@ -77,90 +80,93 @@ def carregar_dados():
 
 df = carregar_dados()
 
-# --- LANÇAMENTOS ---
+# --- FORMULÁRIO DE LANÇAMENTO / EDIÇÃO ---
 with st.sidebar:
     st.divider()
-    st.header("➕ Novo Lançamento")
+    if st.session_state.edit_id:
+        st.header("📝 Editar Lançamento")
+        # Busca dados do item a ser editado
+        item_edit = df[df['id'] == st.session_state.edit_id].iloc[0]
+        btn_label = "Atualizar Lançamento"
+    else:
+        st.header("➕ Novo Lançamento")
+        item_edit = {"descricao": "", "natureza": "Ativo", "tipo": "Débito", "valor": 0.01, "justificativa": ""}
+        btn_label = "Confirmar Lançamento"
+
     with st.form("contabil", clear_on_submit=True):
-        desc = st.text_input("Nome da Conta").upper().strip()
-        nat = st.selectbox("Natureza", ["Ativo", "Passivo", "Patrimônio Líquido", "Receita", "Despesa", "Encargos Financeiros"])
-        tipo = st.radio("Operação", ["Débito", "Crédito"], horizontal=True)
-        valor = st.number_input("Valor (R$)", min_value=0.01, format="%.2f")
-        just = st.text_area("Justificativa")
-        if st.form_submit_button("Confirmar"):
-            if desc:
-                supabase.table("lancamentos").insert({"user_id": user_id, "descricao": desc, "natureza": nat, "tipo": tipo, "valor": valor, "justificativa": just}).execute()
-                st.rerun()
+        desc = st.text_input("Nome da Conta", value=item_edit['descricao']).upper().strip()
+        nat_list = ["Ativo", "Passivo", "Patrimônio Líquido", "Receita", "Despesa", "Encargos Financeiros"]
+        nat = st.selectbox("Natureza", nat_list, index=nat_list.index(item_edit['natureza']))
+        tipo = st.radio("Operação", ["Débito", "Crédito"], index=0 if item_edit['tipo'] == "Débito" else 1, horizontal=True)
+        valor = st.number_input("Valor (R$)", min_value=0.01, value=float(item_edit['valor']), format="%.2f")
+        just = st.text_area("Justificativa", value=item_edit['justificativa'])
+        
+        submitted = st.form_submit_button(btn_label, use_container_width=True)
+        
+        if submitted and desc:
+            payload = {"user_id": user_id, "descricao": desc, "natureza": nat, "tipo": tipo, "valor": valor, "justificativa": just}
+            if st.session_state.edit_id:
+                supabase.table("lancamentos").update(payload).eq("id", st.session_state.edit_id).execute()
+                st.session_state.edit_id = None # Limpa o modo edição
+            else:
+                supabase.table("lancamentos").insert(payload).execute()
+            st.rerun()
+    
+    if st.session_state.edit_id:
+        if st.button("Cancelar Edição", use_container_width=True):
+            st.session_state.edit_id = None
+            st.rerun()
 
 # --- INTERFACE PRINCIPAL ---
 st.title("📑 Painel Contábil Digital")
 
 if not df.empty:
-    t1, t2, t3, t4 = st.tabs(["📊 Razonetes", "🧾 Balancete", "📈 DRE Interativa", "⚙️ Gestão"])
+    tabs = st.tabs(["📊 Razonetes", "🧾 Balancete", "📈 DRE Interativa", "⚙️ Gestão"])
     
-    with t1:
-        st.subheader("Livro Razão")
+    with tabs[0]: # Razonetes
         for conta in sorted(df['descricao'].unique()):
             df_c = df[df['descricao'] == conta]
             with st.expander(f"📖 {conta} ({df_c['natureza'].iloc[0]})"):
                 st.table(df_c[['tipo', 'valor', 'justificativa']])
 
-    with t2:
-        st.subheader("Balancete de Verificação")
-        
-        # Lógica do Balancete
+    with tabs[1]: # Balancete
         balancete_data = []
         for conta in sorted(df['descricao'].unique()):
             df_c = df[df['descricao'] == conta]
-            debitos = df_c[df_c['tipo'] == 'Débito']['valor'].sum()
-            creditos = df_c[df_c['tipo'] == 'Crédito']['valor'].sum()
-            balancete_data.append({
-                "Conta": conta,
-                "Débito (Devedor)": debitos,
-                "Crédito (Credor)": creditos
-            })
-        
+            d = df_c[df_c['tipo'] == 'Débito']['valor'].sum()
+            c = df_c[df_c['tipo'] == 'Crédito']['valor'].sum()
+            balancete_data.append({"Conta": conta, "Débito": d, "Crédito": c})
         bal_df = pd.DataFrame(balancete_data)
-        st.table(bal_df.style.format({"Débito (Devedor)": "R$ {:.2f}", "Crédito (Credor)": "R$ {:.2f}"}))
-        
-        total_d = bal_df["Débito (Devedor)"].sum()
-        total_c = bal_df["Crédito (Credor)"].sum()
-        
-        c1, c2 = st.columns(2)
-        c1.metric("Total Devedor", f"R$ {total_d:,.2f}")
-        c2.metric("Total Credor", f"R$ {total_c:,.2f}")
-        
-        if round(total_d, 2) == round(total_c, 2):
-            st.success("✅ Balancete em Equilíbrio: Débitos e Créditos conferem!")
+        st.table(bal_df.style.format({"Débito": "R$ {:.2f}", "Crédito": "R$ {:.2f}"}))
+        if round(bal_df["Débito"].sum(), 2) == round(bal_df["Crédito"].sum(), 2):
+            st.success("✅ Balancete em Equilíbrio!")
         else:
-            st.error("⚠️ Balancete Desequilibrado: Verifique as partidas dobradas.")
+            st.error("⚠️ Balancete Desequilibrado!")
 
-    with t3:
+    with tabs[2]: # DRE
         rec = df[df['natureza'] == 'Receita']['valor'].sum()
         desp = df[df['natureza'] == 'Despesa']['valor'].sum()
         enc = df[df['natureza'] == 'Encargos Financeiros']['valor'].sum()
         lucro = rec - desp - enc
-        
-        # Gráficos e Métricas (Mantidos da versão anterior)
-        c1, c2, c3 = st.columns(3)
-        c1.metric("Receita", f"R$ {rec:,.2f}")
-        c2.metric("Custos/Gastos", f"R$ {desp+enc:,.2f}", delta_color="inverse")
-        c3.metric("Lucro Líquido", f"R$ {lucro:,.2f}")
-
         fig = plotly_go.Figure(plotly_go.Waterfall(
             x = ["Receita", "Despesas", "Encargos", "LUCRO"],
             measure = ["relative", "relative", "relative", "total"],
-            y = [rec, -desp, -enc, 0],
-            connector = {"line":{"color":"#444"}}
+            y = [rec, -desp, -enc, 0]
         ))
         st.plotly_chart(fig, use_container_width=True)
 
-    with t4:
+    with tabs[3]: # Gestão (Edição e Exclusão)
+        st.subheader("Gerenciar Lançamentos")
         for idx, row in df.iterrows():
-            c1, c2 = st.columns([0.8, 0.2])
-            c1.write(f"{row['descricao']} | R$ {row['valor']:.2f}")
-            if c2.button("Apagar", key=f"del_{row['id']}"):
+            col1, col2, col3 = st.columns([0.6, 0.2, 0.2])
+            col1.write(f"📝 {row['descricao']} | R$ {row['valor']:.2f}")
+            
+            if col2.button("Editar", key=f"edit_{row['id']}"):
+                st.session_state.edit_id = row['id']
+                st.rerun()
+                
+            if col3.button("Excluir", key=f"del_{row['id']}"):
                 supabase.table("lancamentos").delete().eq("id", row['id']).execute()
                 st.rerun()
 else:
-    st.info("Aguardando lançamentos para gerar o Balancete.")
+    st.info("Aguardando lançamentos.")
