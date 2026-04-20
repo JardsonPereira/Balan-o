@@ -2,18 +2,22 @@ import streamlit as st
 import pandas as pd
 import subprocess
 import sys
-import plotly.graph_objects as go # Biblioteca para gráficos interativos
+import os
 
-# --- GARANTIA DE INSTALAÇÃO ---
-try:
-    from supabase import create_client, Client
-    import plotly
-except ImportError:
-    subprocess.check_call([sys.executable, "-m", "pip", "install", "supabase", "plotly"])
-    from supabase import create_client, Client
+# --- GARANTIA DE INSTALAÇÃO (BOOTSTRAP) ---
+def install_and_import(package):
+    try:
+        return __import__(package)
+    except ImportError:
+        subprocess.check_call([sys.executable, "-m", "pip", "install", package])
+        return __import__(package)
 
-# --- CONFIGURAÇÃO E CONEXÃO ---
-st.set_page_config(page_title="Sistema Contábil Integrado", layout="wide")
+# Importações com garantia
+plotly_go = install_and_import("plotly").graph_objects
+from supabase import create_client, Client
+
+# --- CONFIGURAÇÃO ---
+st.set_page_config(page_title="Sistema Contábil Interativo", layout="wide")
 
 try:
     url: str = st.secrets["SUPABASE_URL"]
@@ -23,7 +27,7 @@ except Exception:
     st.error("Erro de conexão. Verifique as Secrets.")
     st.stop()
 
-# --- SISTEMA DE ACESSO ---
+# --- AUTENTICAÇÃO ---
 if 'user' not in st.session_state:
     st.session_state.user = None
 
@@ -48,7 +52,7 @@ def gerenciar_acesso():
                 st.session_state.user = res.user
                 st.rerun()
             except Exception:
-                st.sidebar.error("E-mail ou senha inválidos.")
+                st.sidebar.error("Credenciais inválidas.")
     elif aba == "Recuperar Senha":
         if st.sidebar.button("Enviar link de recuperação"):
             try:
@@ -61,21 +65,18 @@ if st.session_state.user is None:
     gerenciar_acesso()
     st.stop()
 
-# --- SISTEMA PÓS-LOGIN ---
+# --- PÓS-LOGIN ---
 user_id = st.session_state.user.id
 st.sidebar.write(f"👤 Logado: **{st.session_state.user.email}**")
 if st.sidebar.button("Sair"):
     st.session_state.user = None
     st.rerun()
 
-def buscar_dados():
-    try:
-        res = supabase.table("lancamentos").select("*").eq("user_id", user_id).execute()
-        return pd.DataFrame(res.data)
-    except Exception:
-        return pd.DataFrame()
+def carregar_dados():
+    res = supabase.table("lancamentos").select("*").eq("user_id", user_id).execute()
+    return pd.DataFrame(res.data)
 
-df = buscar_dados()
+df = carregar_dados()
 
 # --- LANÇAMENTOS ---
 with st.sidebar:
@@ -87,12 +88,12 @@ with st.sidebar:
         tipo = st.radio("Operação", ["Débito", "Crédito"], horizontal=True)
         valor = st.number_input("Valor (R$)", min_value=0.01, format="%.2f")
         just = st.text_area("Justificativa")
-        if st.form_submit_button("Confirmar Lançamento"):
+        if st.form_submit_button("Confirmar"):
             if desc:
                 supabase.table("lancamentos").insert({"user_id": user_id, "descricao": desc, "natureza": nat, "tipo": tipo, "valor": valor, "justificativa": just}).execute()
                 st.rerun()
 
-# --- DASHBOARD PRINCIPAL ---
+# --- INTERFACE PRINCIPAL ---
 st.title("📑 Painel Contábil Digital")
 
 if not df.empty:
@@ -101,69 +102,52 @@ if not df.empty:
     with t1:
         for conta in sorted(df['descricao'].unique()):
             df_c = df[df['descricao'] == conta]
-            with st.expander(f"📖 Conta: {conta}"):
-                c_d, c_c = st.columns(2)
-                v_d = df_c[df_c['tipo'] == 'Débito']['valor'].sum()
-                v_c = df_c[df_c['tipo'] == 'Crédito']['valor'].sum()
-                c_d.markdown("**DÉBITO**")
-                for _, r in df_c[df_c['tipo'] == 'Débito'].iterrows(): c_d.caption(f"R$ {r['valor']:.2f} - {r['justificativa']}")
-                c_c.markdown("**CRÉDITO**")
-                for _, r in df_c[df_c['tipo'] == 'Crédito'].iterrows(): c_c.caption(f"R$ {r['valor']:.2f} - {r['justificativa']}")
-                st.write(f"**Saldo: R$ {abs(v_d - v_c):,.2f}**")
+            with st.expander(f"📖 {conta} ({df_c['natureza'].iloc[0]})"):
+                st.table(df_c[['tipo', 'valor', 'justificativa']])
 
     with t2:
-        # CÁLCULOS
         rec = df[df['natureza'] == 'Receita']['valor'].sum()
         desp = df[df['natureza'] == 'Despesa']['valor'].sum()
         enc = df[df['natureza'] == 'Encargos Financeiros']['valor'].sum()
         lucro = rec - desp - enc
         
-        st.subheader("Análise Visual de Resultado")
+        # Métricas interativas
+        c1, c2, c3, c4 = st.columns(4)
+        c1.metric("Receita", f"R$ {rec:,.2f}")
+        c2.metric("Despesas", f"R$ {desp:,.2f}", delta_color="inverse")
+        c3.metric("Encargos", f"R$ {enc:,.2f}", delta_color="inverse")
+        c4.metric("Lucro Líquido", f"R$ {lucro:,.2f}", delta=f"{(lucro/rec*100) if rec>0 else 0:.1f}%")
+
+        col_left, col_right = st.columns(2)
         
-        # Métricas em destaque
-        m1, m2, m3, m4 = st.columns(4)
-        m1.metric("Receita Total", f"R$ {rec:,.2f}")
-        m2.metric("Despesas Adm.", f"R$ {desp:,.2f}", delta_color="inverse")
-        m3.metric("Encargos Fin.", f"R$ {enc:,.2f}", delta_color="inverse")
-        m4.metric("Lucro Líquido", f"R$ {lucro:,.2f}", delta=f"{(lucro/rec*100) if rec>0 else 0:.1f}%")
-
-        col_graf1, col_graf2 = st.columns(2)
-
-        with col_graf1:
-            st.write("**Composição de Gastos**")
-            if (desp + enc) > 0:
-                fig_pie = go.Figure(data=[go.Pie(labels=['Despesas', 'Encargos'], values=[desp, enc], hole=.3)])
-                st.plotly_chart(fig_pie, use_container_width=True)
-            else:
-                st.info("Sem gastos para exibir gráfico.")
-
-        with col_graf2:
-            st.write("**Fluxo do Resultado (Waterfall)**")
-            fig_water = go.Figure(go.Waterfall(
-                orientation = "v",
-                measure = ["relative", "relative", "relative", "total"],
+        with col_left:
+            st.write("**Fluxo de Resultado**")
+            fig = plotly_go.Figure(plotly_go.Waterfall(
                 x = ["Receita", "Despesas", "Encargos", "LUCRO"],
-                textposition = "outside",
-                text = [f"+{rec}", f"-{desp}", f"-{enc}", f"={lucro}"],
+                measure = ["relative", "relative", "relative", "total"],
                 y = [rec, -desp, -enc, 0],
-                connector = {"line":{"color":"rgb(63, 63, 63)"}},
+                text = [f"R${rec}", f"-R${desp}", f"-R${enc}", f"R${lucro}"],
+                connector = {"line":{"color":"#444"}}
             ))
-            st.plotly_chart(fig_water, use_container_width=True)
+            st.plotly_chart(fig, use_container_width=True)
 
-        st.divider()
-        st.write("**📊 Análise Vertical Detalhada:**")
-        if rec > 0:
-            st.progress(1.0, text=f"Receita: 100%")
-            st.progress(min(desp/rec, 1.0), text=f"Despesas Administrativas: {(desp/rec)*100:.2f}%")
-            st.progress(min(enc/rec, 1.0), text=f"Encargos Financeiros: {(enc/rec)*100:.2f}%")
-        
+        with col_right:
+            st.write("**Análise Vertical**")
+            if rec > 0:
+                st.write(f"Despesas: **{(desp/rec)*100:.1f}%** da Receita")
+                st.write(f"Encargos: **{(enc/rec)*100:.1f}%** da Receita")
+                st.write(f"Margem Líquida: **{(lucro/rec)*100:.1f}%**")
+                # Gráfico de Pizza
+                fig_pie = plotly_go.Figure(data=[plotly_go.Pie(labels=['Lucro', 'Despesas', 'Encargos'], 
+                                                            values=[max(0, lucro), desp, enc], hole=.3)])
+                st.plotly_chart(fig_pie, use_container_width=True)
+
     with t3:
-        st.subheader("Histórico")
         for idx, row in df.iterrows():
             c1, c2 = st.columns([0.8, 0.2])
-            c1.write(f"🗑️ {row['descricao']} | R$ {row['valor']:.2f}")
+            c1.write(f"{row['descricao']} | R$ {row['valor']:.2f}")
             if c2.button("Apagar", key=f"del_{row['id']}"):
                 supabase.table("lancamentos").delete().eq("id", row['id']).execute()
                 st.rerun()
 else:
-    st.info("Nenhum lançamento encontrado.")
+    st.info("Aguardando lançamentos...")
