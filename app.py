@@ -69,7 +69,7 @@ def carregar_dados():
 
 df = carregar_dados()
 
-# --- FORMULÁRIO ---
+# --- FORMULÁRIO (CORRIGIDO PARA NÃO SUMIR) ---
 with st.sidebar:
     st.divider()
     if st.session_state.edit_id:
@@ -79,6 +79,7 @@ with st.sidebar:
         st.header("➕ Novo")
         item_edit = {"descricao": "", "natureza": "Ativo", "tipo": "Débito", "valor": 0.01, "justificativa": ""}
 
+    # IMPORTANTE: Não usamos clear_on_submit=True para evitar bugs de reset visual
     with st.form("contabil"):
         contas_existentes = sorted(df['descricao'].unique().tolist()) if not df.empty else []
         opcoes_conta = ["+ Adicionar Nova Conta"] + contas_existentes
@@ -89,8 +90,9 @@ with st.sidebar:
             
         conta_sel = st.selectbox("Selecione a Conta", opcoes_conta, index=idx_conta)
         
+        # Lógica persistente para o nome da conta
         if conta_sel == "+ Adicionar Nova Conta":
-            desc = st.text_input("Nome da Nova Conta", value="").upper().strip()
+            desc = st.text_input("Nome da Nova Conta").upper().strip()
         else:
             desc = conta_sel
 
@@ -100,17 +102,21 @@ with st.sidebar:
         valor = st.number_input("Valor", min_value=0.01, value=float(item_edit['valor']))
         just = st.text_area("Justificativa", value=item_edit['justificativa'])
         
-        if st.form_submit_button("Confirmar"):
+        if st.form_submit_button("Confirmar Lançamento"):
             if not desc:
-                st.error("Informe o nome da conta!")
+                st.error("O nome da conta é obrigatório!")
             else:
                 payload = {"user_id": user_id, "descricao": desc, "natureza": nat, "tipo": tipo, "valor": valor, "justificativa": just}
-                if st.session_state.edit_id:
-                    supabase.table("lancamentos").update(payload).eq("id", st.session_state.edit_id).execute()
-                    st.session_state.edit_id = None
-                else:
-                    supabase.table("lancamentos").insert(payload).execute()
-                st.rerun()
+                try:
+                    if st.session_state.edit_id:
+                        supabase.table("lancamentos").update(payload).eq("id", st.session_state.edit_id).execute()
+                        st.session_state.edit_id = None
+                    else:
+                        supabase.table("lancamentos").insert(payload).execute()
+                    st.success("Salvo com sucesso!")
+                    st.rerun()
+                except Exception as e:
+                    st.error(f"Erro ao salvar: {e}")
 
 # --- INTERFACE PRINCIPAL ---
 st.title("📑 Sistema Contábil Digital")
@@ -152,8 +158,6 @@ if not df.empty:
 
     elif opcao_menu == "📈 DRE":
         st.subheader("Demonstração do Resultado do Exercício")
-        
-        # Cálculos de Totais
         df_rec = df[df['natureza'] == 'Receita'].groupby('descricao')['valor'].sum()
         df_des = df[df['natureza'] == 'Despesa'].groupby('descricao')['valor'].sum()
         df_enc = df[df['natureza'] == 'Encargos Financeiros'].groupby('descricao')['valor'].sum()
@@ -164,27 +168,20 @@ if not df.empty:
         ebitda = rec_total - des_total
         lucro_real = ebitda - enc_total
 
-        # --- ESTRUTURA RETRÁTIL (ACCORDION) ---
-        
-        # 1. Receita Bruta
         with st.expander(f"(=) RECEITA BRUTA OPERACIONAL: R$ {rec_total:,.2f}", expanded=True):
             for nome, valor in df_rec.items():
                 st.write(f"   (+) {nome}: R$ {valor:,.2f}")
 
-        # 2. Despesas Operacionais
         with st.expander(f"(-) DESPESAS OPERACIONAIS: R$ {-des_total:,.2f}", expanded=False):
             for nome, valor in df_des.items():
                 st.write(f"   (-) {nome}: R$ {valor:,.2f}")
 
-        # 3. EBITDA (Destaque)
         st.info(f"**(=) EBITDA (LAJIDA): R$ {ebitda:,.2f}**")
 
-        # 4. Resultado Financeiro
         with st.expander(f"(-) RESULTADO FINANCEIRO: R$ {-enc_total:,.2f}", expanded=False):
             for nome, valor in df_enc.items():
                 st.write(f"   (-) {nome}: R$ {valor:,.2f}")
 
-        # 5. Lucro Real (Destaque Final)
         st.success(f"### **(=) LUCRO REAL LÍQUIDO: R$ {lucro_real:,.2f}**")
 
     elif opcao_menu == "⚙️ Gestão":
