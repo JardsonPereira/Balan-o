@@ -127,13 +127,15 @@ st.title("📑 Sistema Contábil Digital")
 # --- CSS PARA FIXAR O MENU NO TOPO ---
 st.markdown("""
     <style>
-        div[data-testid="stHorizontalBlock"] {
+        /* Seleciona o container das colunas de navegação */
+        div[data-testid="stHorizontalBlock"]:has(button) {
+            position: -webkit-sticky;
             position: sticky;
-            top: 2.8rem;
+            top: 2.8rem; /* Ajuste dependendo do tema do Streamlit */
             background-color: white;
             z-index: 999;
-            padding: 10px 0px;
-            border-bottom: 1px solid #ddd;
+            padding: 15px 0px;
+            border-bottom: 2px solid #f0f2f6;
         }
     </style>
 """, unsafe_allow_html=True)
