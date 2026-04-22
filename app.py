@@ -116,7 +116,7 @@ with st.sidebar:
 st.title("📑 Sistema Contábil Digital")
 
 if not df.empty:
-    t = st.tabs(["📊 Razonetes", "🧾 Balancete", "📈 DRE Profissional", "⚙️ Gestão"])
+    t = st.tabs(["📊 Razonetes", "🧾 Balancete", "📈 DRE", "⚙️ Gestão"])
     
     with t[0]: # Razonetes
         cols = st.columns(3)
@@ -150,7 +150,7 @@ if not df.empty:
         col_b1.metric("Total Saldos Devedores", f"R$ {t_dev:,.2f}")
         col_b2.metric("Total Saldos Credores", f"R$ {t_cre:,.2f}")
 
-    with t[2]: # DRE PROFISSIONAL
+    with t[2]: # DRE (Sem Destaques Visuais)
         st.subheader("Demonstração do Resultado do Exercício (DRE)")
         
         # Agrupamento de dados
@@ -164,41 +164,32 @@ if not df.empty:
         ebitda = rec_total - des_total
         lucro_real = ebitda - enc_total
 
-        # Resumo Visual Profissional
+        # Resumo Superior
         m1, m2, m3 = st.columns(3)
         m1.metric("Receita Líquida", f"R$ {rec_total:,.2f}")
-        m2.metric("EBITDA", f"R$ {ebitda:,.2f}", f"{(ebitda/rec_total*100 if rec_total > 0 else 0):.1f}%")
-        m3.metric("Lucro Real", f"R$ {lucro_real:,.2f}", f"{(lucro_real/rec_total*100 if rec_total > 0 else 0):.1f}%")
+        m2.metric("EBITDA", f"R$ {ebitda:,.2f}")
+        m3.metric("Lucro Real", f"R$ {lucro_real:,.2f}")
 
-        # Construção da Estrutura Contábil
+        # Estrutura da Tabela
         dre_linhas = []
-        dre_linhas.append({"Descrição": "(=) RECEITA BRUTA OPERACIONAL", "Valor": rec_total, "Destaque": True})
+        dre_linhas.append({"Descrição": "(=) RECEITA BRUTA OPERACIONAL", "Valor": rec_total})
         for nome, valor in df_rec.items():
-            dre_linhas.append({"Descrição": f"   (+) {nome}", "Valor": valor, "Destaque": False})
+            dre_linhas.append({"Descrição": f"   (+) {nome}", "Valor": valor})
             
-        dre_linhas.append({"Descrição": "(-) DESPESAS OPERACIONAIS (ADM/VENDAS)", "Valor": -des_total, "Destaque": True})
+        dre_linhas.append({"Descrição": "(-) DESPESAS OPERACIONAIS", "Valor": -des_total})
         for nome, valor in df_des.items():
-            dre_linhas.append({"Descrição": f"   (-) {nome}", "Valor": -valor, "Destaque": False})
+            dre_linhas.append({"Descrição": f"   (-) {nome}", "Valor": -valor})
             
-        dre_linhas.append({"Descrição": "(=) EBITDA (LAJIDA)", "Valor": ebitda, "Destaque": True})
+        dre_linhas.append({"Descrição": "(=) EBITDA (LAJIDA)", "Valor": ebitda})
         
-        dre_linhas.append({"Descrição": "(-) RESULTADO FINANCEIRO (ENCARGOS)", "Valor": -enc_total, "Destaque": True})
+        dre_linhas.append({"Descrição": "(-) RESULTADO FINANCEIRO", "Valor": -enc_total})
         for nome, valor in df_enc.items():
-            dre_linhas.append({"Descrição": f"   (-) {nome}", "Valor": -valor, "Destaque": False})
+            dre_linhas.append({"Descrição": f"   (-) {nome}", "Valor": -valor})
             
-        dre_linhas.append({"Descrição": "(=) LUCRO REAL LÍQUIDO", "Valor": lucro_real, "Destaque": True})
+        dre_linhas.append({"Descrição": "(=) LUCRO REAL LÍQUIDO", "Valor": lucro_real})
 
-        # Renderização da Tabela com Estilização
         dre_final = pd.DataFrame(dre_linhas)
-        
-        def destacar_linhas(row):
-            if row['Destaque']:
-                return ['background-color: #f0f2f6; font-weight: bold'] * len(row)
-            return [''] * len(row)
-
-        st.table(dre_final.style.apply(destacar_linhas, axis=1)
-                 .format({"Valor": "R$ {:,.2f}"})
-                 .hide(axis="columns", subset=["Destaque"]))
+        st.table(dre_final.style.format({"Valor": "R$ {:,.2f}"}))
 
     with t[3]: # Gestão
         st.subheader("Gerenciar Lançamentos")
