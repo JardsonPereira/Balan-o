@@ -22,7 +22,7 @@ try:
     key: str = st.secrets["SUPABASE_KEY"]
     supabase: Client = create_client(url, key)
 except Exception:
-    st.error("Erro de conexão. Verifique as Secrets.")
+    st.error("Erro de conexão. Verifique as Secrets no Streamlit Cloud.")
     st.stop()
 
 # --- ESTADOS DO SISTEMA ---
@@ -136,29 +136,45 @@ st.divider()
 
 if not df.empty:
     if opcao_menu == "📊 Razonetes":
+        st.markdown("""
+            <style>
+            .conta-card { background: #ffffff; border: 1px solid #dfe3e8; border-radius: 8px; box-shadow: 0 4px 6px rgba(0,0,0,0.05); margin-bottom: 20px; }
+            .conta-titulo { background: #f4f6f8; padding: 10px; text-align: center; font-weight: bold; border-bottom: 2px solid #202124; border-radius: 8px 8px 0 0; }
+            .conta-corpo { display: flex; min-height: 80px; }
+            .lado-debito { flex: 1; padding: 10px; border-right: 1px solid #dfe3e8; }
+            .lado-credito { flex: 1; padding: 10px; }
+            .valor-item { font-size: 0.85rem; margin-bottom: 2px; }
+            .valor-deb { color: #1e7e34; }
+            .valor-cre { color: #d32f2f; }
+            .just-hint { font-size: 0.7rem; color: #637381; font-style: italic; display: block; }
+            .conta-rodape { padding: 8px; border-top: 1px solid #202124; text-align: center; font-weight: bold; font-size: 0.9rem; }
+            </style>
+        """, unsafe_allow_html=True)
+
         cols = st.columns(3)
         for i, conta in enumerate(sorted(df['descricao'].unique())):
             with cols[i % 3]:
                 df_c = df[df['descricao'] == conta]
-                st.markdown(f"<div style='text-align:center; font-weight:bold; border-bottom:2px solid black; background-color:#f8f9fa;'>{conta}</div>", unsafe_allow_html=True)
-                c_d, c_c = st.columns(2)
-                v_deb = df_c[df_c['tipo'] == 'Débito']['valor'].sum()
-                v_cre = df_c[df_c['tipo'] == 'Crédito']['valor'].sum()
-                
-                # Exibição com justificativa ao passar o mouse ou pequena legenda
-                for _, r in df_c[df_c['tipo'] == 'Débito'].iterrows(): 
-                    c_d.write(f"D: {r['valor']:,.2f}")
-                    if r['justificativa']: c_d.caption(f"↳ {r['justificativa']}")
-                
-                for _, r in df_c[df_c['tipo'] == 'Crédito'].iterrows(): 
-                    c_c.write(f"C: {r['valor']:,.2f}")
-                    if r['justificativa']: c_c.caption(f"↳ {r['justificativa']}")
-                
-                st.markdown("<div style='border-top:1px solid gray;'></div>", unsafe_allow_html=True)
-                saldo = v_deb - v_cre
-                if saldo > 0: st.markdown(f"**Saldo D: R$ {saldo:,.2f}**")
-                elif saldo < 0: st.markdown(f"**Saldo C: R$ {abs(saldo):,.2f}**")
-                else: st.write("Conta Zerada")
+                v_deb_sum = df_c[df_c['tipo'] == 'Débito']['valor'].sum()
+                v_cre_sum = df_c[df_c['tipo'] == 'Crédito']['valor'].sum()
+                saldo = v_deb_sum - v_cre_sum
+
+                deb_html = "".join([f"<div class='valor-item valor-deb'>D: {r['valor']:,.2f}<span class='just-hint'>{r['justificativa']}</span></div>" for _, r in df_c[df_c['tipo'] == 'Débito'].iterrows()])
+                cre_html = "".join([f"<div class='valor-item valor-cre'>C: {r['valor']:,.2f}<span class='just-hint'>{r['justificativa']}</span></div>" for _, r in df_c[df_c['tipo'] == 'Crédito'].iterrows()])
+
+                txt_saldo = f"Saldo D: R$ {saldo:,.2f}" if saldo > 0 else f"Saldo C: R$ {abs(saldo):,.2f}" if saldo < 0 else "Zerada"
+                cor_saldo = "#1e7e34" if saldo > 0 else "#d32f2f" if saldo < 0 else "#212529"
+
+                st.markdown(f"""
+                    <div class="conta-card">
+                        <div class="conta-titulo">{conta}</div>
+                        <div class="conta-corpo">
+                            <div class="lado-debito">{deb_html}</div>
+                            <div class="lado-credito">{cre_html}</div>
+                        </div>
+                        <div class="conta-rodape" style="color: {cor_saldo};">{txt_saldo}</div>
+                    </div>
+                """, unsafe_allow_html=True)
 
     elif opcao_menu == "🧾 Balancete":
         st.subheader("Balancete de Verificação")
@@ -176,58 +192,45 @@ if not df.empty:
         col_b2.metric("Total Credores", f"R$ {t_cre:,.2f}")
 
     elif opcao_menu == "📈 DRE":
-        st.subheader("Demonstração do Resultado do Exercício")
+        st.subheader("Demonstração do Resultado")
         df_rec = df[df['natureza'] == 'Receita'].groupby('descricao')['valor'].sum()
         df_des = df[df['natureza'] == 'Despesa'].groupby('descricao')['valor'].sum()
         df_enc = df[df['natureza'] == 'Encargos Financeiros'].groupby('descricao')['valor'].sum()
         
-        rec_total = df_rec.sum()
-        des_total = df_des.sum()
-        enc_total = df_enc.sum()
+        rec_total, des_total, enc_total = df_rec.sum(), df_des.sum(), df_enc.sum()
         ebitda = rec_total - des_total
         lucro_real = ebitda - enc_total
 
         with st.expander(f"(=) RECEITA BRUTA OPERACIONAL: R$ {rec_total:,.2f}", expanded=True):
-            for nome, valor in df_rec.items():
-                st.write(f"   (+) {nome}: R$ {valor:,.2f}")
+            for nome, valor in df_rec.items(): st.write(f"   (+) {nome}: R$ {valor:,.2f}")
 
         with st.expander(f"(-) DESPESAS OPERACIONAIS: R$ {-des_total:,.2f}", expanded=False):
-            for nome, valor in df_des.items():
-                st.write(f"   (-) {nome}: R$ {valor:,.2f}")
+            for nome, valor in df_des.items(): st.write(f"   (-) {nome}: R$ {valor:,.2f}")
 
         st.info(f"**(=) EBITDA (LAJIDA): R$ {ebitda:,.2f}**")
 
         with st.expander(f"(-) RESULTADO FINANCEIRO: R$ {-enc_total:,.2f}", expanded=False):
-            for nome, valor in df_enc.items():
-                st.write(f"   (-) {nome}: R$ {valor:,.2f}")
+            for nome, valor in df_enc.items(): st.write(f"   (-) {nome}: R$ {valor:,.2f}")
 
         st.success(f"### **(=) LUCRO REAL LÍQUIDO: R$ {lucro_real:,.2f}**")
 
     elif opcao_menu == "⚙️ Gestão":
-        st.subheader("Gerenciar Lançamentos")
-        
+        st.subheader("Gestão do Sistema")
         if st.button("⚠️ Resetar Todos os Lançamentos", type="secondary"):
             if st.session_state.get('confirm_reset'):
-                try:
-                    supabase.table("lancamentos").delete().eq("user_id", user_id).execute()
-                    st.session_state.confirm_reset = False
-                    st.success("Todos os dados foram apagados.")
-                    st.rerun()
-                except Exception as e:
-                    st.error(f"Erro ao resetar: {e}")
+                supabase.table("lancamentos").delete().eq("user_id", user_id).execute()
+                st.session_state.confirm_reset = False
+                st.success("Dados apagados.")
+                st.rerun()
             else:
                 st.session_state.confirm_reset = True
-                st.warning("Clique novamente para confirmar a exclusão de TODOS os dados.")
+                st.warning("Clique novamente para confirmar a limpeza TOTAL.")
         
         st.divider()
-        
         for idx, row in df.iterrows():
             c1, c2, c3 = st.columns([0.6, 0.2, 0.2])
-            c1.write(f"**{row['descricao']}** | Grupo: {row['natureza']}")
-            c1.caption(f"Operação: {row['tipo']} | Valor: R$ {row['valor']:,.2f}")
-            if row['justificativa']:
-                c1.info(f"📝 **Justificativa:** {row['justificativa']}")
-            
+            c1.write(f"**{row['descricao']}** | {row['natureza']} | R$ {row['valor']:,.2f}")
+            if row['justificativa']: c1.info(f"📝 {row['justificativa']}")
             if c2.button("Editar", key=f"ed_{row['id']}"):
                 st.session_state.edit_id = row['id']
                 st.rerun()
