@@ -127,16 +127,17 @@ st.title("📑 Sistema Contábil Digital")
 # --- CSS PARA FIXAR O MENU NO TOPO ---
 st.markdown("""
     <style>
-        /* Seleciona o container das colunas de navegação */
+        /* Container que envolve os botões de navegação */
         div[data-testid="stHorizontalBlock"]:has(button) {
-            position: -webkit-sticky;
             position: sticky;
-            top: 2.8rem; /* Ajuste dependendo do tema do Streamlit */
+            top: 0;
             background-color: white;
             z-index: 999;
-            padding: 15px 0px;
+            padding: 10px 0;
             border-bottom: 2px solid #f0f2f6;
         }
+        /* Remove o espaço extra no topo do Streamlit para o menu colar no topo real */
+        .block-container { padding-top: 1rem; }
     </style>
 """, unsafe_allow_html=True)
 
@@ -201,28 +202,16 @@ if not df.empty:
             d = df_c[df_c['tipo'] == 'Débito']['valor'].sum()
             c = df_c[df_c['tipo'] == 'Crédito']['valor'].sum()
             bal_data.append({"Conta": conta, "Saldo Devedor": d-c if d>c else 0, "Saldo Credor": c-d if c>d else 0})
-        
         bal_df = pd.DataFrame(bal_data)
-        styled_bal = bal_df.style.format({
-            "Saldo Devedor": "R$ {:,.2f}",
-            "Saldo Credor": "R$ {:,.2f}"
-        }).set_table_styles([
-            {'selector': 'th', 'props': [('background-color', '#202124'), ('color', 'white'), ('text-align', 'center'), ('font-weight', 'bold')]},
-            {'selector': 'td', 'props': [('text-align', 'right'), ('padding', '10px')]},
+        styled_bal = bal_df.style.format({"Saldo Devedor": "R$ {:,.2f}", "Saldo Credor": "R$ {:,.2f}"}).set_table_styles([
+            {'selector': 'th', 'props': [('background-color', '#202124'), ('color', 'white')]},
             {'selector': 'tr:nth-child(even)', 'props': [('background-color', '#f8f9fa')]}
-        ], overwrite=False)
-
+        ])
         st.table(styled_bal)
-        
         t_dev, t_cre = bal_df["Saldo Devedor"].sum(), bal_df["Saldo Credor"].sum()
-        col_b1, col_b2 = st.columns(2)
-        col_b1.metric("Total de Saldos Devedores", f"R$ {t_dev:,.2f}", delta=None)
-        col_b2.metric("Total de Saldos Credores", f"R$ {t_cre:,.2f}", delta=None)
-        
-        if round(t_dev, 2) == round(t_cre, 2):
-            st.success("✅ O Balancete está equilibrado (Débitos = Créditos)")
-        else:
-            st.error("❌ O Balancete está desequilibrado! Verifique seus lançamentos.")
+        c1, c2 = st.columns(2)
+        c1.metric("Total Devedores", f"R$ {t_dev:,.2f}")
+        c2.metric("Total Credores", f"R$ {t_cre:,.2f}")
 
     elif opcao_menu == "📈 DRE":
         st.subheader("Demonstração do Resultado")
@@ -251,7 +240,7 @@ if not df.empty:
                 st.rerun()
             else:
                 st.session_state.confirm_reset = True
-                st.warning("Clique novamente para confirmar a limpeza TOTAL.")
+                st.warning("Clique novamente para confirmar.")
         st.divider()
         for idx, row in df.iterrows():
             c1, c2, c3 = st.columns([0.6, 0.2, 0.2])
