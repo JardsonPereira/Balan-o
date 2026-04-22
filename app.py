@@ -116,7 +116,7 @@ with st.sidebar:
 st.title("📑 Sistema Contábil Digital")
 
 if not df.empty:
-    t = st.tabs(["📊 Razonetes", "🧾 Balancete", "📈 DRE Detalhada", "⚙️ Gestão"])
+    t = st.tabs(["📊 Razonetes", "🧾 Balancete", "📈 DRE Profissional", "⚙️ Gestão"])
     
     with t[0]: # Razonetes
         cols = st.columns(3)
@@ -150,58 +150,55 @@ if not df.empty:
         col_b1.metric("Total Saldos Devedores", f"R$ {t_dev:,.2f}")
         col_b2.metric("Total Saldos Credores", f"R$ {t_cre:,.2f}")
 
-    with t[2]: # DRE DETALHADA (Sem Gráficos)
-        st.subheader("Demonstração do Resultado do Exercício")
+    with t[2]: # DRE PROFISSIONAL
+        st.subheader("Demonstração do Resultado do Exercício (DRE)")
         
-        # Filtros por natureza
-        df_rec = df[df['natureza'] == 'Receita'].groupby('descricao')['valor'].sum().reset_index()
-        df_des = df[df['natureza'] == 'Despesa'].groupby('descricao')['valor'].sum().reset_index()
-        df_enc = df[df['natureza'] == 'Encargos Financeiros'].groupby('descricao')['valor'].sum().reset_index()
+        # Agrupamento de dados
+        df_rec = df[df['natureza'] == 'Receita'].groupby('descricao')['valor'].sum()
+        df_des = df[df['natureza'] == 'Despesa'].groupby('descricao')['valor'].sum()
+        df_enc = df[df['natureza'] == 'Encargos Financeiros'].groupby('descricao')['valor'].sum()
         
-        rec_total = df_rec['valor'].sum()
-        des_total = df_des['valor'].sum()
-        enc_total = df_enc['valor'].sum()
+        rec_total = df_rec.sum()
+        des_total = df_des.sum()
+        enc_total = df_enc.sum()
         ebitda = rec_total - des_total
         lucro_real = ebitda - enc_total
 
-        # Cabeçalho de Métricas
-        c1, c2, c3 = st.columns(3)
-        c1.metric("EBITDA", f"R$ {ebitda:,.2f}")
-        c2.metric("Lucro Real", f"R$ {lucro_real:,.2f}")
-        c3.metric("Margem Líquida", f"{(lucro_real/rec_total*100) if rec_total > 0 else 0:.2f}%")
+        # Resumo Visual Profissional
+        m1, m2, m3 = st.columns(3)
+        m1.metric("Receita Líquida", f"R$ {rec_total:,.2f}")
+        m2.metric("EBITDA", f"R$ {ebitda:,.2f}", f"{(ebitda/rec_total*100 if rec_total > 0 else 0):.1f}%")
+        m3.metric("Lucro Real", f"R$ {lucro_real:,.2f}", f"{(lucro_real/rec_total*100 if rec_total > 0 else 0):.1f}%")
 
-        st.divider()
-
-        # Detalhamento das Contas
-        col_dre1, col_dre2 = st.columns(2)
+        # Construção da Estrutura Contábil
+        dre_linhas = []
+        dre_linhas.append({"Descrição": "(=) RECEITA BRUTA OPERACIONAL", "Valor": rec_total, "Destaque": True})
+        for nome, valor in df_rec.items():
+            dre_linhas.append({"Descrição": f"   (+) {nome}", "Valor": valor, "Destaque": False})
+            
+        dre_linhas.append({"Descrição": "(-) DESPESAS OPERACIONAIS (ADM/VENDAS)", "Valor": -des_total, "Destaque": True})
+        for nome, valor in df_des.items():
+            dre_linhas.append({"Descrição": f"   (-) {nome}", "Valor": -valor, "Destaque": False})
+            
+        dre_linhas.append({"Descrição": "(=) EBITDA (LAJIDA)", "Valor": ebitda, "Destaque": True})
         
-        with col_dre1:
-            st.markdown("### 🟢 Receitas")
-            if not df_rec.empty:
-                for _, r in df_rec.iterrows():
-                    st.write(f"**{r['descricao']}**: R$ {r['valor']:,.2f}")
-                st.markdown(f"**TOTAL RECEITAS: R$ {rec_total:,.2f}**")
-            else: st.info("Sem receitas lançadas.")
+        dre_linhas.append({"Descrição": "(-) RESULTADO FINANCEIRO (ENCARGOS)", "Valor": -enc_total, "Destaque": True})
+        for nome, valor in df_enc.items():
+            dre_linhas.append({"Descrição": f"   (-) {nome}", "Valor": -valor, "Destaque": False})
+            
+        dre_linhas.append({"Descrição": "(=) LUCRO REAL LÍQUIDO", "Valor": lucro_real, "Destaque": True})
 
-            st.markdown("### 🔴 Despesas Administrativas")
-            if not df_des.empty:
-                for _, r in df_des.iterrows():
-                    st.write(f"{r['descricao']}: R$ {r['valor']:,.2f}")
-                st.markdown(f"**TOTAL DESPESAS: R$ {des_total:,.2f}**")
-            else: st.info("Sem despesas lançadas.")
+        # Renderização da Tabela com Estilização
+        dre_final = pd.DataFrame(dre_linhas)
+        
+        def destacar_linhas(row):
+            if row['Destaque']:
+                return ['background-color: #f0f2f6; font-weight: bold'] * len(row)
+            return [''] * len(row)
 
-        with col_dre2:
-            st.markdown("### 🟠 Encargos Financeiros")
-            if not df_enc.empty:
-                for _, r in df_enc.iterrows():
-                    st.write(f"{r['descricao']}: R$ {r['valor']:,.2f}")
-                st.markdown(f"**TOTAL ENCARGOS: R$ {enc_total:,.2f}**")
-            else: st.info("Sem encargos lançados.")
-
-            st.markdown("---")
-            st.markdown(f"### 🏁 Resultado Final")
-            st.write(f"**EBITDA:** R$ {ebitda:,.2f}")
-            st.write(f"**Lucro Real Líquido:** R$ {lucro_real:,.2f}")
+        st.table(dre_final.style.apply(destacar_linhas, axis=1)
+                 .format({"Valor": "R$ {:,.2f}"})
+                 .hide(axis="columns", subset=["Destaque"]))
 
     with t[3]: # Gestão
         st.subheader("Gerenciar Lançamentos")
