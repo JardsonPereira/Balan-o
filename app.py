@@ -124,7 +124,21 @@ with st.sidebar:
 # --- INTERFACE PRINCIPAL ---
 st.title("📑 Sistema Contábil Digital")
 
-# --- MENU LADO A LADO ---
+# --- CSS PARA FIXAR O MENU NO TOPO ---
+st.markdown("""
+    <style>
+        div[data-testid="stHorizontalBlock"] {
+            position: sticky;
+            top: 2.8rem;
+            background-color: white;
+            z-index: 999;
+            padding: 10px 0px;
+            border-bottom: 1px solid #ddd;
+        }
+    </style>
+""", unsafe_allow_html=True)
+
+# --- MENU LADO A LADO FIXADO ---
 col_nav = st.columns(4)
 if col_nav[0].button("📊 Razonetes", use_container_width=True): st.session_state.menu_opcao = "📊 Razonetes"
 if col_nav[1].button("🧾 Balancete", use_container_width=True): st.session_state.menu_opcao = "🧾 Balancete"
@@ -187,8 +201,6 @@ if not df.empty:
             bal_data.append({"Conta": conta, "Saldo Devedor": d-c if d>c else 0, "Saldo Credor": c-d if c>d else 0})
         
         bal_df = pd.DataFrame(bal_data)
-        
-        # Estilização profissional do Balancete
         styled_bal = bal_df.style.format({
             "Saldo Devedor": "R$ {:,.2f}",
             "Saldo Credor": "R$ {:,.2f}"
