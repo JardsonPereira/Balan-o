@@ -69,14 +69,14 @@ def carregar_dados():
 
 df = carregar_dados()
 
-# --- FORMULÁRIO ---
+# --- FORMULÁRIO NO SIDEBAR ---
 with st.sidebar:
     st.divider()
     if st.session_state.edit_id:
         st.header("📝 Editar")
         item_edit = df[df['id'] == st.session_state.edit_id].iloc[0]
     else:
-        st.header("➕ Novo")
+        st.header("➕ Novo Lançamento")
         item_edit = {"descricao": "", "natureza": "Ativo", "tipo": "Débito", "valor": 0.01, "justificativa": ""}
 
     with st.form("contabil"):
@@ -112,13 +112,15 @@ with st.sidebar:
                     supabase.table("lancamentos").insert(payload).execute()
                 st.rerun()
 
-# --- INTERFACE ---
+# --- INTERFACE PRINCIPAL ---
 st.title("📑 Sistema Contábil Digital")
 
+# --- MENU DE NAVEGAÇÃO ---
+opcao_menu = st.selectbox("Navegação", ["📊 Razonetes", "🧾 Balancete", "📈 DRE", "⚙️ Gestão"], label_visibility="collapsed")
+
 if not df.empty:
-    t = st.tabs(["📊 Razonetes", "🧾 Balancete", "📈 DRE", "⚙️ Gestão"])
     
-    with t[0]: # Razonetes
+    if opcao_menu == "📊 Razonetes":
         cols = st.columns(3)
         for i, conta in enumerate(sorted(df['descricao'].unique())):
             with cols[i % 3]:
@@ -135,8 +137,8 @@ if not df.empty:
                 elif saldo < 0: st.markdown(f"**Saldo C: R$ {abs(saldo):,.2f}**")
                 else: st.write("Conta Zerada")
 
-    with t[1]: # Balancete
-        st.subheader("Balancete de Verificação de Saldos")
+    elif opcao_menu == "🧾 Balancete":
+        st.subheader("Balancete de Verificação")
         bal_data = []
         for conta in sorted(df['descricao'].unique()):
             df_c = df[df['descricao'] == conta]
@@ -147,13 +149,12 @@ if not df.empty:
         st.table(bal_df.style.format({"Saldo Devedor": "R$ {:.2f}", "Saldo Credor": "R$ {:.2f}"}))
         t_dev, t_cre = bal_df["Saldo Devedor"].sum(), bal_df["Saldo Credor"].sum()
         col_b1, col_b2 = st.columns(2)
-        col_b1.metric("Total Saldos Devedores", f"R$ {t_dev:,.2f}")
-        col_b2.metric("Total Saldos Credores", f"R$ {t_cre:,.2f}")
+        col_b1.metric("Total Devedores", f"R$ {t_dev:,.2f}")
+        col_b2.metric("Total Credores", f"R$ {t_cre:,.2f}")
 
-    with t[2]: # DRE (Sem Destaques Visuais)
-        st.subheader("Demonstração do Resultado do Exercício (DRE)")
+    elif opcao_menu == "📈 DRE":
+        st.subheader("Demonstração do Resultado do Exercício")
         
-        # Agrupamento de dados
         df_rec = df[df['natureza'] == 'Receita'].groupby('descricao')['valor'].sum()
         df_des = df[df['natureza'] == 'Despesa'].groupby('descricao')['valor'].sum()
         df_enc = df[df['natureza'] == 'Encargos Financeiros'].groupby('descricao')['valor'].sum()
@@ -164,34 +165,41 @@ if not df.empty:
         ebitda = rec_total - des_total
         lucro_real = ebitda - enc_total
 
-        # Resumo Superior
-        m1, m2, m3 = st.columns(3)
-        m1.metric("Receita Líquida", f"R$ {rec_total:,.2f}")
-        m2.metric("EBITDA", f"R$ {ebitda:,.2f}")
-        m3.metric("Lucro Real", f"R$ {lucro_real:,.2f}")
-
-        # Estrutura da Tabela
+        # Construção da Estrutura com Destaques
         dre_linhas = []
-        dre_linhas.append({"Descrição": "(=) RECEITA BRUTA OPERACIONAL", "Valor": rec_total})
+        dre_linhas.append({"Descrição": "(=) RECEITA BRUTA OPERACIONAL", "Valor": rec_total, "Destaque": True})
         for nome, valor in df_rec.items():
-            dre_linhas.append({"Descrição": f"   (+) {nome}", "Valor": valor})
+            dre_linhas.append({"Descrição": f"   (+) {nome}", "Valor": valor, "Destaque": False})
             
-        dre_linhas.append({"Descrição": "(-) DESPESAS OPERACIONAIS", "Valor": -des_total})
+        dre_linhas.append({"Descrição": "(-) DESPESAS OPERACIONAIS", "Valor": -des_total, "Destaque": True})
         for nome, valor in df_des.items():
-            dre_linhas.append({"Descrição": f"   (-) {nome}", "Valor": -valor})
+            dre_linhas.append({"Descrição": f"   (-) {nome}", "Valor": -valor, "Destaque": False})
             
-        dre_linhas.append({"Descrição": "(=) EBITDA (LAJIDA)", "Valor": ebitda})
+        dre_linhas.append({"Descrição": "(=) EBITDA (LAJIDA)", "Valor": ebitda, "Destaque": "EBITDA"})
         
-        dre_linhas.append({"Descrição": "(-) RESULTADO FINANCEIRO", "Valor": -enc_total})
+        dre_linhas.append({"Descrição": "(-) RESULTADO FINANCEIRO", "Valor": -enc_total, "Destaque": True})
         for nome, valor in df_enc.items():
-            dre_linhas.append({"Descrição": f"   (-) {nome}", "Valor": -valor})
+            dre_linhas.append({"Descrição": f"   (-) {nome}", "Valor": -valor, "Destaque": False})
             
-        dre_linhas.append({"Descrição": "(=) LUCRO REAL LÍQUIDO", "Valor": lucro_real})
+        dre_linhas.append({"Descrição": "(=) LUCRO REAL LÍQUIDO", "Valor": lucro_real, "Destaque": "LUCRO"})
 
         dre_final = pd.DataFrame(dre_linhas)
-        st.table(dre_final.style.format({"Valor": "R$ {:,.2f}"}))
 
-    with t[3]: # Gestão
+        # Função de estilização para destacar os principais
+        def destacar_principais(row):
+            if row['Destaque'] == "LUCRO":
+                return ['background-color: #d4edda; font-weight: bold; color: #155724'] * len(row)
+            elif row['Destaque'] == "EBITDA":
+                return ['background-color: #fff3cd; font-weight: bold; color: #856404'] * len(row)
+            elif row['Destaque'] == True:
+                return ['font-weight: bold'] * len(row)
+            return [''] * len(row)
+
+        st.table(dre_final.style.apply(destacar_principais, axis=1)
+                 .format({"Valor": "R$ {:,.2f}"})
+                 .hide(axis="columns", subset=["Destaque"]))
+
+    elif opcao_menu == "⚙️ Gestão":
         st.subheader("Gerenciar Lançamentos")
         for idx, row in df.iterrows():
             c1, c2, c3 = st.columns([0.6, 0.2, 0.2])
@@ -205,4 +213,4 @@ if not df.empty:
                 st.rerun()
             st.divider()
 else:
-    st.info("Aguardando lançamentos.")
+    st.info("Aguardando lançamentos para gerar relatórios.")
