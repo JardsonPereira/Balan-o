@@ -3,6 +3,7 @@ import pandas as pd
 import subprocess
 import sys
 import os
+import plotly.graph_objects as go # Adicionado para interatividade
 
 # --- GARANTIA DE INSTALAÇÃO ---
 def install_and_import(package):
@@ -104,7 +105,6 @@ with st.sidebar:
             if not desc:
                 st.error("Informe o nome da conta!")
             else:
-                # Removido 'natureza_operacao' do payload
                 payload = {"user_id": user_id, "descricao": desc, "natureza": nat, "tipo": tipo, "valor": valor, "justificativa": just}
                 if st.session_state.edit_id:
                     supabase.table("lancamentos").update(payload).eq("id", st.session_state.edit_id).execute()
@@ -117,7 +117,7 @@ with st.sidebar:
 st.title("📑 Sistema Contábil Digital")
 
 if not df.empty:
-    t = st.tabs(["📊 Razonetes", "🧾 Balancete", "📈 DRE", "⚙️ Gestão"])
+    t = st.tabs(["📊 Razonetes", "🧾 Balancete", "📈 DRE Interativa", "⚙️ Gestão"])
     
     with t[0]: # Razonetes
         cols = st.columns(3)
@@ -151,29 +151,65 @@ if not df.empty:
         col_b1.metric("Total Saldos Devedores", f"R$ {t_dev:,.2f}")
         col_b2.metric("Total Saldos Credores", f"R$ {t_cre:,.2f}")
 
-    with t[2]: # DRE
-        st.subheader("DRE - Análise Vertical e Resultados")
+    with t[2]: # DRE INTERATIVA
+        st.subheader("Análise Dinâmica de Resultados")
         rec = df[df['natureza'] == 'Receita']['valor'].sum()
         des = df[df['natureza'] == 'Despesa']['valor'].sum()
         enc = df[df['natureza'] == 'Encargos Financeiros']['valor'].sum()
-        
         ebitda = rec - des
         lucro_real = ebitda - enc
-        
-        c1, c2, c3 = st.columns(3)
-        c1.metric("EBITDA", f"R$ {ebitda:,.2f}")
-        c2.metric("Lucro Real", f"R$ {lucro_real:,.2f}")
-        c3.metric("Margem Real", f"{(lucro_real/rec*100) if rec > 0 else 0:.2f}%")
 
-        if rec > 0:
-            dre_df = pd.DataFrame([
-                {"Descrição": "RECEITA BRUTA", "Valor": rec, "%": "100%"},
-                {"Descrição": "(-) DESPESAS ADMINISTRATIVAS", "Valor": des, "%": f"{(des/rec)*100:.2f}%"},
-                {"Descrição": "(=) EBITDA (LAJIDA)", "Valor": ebitda, "%": f"{(ebitda/rec)*100:.2f}%"},
-                {"Descrição": "(-) ENCARGOS FINANCEIROS", "Valor": enc, "%": f"{(enc/rec)*100:.2f}%"},
-                {"Descrição": "(=) LUCRO REAL LÍQUIDO", "Valor": lucro_real, "%": f"{(lucro_real/rec)*100:.2f}%"}
-            ])
-            st.table(dre_df.style.format({"Valor": "R$ {:.2f}"}))
+        # Indicadores principais
+        m1, m2, m3, m4 = st.columns(4)
+        m1.metric("Receita Total", f"R$ {rec:,.2f}")
+        m2.metric("EBITDA", f"R$ {ebitda:,.2f}", f"{((ebitda/rec*100) if rec > 0 else 0):.1f}% margem")
+        m3.metric("Lucro Real", f"R$ {lucro_real:,.2f}", delta_color="normal")
+        m4.metric("Despesas Totais", f"R$ {des+enc:,.2f}", inverse_trend=True)
+
+        col_graf1, col_graf2 = st.columns([2, 1])
+
+        with col_graf1:
+            # Gráfico de Cascata (Waterfall)
+            fig_waterfall = go.Figure(go.Waterfall(
+                name = "DRE", orientation = "v",
+                measure = ["relative", "relative", "total", "relative", "total"],
+                x = ["Receita Bruta", "Despesas Adm", "EBITDA", "Encargos Fin", "Lucro Líquido"],
+                textposition = "outside",
+                text = [f"R$ {rec:,.0f}", f"-R$ {des:,.0f}", f"R$ {ebitda:,.0f}", f"-R$ {enc:,.0f}", f"R$ {lucro_real:,.0f}"],
+                y = [rec, -des, 0, -enc, 0],
+                connector = {"line":{"color":"rgb(63, 63, 63)"}},
+                increasing = {"marker":{"color":"#2ecc71"}},
+                decreasing = {"marker":{"color":"#e74c3c"}},
+                totals = {"marker":{"color":"#3498db"}}
+            ))
+            fig_waterfall.update_layout(title="Fluxo do Resultado", showlegend=False, height=450)
+            st.plotly_chart(fig_waterfall, use_container_width=True)
+
+        with col_graf2:
+            # Gráfico de Rosca (Composição de Gastos)
+            if (des + enc) > 0:
+                fig_donut = go.Figure(data=[go.Pie(
+                    labels=['Despesas Adm', 'Encargos Fin'], 
+                    values=[des, enc], 
+                    hole=.6,
+                    marker_colors=['#f39c12', '#d35400']
+                )])
+                fig_donut.update_layout(title="Composição de Saídas", height=450)
+                st.plotly_chart(fig_donut, use_container_width=True)
+            else:
+                st.info("Sem despesas para exibir.")
+
+        # Tabela Detalhada (Preservada conforme anterior, mas estilizada)
+        with st.expander("Ver Tabela Detalhada"):
+            if rec > 0:
+                dre_df = pd.DataFrame([
+                    {"Descrição": "RECEITA BRUTA", "Valor": rec, "%": "100%"},
+                    {"Descrição": "(-) DESPESAS ADMINISTRATIVAS", "Valor": des, "%": f"{(des/rec)*100:.2f}%"},
+                    {"Descrição": "(=) EBITDA (LAJIDA)", "Valor": ebitda, "%": f"{(ebitda/rec)*100:.2f}%"},
+                    {"Descrição": "(-) ENCARGOS FINANCEIROS", "Valor": enc, "%": f"{(enc/rec)*100:.2f}%"},
+                    {"Descrição": "(=) LUCRO REAL LÍQUIDO", "Valor": lucro_real, "%": f"{(lucro_real/rec)*100:.2f}%"}
+                ])
+                st.table(dre_df.style.format({"Valor": "R$ {:.2f}"}))
 
     with t[3]: # Gestão
         st.subheader("Gerenciar Lançamentos")
