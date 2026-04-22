@@ -124,24 +124,7 @@ with st.sidebar:
 # --- INTERFACE PRINCIPAL ---
 st.title("📑 Sistema Contábil Digital")
 
-# --- CSS PARA FIXAR O MENU NO TOPO ---
-st.markdown("""
-    <style>
-        /* Container que envolve os botões de navegação */
-        div[data-testid="stHorizontalBlock"]:has(button) {
-            position: sticky;
-            top: 0;
-            background-color: white;
-            z-index: 999;
-            padding: 10px 0;
-            border-bottom: 2px solid #f0f2f6;
-        }
-        /* Remove o espaço extra no topo do Streamlit para o menu colar no topo real */
-        .block-container { padding-top: 1rem; }
-    </style>
-""", unsafe_allow_html=True)
-
-# --- MENU LADO A LADO FIXADO ---
+# --- MENU LADO A LADO (NÃO FIXADO) ---
 col_nav = st.columns(4)
 if col_nav[0].button("📊 Razonetes", use_container_width=True): st.session_state.menu_opcao = "📊 Razonetes"
 if col_nav[1].button("🧾 Balancete", use_container_width=True): st.session_state.menu_opcao = "🧾 Balancete"
@@ -202,6 +185,7 @@ if not df.empty:
             d = df_c[df_c['tipo'] == 'Débito']['valor'].sum()
             c = df_c[df_c['tipo'] == 'Crédito']['valor'].sum()
             bal_data.append({"Conta": conta, "Saldo Devedor": d-c if d>c else 0, "Saldo Credor": c-d if c>d else 0})
+        
         bal_df = pd.DataFrame(bal_data)
         styled_bal = bal_df.style.format({"Saldo Devedor": "R$ {:,.2f}", "Saldo Credor": "R$ {:,.2f}"}).set_table_styles([
             {'selector': 'th', 'props': [('background-color', '#202124'), ('color', 'white')]},
@@ -240,7 +224,7 @@ if not df.empty:
                 st.rerun()
             else:
                 st.session_state.confirm_reset = True
-                st.warning("Clique novamente para confirmar.")
+                st.warning("Clique novamente para confirmar a limpeza TOTAL.")
         st.divider()
         for idx, row in df.iterrows():
             c1, c2, c3 = st.columns([0.6, 0.2, 0.2])
