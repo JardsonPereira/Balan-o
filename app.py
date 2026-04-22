@@ -148,33 +148,42 @@ if not df.empty:
             .valor-cre { color: #d32f2f; }
             .just-hint { font-size: 0.7rem; color: #637381; font-style: italic; display: block; }
             .conta-rodape { padding: 8px; border-top: 1px solid #202124; text-align: center; font-weight: bold; font-size: 0.9rem; }
+            .grupo-header { background-color: #202124; color: white; padding: 5px 15px; border-radius: 5px; margin: 20px 0 10px 0; font-size: 1.1rem; }
             </style>
         """, unsafe_allow_html=True)
 
-        cols = st.columns(3)
-        for i, conta in enumerate(sorted(df['descricao'].unique())):
-            with cols[i % 3]:
-                df_c = df[df['descricao'] == conta]
-                v_deb_sum = df_c[df_c['tipo'] == 'Débito']['valor'].sum()
-                v_cre_sum = df_c[df_c['tipo'] == 'Crédito']['valor'].sum()
-                saldo = v_deb_sum - v_cre_sum
+        grupos = ["Ativo", "Passivo", "Patrimônio Líquido", "Receita", "Despesa", "Encargos Financeiros"]
+        
+        for grupo in grupos:
+            df_grupo = df[df['natureza'] == grupo]
+            if not df_grupo.empty:
+                st.markdown(f"<div class='grupo-header'>{grupo.upper()}</div>", unsafe_allow_html=True)
+                contas_grupo = sorted(df_grupo['descricao'].unique())
+                cols = st.columns(3)
+                
+                for i, conta in enumerate(contas_grupo):
+                    with cols[i % 3]:
+                        df_c = df_grupo[df_grupo['descricao'] == conta]
+                        v_deb_sum = df_c[df_c['tipo'] == 'Débito']['valor'].sum()
+                        v_cre_sum = df_c[df_c['tipo'] == 'Crédito']['valor'].sum()
+                        saldo = v_deb_sum - v_cre_sum
 
-                deb_html = "".join([f"<div class='valor-item valor-deb'>D: {r['valor']:,.2f}<span class='just-hint'>{r['justificativa']}</span></div>" for _, r in df_c[df_c['tipo'] == 'Débito'].iterrows()])
-                cre_html = "".join([f"<div class='valor-item valor-cre'>C: {r['valor']:,.2f}<span class='just-hint'>{r['justificativa']}</span></div>" for _, r in df_c[df_c['tipo'] == 'Crédito'].iterrows()])
+                        deb_html = "".join([f"<div class='valor-item valor-deb'>D: {r['valor']:,.2f}<span class='just-hint'>{r['justificativa']}</span></div>" for _, r in df_c[df_c['tipo'] == 'Débito'].iterrows()])
+                        cre_html = "".join([f"<div class='valor-item valor-cre'>C: {r['valor']:,.2f}<span class='just-hint'>{r['justificativa']}</span></div>" for _, r in df_c[df_c['tipo'] == 'Crédito'].iterrows()])
 
-                txt_saldo = f"Saldo D: R$ {saldo:,.2f}" if saldo > 0 else f"Saldo C: R$ {abs(saldo):,.2f}" if saldo < 0 else "Zerada"
-                cor_saldo = "#1e7e34" if saldo > 0 else "#d32f2f" if saldo < 0 else "#212529"
+                        txt_saldo = f"Saldo D: R$ {saldo:,.2f}" if saldo > 0 else f"Saldo C: R$ {abs(saldo):,.2f}" if saldo < 0 else "Zerada"
+                        cor_saldo = "#1e7e34" if saldo > 0 else "#d32f2f" if saldo < 0 else "#212529"
 
-                st.markdown(f"""
-                    <div class="conta-card">
-                        <div class="conta-titulo">{conta}</div>
-                        <div class="conta-corpo">
-                            <div class="lado-debito">{deb_html}</div>
-                            <div class="lado-credito">{cre_html}</div>
-                        </div>
-                        <div class="conta-rodape" style="color: {cor_saldo};">{txt_saldo}</div>
-                    </div>
-                """, unsafe_allow_html=True)
+                        st.markdown(f"""
+                            <div class="conta-card">
+                                <div class="conta-titulo">{conta}</div>
+                                <div class="conta-corpo">
+                                    <div class="lado-debito">{deb_html}</div>
+                                    <div class="lado-credito">{cre_html}</div>
+                                </div>
+                                <div class="conta-rodape" style="color: {cor_saldo};">{txt_saldo}</div>
+                            </div>
+                        """, unsafe_allow_html=True)
 
     elif opcao_menu == "🧾 Balancete":
         st.subheader("Balancete de Verificação")
