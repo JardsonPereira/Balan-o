@@ -197,6 +197,23 @@ if not df.empty:
 
     elif opcao_menu == "⚙️ Gestão":
         st.subheader("Gerenciar Lançamentos")
+        
+        # Opção de Resetar Tudo
+        if st.button("⚠️ Resetar Todos os Lançamentos", type="secondary"):
+            if st.session_state.get('confirm_reset'):
+                try:
+                    supabase.table("lancamentos").delete().eq("user_id", user_id).execute()
+                    st.session_state.confirm_reset = False
+                    st.success("Todos os dados foram apagados.")
+                    st.rerun()
+                except Exception as e:
+                    st.error(f"Erro ao resetar: {e}")
+            else:
+                st.session_state.confirm_reset = True
+                st.warning("Clique novamente para confirmar a exclusão de TODOS os dados.")
+        
+        st.divider()
+        
         for idx, row in df.iterrows():
             c1, c2, c3 = st.columns([0.6, 0.2, 0.2])
             c1.write(f"**{row['descricao']}** | Grupo: {row['natureza']}")
