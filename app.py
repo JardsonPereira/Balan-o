@@ -32,6 +32,8 @@ if 'edit_id' not in st.session_state:
     st.session_state.edit_id = None
 if 'form_count' not in st.session_state:
     st.session_state.form_count = 0
+if 'menu_opcao' not in st.session_state:
+    st.session_state.menu_opcao = "📊 Razonetes"
 
 # --- AUTENTICAÇÃO ---
 def gerenciar_acesso():
@@ -81,7 +83,6 @@ with st.sidebar:
         st.header("➕ Novo")
         item_edit = {"descricao": "", "natureza": "Ativo", "tipo": "Débito", "valor": 0.0, "justificativa": ""}
 
-    # A key baseada em form_count garante que tudo limpe após o rerun
     with st.form(key=f"contabil_form_{st.session_state.form_count}"):
         contas_existentes = sorted(df['descricao'].unique().tolist()) if not df.empty else []
         opcoes_conta = ["+ Adicionar Nova Conta"] + contas_existentes
@@ -115,7 +116,6 @@ with st.sidebar:
                     else:
                         supabase.table("lancamentos").insert(payload).execute()
                     
-                    # Incrementa o contador para limpar os campos no próximo ciclo
                     st.session_state.form_count += 1
                     st.rerun()
                 except Exception as e:
@@ -124,7 +124,15 @@ with st.sidebar:
 # --- INTERFACE PRINCIPAL ---
 st.title("📑 Sistema Contábil Digital")
 
-opcao_menu = st.selectbox("Menu de Navegação", ["📊 Razonetes", "🧾 Balancete", "📈 DRE", "⚙️ Gestão"])
+# --- MENU LADO A LADO ---
+col_nav = st.columns(4)
+if col_nav[0].button("📊 Razonetes", use_container_width=True): st.session_state.menu_opcao = "📊 Razonetes"
+if col_nav[1].button("🧾 Balancete", use_container_width=True): st.session_state.menu_opcao = "🧾 Balancete"
+if col_nav[2].button("📈 DRE", use_container_width=True): st.session_state.menu_opcao = "📈 DRE"
+if col_nav[3].button("⚙️ Gestão", use_container_width=True): st.session_state.menu_opcao = "⚙️ Gestão"
+
+opcao_menu = st.session_state.menu_opcao
+st.divider()
 
 if not df.empty:
     if opcao_menu == "📊 Razonetes":
