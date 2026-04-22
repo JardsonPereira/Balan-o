@@ -30,6 +30,8 @@ if 'user' not in st.session_state:
     st.session_state.user = None
 if 'edit_id' not in st.session_state:
     st.session_state.edit_id = None
+if 'form_count' not in st.session_state:
+    st.session_state.form_count = 0
 
 # --- AUTENTICAÇÃO ---
 def gerenciar_acesso():
@@ -69,7 +71,7 @@ def carregar_dados():
 
 df = carregar_dados()
 
-# --- FORMULÁRIO (CORRIGIDO PARA NÃO SUMIR) ---
+# --- FORMULÁRIO COM RESET AUTOMÁTICO ---
 with st.sidebar:
     st.divider()
     if st.session_state.edit_id:
@@ -77,10 +79,10 @@ with st.sidebar:
         item_edit = df[df['id'] == st.session_state.edit_id].iloc[0]
     else:
         st.header("➕ Novo")
-        item_edit = {"descricao": "", "natureza": "Ativo", "tipo": "Débito", "valor": 0.01, "justificativa": ""}
+        item_edit = {"descricao": "", "natureza": "Ativo", "tipo": "Débito", "valor": 0.0, "justificativa": ""}
 
-    # IMPORTANTE: Não usamos clear_on_submit=True para evitar bugs de reset visual
-    with st.form("contabil"):
+    # A key baseada em form_count garante que tudo limpe após o rerun
+    with st.form(key=f"contabil_form_{st.session_state.form_count}"):
         contas_existentes = sorted(df['descricao'].unique().tolist()) if not df.empty else []
         opcoes_conta = ["+ Adicionar Nova Conta"] + contas_existentes
         
@@ -90,21 +92,20 @@ with st.sidebar:
             
         conta_sel = st.selectbox("Selecione a Conta", opcoes_conta, index=idx_conta)
         
-        # Lógica persistente para o nome da conta
         if conta_sel == "+ Adicionar Nova Conta":
-            desc = st.text_input("Nome da Nova Conta").upper().strip()
+            desc = st.text_input("Nome da Nova Conta", value="").upper().strip()
         else:
             desc = conta_sel
 
         nat_list = ["Ativo", "Passivo", "Patrimônio Líquido", "Receita", "Despesa", "Encargos Financeiros"]
         nat = st.selectbox("Grupo", nat_list, index=nat_list.index(item_edit['natureza']))
         tipo = st.radio("Operação", ["Débito", "Crédito"], index=0 if item_edit['tipo'] == "Débito" else 1, horizontal=True)
-        valor = st.number_input("Valor", min_value=0.01, value=float(item_edit['valor']))
+        valor = st.number_input("Valor", min_value=0.0, value=float(item_edit['valor']))
         just = st.text_area("Justificativa", value=item_edit['justificativa'])
         
         if st.form_submit_button("Confirmar Lançamento"):
             if not desc:
-                st.error("O nome da conta é obrigatório!")
+                st.error("Informe o nome da conta!")
             else:
                 payload = {"user_id": user_id, "descricao": desc, "natureza": nat, "tipo": tipo, "valor": valor, "justificativa": just}
                 try:
@@ -113,7 +114,9 @@ with st.sidebar:
                         st.session_state.edit_id = None
                     else:
                         supabase.table("lancamentos").insert(payload).execute()
-                    st.success("Salvo com sucesso!")
+                    
+                    # Incrementa o contador para limpar os campos no próximo ciclo
+                    st.session_state.form_count += 1
                     st.rerun()
                 except Exception as e:
                     st.error(f"Erro ao salvar: {e}")
