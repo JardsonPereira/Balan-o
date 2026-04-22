@@ -144,8 +144,16 @@ if not df.empty:
                 c_d, c_c = st.columns(2)
                 v_deb = df_c[df_c['tipo'] == 'Débito']['valor'].sum()
                 v_cre = df_c[df_c['tipo'] == 'Crédito']['valor'].sum()
-                for v in df_c[df_c['tipo'] == 'Débito']['valor']: c_d.write(f"D: {v:,.2f}")
-                for v in df_c[df_c['tipo'] == 'Crédito']['valor']: c_c.write(f"C: {v:,.2f}")
+                
+                # Exibição com justificativa ao passar o mouse ou pequena legenda
+                for _, r in df_c[df_c['tipo'] == 'Débito'].iterrows(): 
+                    c_d.write(f"D: {r['valor']:,.2f}")
+                    if r['justificativa']: c_d.caption(f"↳ {r['justificativa']}")
+                
+                for _, r in df_c[df_c['tipo'] == 'Crédito'].iterrows(): 
+                    c_c.write(f"C: {r['valor']:,.2f}")
+                    if r['justificativa']: c_c.caption(f"↳ {r['justificativa']}")
+                
                 st.markdown("<div style='border-top:1px solid gray;'></div>", unsafe_allow_html=True)
                 saldo = v_deb - v_cre
                 if saldo > 0: st.markdown(f"**Saldo D: R$ {saldo:,.2f}**")
@@ -198,7 +206,6 @@ if not df.empty:
     elif opcao_menu == "⚙️ Gestão":
         st.subheader("Gerenciar Lançamentos")
         
-        # Opção de Resetar Tudo
         if st.button("⚠️ Resetar Todos os Lançamentos", type="secondary"):
             if st.session_state.get('confirm_reset'):
                 try:
@@ -218,6 +225,9 @@ if not df.empty:
             c1, c2, c3 = st.columns([0.6, 0.2, 0.2])
             c1.write(f"**{row['descricao']}** | Grupo: {row['natureza']}")
             c1.caption(f"Operação: {row['tipo']} | Valor: R$ {row['valor']:,.2f}")
+            if row['justificativa']:
+                c1.info(f"📝 **Justificativa:** {row['justificativa']}")
+            
             if c2.button("Editar", key=f"ed_{row['id']}"):
                 st.session_state.edit_id = row['id']
                 st.rerun()
