@@ -69,7 +69,7 @@ def carregar_dados():
 
 df = carregar_dados()
 
-# --- FORMULÁRIO (CORRIGIDO) ---
+# --- FORMULÁRIO ---
 with st.sidebar:
     st.divider()
     if st.session_state.edit_id:
@@ -77,38 +77,23 @@ with st.sidebar:
         item_edit = df[df['id'] == st.session_state.edit_id].iloc[0]
     else:
         st.header("➕ Novo")
-        item_edit = {"descricao": "", "natureza": "Ativo", "tipo": "Débito", "valor": 0.01, "justificativa": "", "natureza_operacao": "Outros"}
+        item_edit = {"descricao": "", "natureza": "Ativo", "tipo": "Débito", "valor": 0.01, "justificativa": ""}
 
-    # Nota: Removido clear_on_submit para evitar que widgets sumam antes do processamento
     with st.form("contabil"):
         contas_existentes = sorted(df['descricao'].unique().tolist()) if not df.empty else []
         opcoes_conta = ["+ Adicionar Nova Conta"] + contas_existentes
         
-        # Define o index padrão se estiver editando
         idx_conta = 0
         if st.session_state.edit_id and item_edit['descricao'] in contas_existentes:
             idx_conta = opcoes_conta.index(item_edit['descricao'])
             
         conta_sel = st.selectbox("Selecione a Conta", opcoes_conta, index=idx_conta)
         
-        # Mostra campo de texto apenas se for nova conta
         if conta_sel == "+ Adicionar Nova Conta":
             desc = st.text_input("Nome da Nova Conta", value="").upper().strip()
         else:
             desc = conta_sel
 
-        nat_op_list = [
-            "Integralização de Capital Social", "Venda de Mercadorias/Serviços", 
-            "Compra de Mercadorias/Bens", "Pagamento de Salários/Encargos", 
-            "Pagamento de Juros/Multas (Encargos Financeiros)", 
-            "Tarifas e Taxas Bancárias (Encargos Financeiros)", "Outros"
-        ]
-        
-        # Busca index da natureza de operação
-        default_nat_op = item_edit.get('natureza_operacao', 'Outros')
-        idx_nat_op = nat_op_list.index(default_nat_op) if default_nat_op in nat_op_list else 0
-        natureza_op = st.selectbox("Natureza da Operação", nat_op_list, index=idx_nat_op)
-        
         nat_list = ["Ativo", "Passivo", "Patrimônio Líquido", "Receita", "Despesa", "Encargos Financeiros"]
         nat = st.selectbox("Grupo", nat_list, index=nat_list.index(item_edit['natureza']))
         tipo = st.radio("Operação", ["Débito", "Crédito"], index=0 if item_edit['tipo'] == "Débito" else 1, horizontal=True)
@@ -119,7 +104,8 @@ with st.sidebar:
             if not desc:
                 st.error("Informe o nome da conta!")
             else:
-                payload = {"user_id": user_id, "descricao": desc, "natureza": nat, "tipo": tipo, "valor": valor, "justificativa": just, "natureza_operacao": natureza_op}
+                # Removido 'natureza_operacao' do payload
+                payload = {"user_id": user_id, "descricao": desc, "natureza": nat, "tipo": tipo, "valor": valor, "justificativa": just}
                 if st.session_state.edit_id:
                     supabase.table("lancamentos").update(payload).eq("id", st.session_state.edit_id).execute()
                     st.session_state.edit_id = None
