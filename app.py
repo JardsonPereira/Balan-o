@@ -3,7 +3,7 @@ import pandas as pd
 import subprocess
 import sys
 import os
-import plotly.graph_objects as go # Adicionado para interatividade
+import plotly.graph_objects as go 
 
 # --- GARANTIA DE INSTALAÇÃO ---
 def install_and_import(package):
@@ -151,7 +151,7 @@ if not df.empty:
         col_b1.metric("Total Saldos Devedores", f"R$ {t_dev:,.2f}")
         col_b2.metric("Total Saldos Credores", f"R$ {t_cre:,.2f}")
 
-    with t[2]: # DRE INTERATIVA
+    with t[2]: # DRE INTERATIVA (Corrigida)
         st.subheader("Análise Dinâmica de Resultados")
         rec = df[df['natureza'] == 'Receita']['valor'].sum()
         des = df[df['natureza'] == 'Despesa']['valor'].sum()
@@ -159,17 +159,17 @@ if not df.empty:
         ebitda = rec - des
         lucro_real = ebitda - enc
 
-        # Indicadores principais
+        # Indicadores principais - CORREÇÃO AQUI
         m1, m2, m3, m4 = st.columns(4)
         m1.metric("Receita Total", f"R$ {rec:,.2f}")
         m2.metric("EBITDA", f"R$ {ebitda:,.2f}", f"{((ebitda/rec*100) if rec > 0 else 0):.1f}% margem")
-        m3.metric("Lucro Real", f"R$ {lucro_real:,.2f}", delta_color="normal")
-        m4.metric("Despesas Totais", f"R$ {des+enc:,.2f}", inverse_trend=True)
+        m3.metric("Lucro Real", f"R$ {lucro_real:,.2f}")
+        # Removido o parâmetro inexistente inverse_trend
+        m4.metric("Despesas Totais", f"R$ {des+enc:,.2f}")
 
         col_graf1, col_graf2 = st.columns([2, 1])
 
         with col_graf1:
-            # Gráfico de Cascata (Waterfall)
             fig_waterfall = go.Figure(go.Waterfall(
                 name = "DRE", orientation = "v",
                 measure = ["relative", "relative", "total", "relative", "total"],
@@ -186,7 +186,6 @@ if not df.empty:
             st.plotly_chart(fig_waterfall, use_container_width=True)
 
         with col_graf2:
-            # Gráfico de Rosca (Composição de Gastos)
             if (des + enc) > 0:
                 fig_donut = go.Figure(data=[go.Pie(
                     labels=['Despesas Adm', 'Encargos Fin'], 
@@ -199,7 +198,6 @@ if not df.empty:
             else:
                 st.info("Sem despesas para exibir.")
 
-        # Tabela Detalhada (Preservada conforme anterior, mas estilizada)
         with st.expander("Ver Tabela Detalhada"):
             if rec > 0:
                 dre_df = pd.DataFrame([
