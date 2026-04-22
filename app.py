@@ -115,7 +115,6 @@ with st.sidebar:
 # --- INTERFACE PRINCIPAL ---
 st.title("📑 Sistema Contábil Digital")
 
-# Opção de Menu superior
 opcao_menu = st.selectbox("Menu de Navegação", ["📊 Razonetes", "🧾 Balancete", "📈 DRE", "⚙️ Gestão"])
 
 if not df.empty:
@@ -137,7 +136,7 @@ if not df.empty:
                 else: st.write("Conta Zerada")
 
     elif opcao_menu == "🧾 Balancete":
-        st.subheader("Balancete de Verificação de Saldos")
+        st.subheader("Balancete de Verificação")
         bal_data = []
         for conta in sorted(df['descricao'].unique()):
             df_c = df[df['descricao'] == conta]
@@ -148,11 +147,13 @@ if not df.empty:
         st.table(bal_df.style.format({"Saldo Devedor": "R$ {:.2f}", "Saldo Credor": "R$ {:.2f}"}))
         t_dev, t_cre = bal_df["Saldo Devedor"].sum(), bal_df["Saldo Credor"].sum()
         col_b1, col_b2 = st.columns(2)
-        col_b1.metric("Total Saldos Devedores", f"R$ {t_dev:,.2f}")
-        col_b2.metric("Total Saldos Credores", f"R$ {t_cre:,.2f}")
+        col_b1.metric("Total Devedores", f"R$ {t_dev:,.2f}")
+        col_b2.metric("Total Credores", f"R$ {t_cre:,.2f}")
 
     elif opcao_menu == "📈 DRE":
         st.subheader("Demonstração do Resultado do Exercício")
+        
+        # Cálculos de Totais
         df_rec = df[df['natureza'] == 'Receita'].groupby('descricao')['valor'].sum()
         df_des = df[df['natureza'] == 'Despesa'].groupby('descricao')['valor'].sum()
         df_enc = df[df['natureza'] == 'Encargos Financeiros'].groupby('descricao')['valor'].sum()
@@ -163,41 +164,28 @@ if not df.empty:
         ebitda = rec_total - des_total
         lucro_real = ebitda - enc_total
 
-        # Resumo Superior (Sem parâmetros errados)
-        m1, m2, m3 = st.columns(3)
-        m1.metric("Receita Líquida", f"R$ {rec_total:,.2f}")
-        m2.metric("EBITDA", f"R$ {ebitda:,.2f}")
-        m3.metric("Lucro Real", f"R$ {lucro_real:,.2f}")
-
-        # Estrutura com Destaques
-        dre_linhas = []
-        dre_linhas.append({"Descrição": "(=) RECEITA BRUTA OPERACIONAL", "Valor": rec_total, "Destaque": "PRINCIPAL"})
-        for nome, valor in df_rec.items():
-            dre_linhas.append({"Descrição": f"   (+) {nome}", "Valor": valor, "Destaque": "ITEM"})
-            
-        dre_linhas.append({"Descrição": "(-) DESPESAS OPERACIONAIS", "Valor": -des_total, "Destaque": "PRINCIPAL"})
-        for nome, valor in df_des.items():
-            dre_linhas.append({"Descrição": f"   (-) {nome}", "Valor": -valor, "Destaque": "ITEM"})
-            
-        dre_linhas.append({"Descrição": "(=) EBITDA (LAJIDA)", "Valor": ebitda, "Destaque": "EBITDA"})
+        # --- ESTRUTURA RETRÁTIL (ACCORDION) ---
         
-        dre_linhas.append({"Descrição": "(-) RESULTADO FINANCEIRO", "Valor": -enc_total, "Destaque": "PRINCIPAL"})
-        for nome, valor in df_enc.items():
-            dre_linhas.append({"Descrição": f"   (-) {nome}", "Valor": -valor, "Destaque": "ITEM"})
-            
-        dre_linhas.append({"Descrição": "(=) LUCRO REAL LÍQUIDO", "Valor": lucro_real, "Destaque": "LUCRO"})
+        # 1. Receita Bruta
+        with st.expander(f"(=) RECEITA BRUTA OPERACIONAL: R$ {rec_total:,.2f}", expanded=True):
+            for nome, valor in df_rec.items():
+                st.write(f"   (+) {nome}: R$ {valor:,.2f}")
 
-        dre_final = pd.DataFrame(dre_linhas)
+        # 2. Despesas Operacionais
+        with st.expander(f"(-) DESPESAS OPERACIONAIS: R$ {-des_total:,.2f}", expanded=False):
+            for nome, valor in df_des.items():
+                st.write(f"   (-) {nome}: R$ {valor:,.2f}")
 
-        def style_dre(row):
-            if row['Destaque'] == "LUCRO": return ['background-color: #d4edda; font-weight: bold'] * len(row)
-            if row['Destaque'] == "EBITDA": return ['background-color: #fff3cd; font-weight: bold'] * len(row)
-            if row['Destaque'] == "PRINCIPAL": return ['font-weight: bold'] * len(row)
-            return [''] * len(row)
+        # 3. EBITDA (Destaque)
+        st.info(f"**(=) EBITDA (LAJIDA): R$ {ebitda:,.2f}**")
 
-        st.table(dre_final.style.apply(style_dre, axis=1)
-                 .format({"Valor": "R$ {:,.2f}"})
-                 .hide(axis="columns", subset=["Destaque"]))
+        # 4. Resultado Financeiro
+        with st.expander(f"(-) RESULTADO FINANCEIRO: R$ {-enc_total:,.2f}", expanded=False):
+            for nome, valor in df_enc.items():
+                st.write(f"   (-) {nome}: R$ {valor:,.2f}")
+
+        # 5. Lucro Real (Destaque Final)
+        st.success(f"### **(=) LUCRO REAL LÍQUIDO: R$ {lucro_real:,.2f}**")
 
     elif opcao_menu == "⚙️ Gestão":
         st.subheader("Gerenciar Lançamentos")
