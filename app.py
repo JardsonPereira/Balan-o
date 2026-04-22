@@ -3,7 +3,6 @@ import pandas as pd
 import subprocess
 import sys
 import os
-import plotly.graph_objects as go 
 
 # --- GARANTIA DE INSTALAÇÃO ---
 def install_and_import(package):
@@ -117,7 +116,7 @@ with st.sidebar:
 st.title("📑 Sistema Contábil Digital")
 
 if not df.empty:
-    t = st.tabs(["📊 Razonetes", "🧾 Balancete", "📈 DRE Interativa", "⚙️ Gestão"])
+    t = st.tabs(["📊 Razonetes", "🧾 Balancete", "📈 DRE Detalhada", "⚙️ Gestão"])
     
     with t[0]: # Razonetes
         cols = st.columns(3)
@@ -151,63 +150,58 @@ if not df.empty:
         col_b1.metric("Total Saldos Devedores", f"R$ {t_dev:,.2f}")
         col_b2.metric("Total Saldos Credores", f"R$ {t_cre:,.2f}")
 
-    with t[2]: # DRE INTERATIVA (Corrigida)
-        st.subheader("Análise Dinâmica de Resultados")
-        rec = df[df['natureza'] == 'Receita']['valor'].sum()
-        des = df[df['natureza'] == 'Despesa']['valor'].sum()
-        enc = df[df['natureza'] == 'Encargos Financeiros']['valor'].sum()
-        ebitda = rec - des
-        lucro_real = ebitda - enc
+    with t[2]: # DRE DETALHADA (Sem Gráficos)
+        st.subheader("Demonstração do Resultado do Exercício")
+        
+        # Filtros por natureza
+        df_rec = df[df['natureza'] == 'Receita'].groupby('descricao')['valor'].sum().reset_index()
+        df_des = df[df['natureza'] == 'Despesa'].groupby('descricao')['valor'].sum().reset_index()
+        df_enc = df[df['natureza'] == 'Encargos Financeiros'].groupby('descricao')['valor'].sum().reset_index()
+        
+        rec_total = df_rec['valor'].sum()
+        des_total = df_des['valor'].sum()
+        enc_total = df_enc['valor'].sum()
+        ebitda = rec_total - des_total
+        lucro_real = ebitda - enc_total
 
-        # Indicadores principais - CORREÇÃO AQUI
-        m1, m2, m3, m4 = st.columns(4)
-        m1.metric("Receita Total", f"R$ {rec:,.2f}")
-        m2.metric("EBITDA", f"R$ {ebitda:,.2f}", f"{((ebitda/rec*100) if rec > 0 else 0):.1f}% margem")
-        m3.metric("Lucro Real", f"R$ {lucro_real:,.2f}")
-        # Removido o parâmetro inexistente inverse_trend
-        m4.metric("Despesas Totais", f"R$ {des+enc:,.2f}")
+        # Cabeçalho de Métricas
+        c1, c2, c3 = st.columns(3)
+        c1.metric("EBITDA", f"R$ {ebitda:,.2f}")
+        c2.metric("Lucro Real", f"R$ {lucro_real:,.2f}")
+        c3.metric("Margem Líquida", f"{(lucro_real/rec_total*100) if rec_total > 0 else 0:.2f}%")
 
-        col_graf1, col_graf2 = st.columns([2, 1])
+        st.divider()
 
-        with col_graf1:
-            fig_waterfall = go.Figure(go.Waterfall(
-                name = "DRE", orientation = "v",
-                measure = ["relative", "relative", "total", "relative", "total"],
-                x = ["Receita Bruta", "Despesas Adm", "EBITDA", "Encargos Fin", "Lucro Líquido"],
-                textposition = "outside",
-                text = [f"R$ {rec:,.0f}", f"-R$ {des:,.0f}", f"R$ {ebitda:,.0f}", f"-R$ {enc:,.0f}", f"R$ {lucro_real:,.0f}"],
-                y = [rec, -des, 0, -enc, 0],
-                connector = {"line":{"color":"rgb(63, 63, 63)"}},
-                increasing = {"marker":{"color":"#2ecc71"}},
-                decreasing = {"marker":{"color":"#e74c3c"}},
-                totals = {"marker":{"color":"#3498db"}}
-            ))
-            fig_waterfall.update_layout(title="Fluxo do Resultado", showlegend=False, height=450)
-            st.plotly_chart(fig_waterfall, use_container_width=True)
+        # Detalhamento das Contas
+        col_dre1, col_dre2 = st.columns(2)
+        
+        with col_dre1:
+            st.markdown("### 🟢 Receitas")
+            if not df_rec.empty:
+                for _, r in df_rec.iterrows():
+                    st.write(f"**{r['descricao']}**: R$ {r['valor']:,.2f}")
+                st.markdown(f"**TOTAL RECEITAS: R$ {rec_total:,.2f}**")
+            else: st.info("Sem receitas lançadas.")
 
-        with col_graf2:
-            if (des + enc) > 0:
-                fig_donut = go.Figure(data=[go.Pie(
-                    labels=['Despesas Adm', 'Encargos Fin'], 
-                    values=[des, enc], 
-                    hole=.6,
-                    marker_colors=['#f39c12', '#d35400']
-                )])
-                fig_donut.update_layout(title="Composição de Saídas", height=450)
-                st.plotly_chart(fig_donut, use_container_width=True)
-            else:
-                st.info("Sem despesas para exibir.")
+            st.markdown("### 🔴 Despesas Administrativas")
+            if not df_des.empty:
+                for _, r in df_des.iterrows():
+                    st.write(f"{r['descricao']}: R$ {r['valor']:,.2f}")
+                st.markdown(f"**TOTAL DESPESAS: R$ {des_total:,.2f}**")
+            else: st.info("Sem despesas lançadas.")
 
-        with st.expander("Ver Tabela Detalhada"):
-            if rec > 0:
-                dre_df = pd.DataFrame([
-                    {"Descrição": "RECEITA BRUTA", "Valor": rec, "%": "100%"},
-                    {"Descrição": "(-) DESPESAS ADMINISTRATIVAS", "Valor": des, "%": f"{(des/rec)*100:.2f}%"},
-                    {"Descrição": "(=) EBITDA (LAJIDA)", "Valor": ebitda, "%": f"{(ebitda/rec)*100:.2f}%"},
-                    {"Descrição": "(-) ENCARGOS FINANCEIROS", "Valor": enc, "%": f"{(enc/rec)*100:.2f}%"},
-                    {"Descrição": "(=) LUCRO REAL LÍQUIDO", "Valor": lucro_real, "%": f"{(lucro_real/rec)*100:.2f}%"}
-                ])
-                st.table(dre_df.style.format({"Valor": "R$ {:.2f}"}))
+        with col_dre2:
+            st.markdown("### 🟠 Encargos Financeiros")
+            if not df_enc.empty:
+                for _, r in df_enc.iterrows():
+                    st.write(f"{r['descricao']}: R$ {r['valor']:,.2f}")
+                st.markdown(f"**TOTAL ENCARGOS: R$ {enc_total:,.2f}**")
+            else: st.info("Sem encargos lançados.")
+
+            st.markdown("---")
+            st.markdown(f"### 🏁 Resultado Final")
+            st.write(f"**EBITDA:** R$ {ebitda:,.2f}")
+            st.write(f"**Lucro Real Líquido:** R$ {lucro_real:,.2f}")
 
     with t[3]: # Gestão
         st.subheader("Gerenciar Lançamentos")
