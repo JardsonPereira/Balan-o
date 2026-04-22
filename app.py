@@ -69,7 +69,7 @@ def carregar_dados():
 
 df = carregar_dados()
 
-# --- FORMULÁRIO (PRESERVADO) ---
+# --- FORMULÁRIO (CORRIGIDO) ---
 with st.sidebar:
     st.divider()
     if st.session_state.edit_id:
@@ -79,12 +79,23 @@ with st.sidebar:
         st.header("➕ Novo")
         item_edit = {"descricao": "", "natureza": "Ativo", "tipo": "Débito", "valor": 0.01, "justificativa": "", "natureza_operacao": "Outros"}
 
-    with st.form("contabil", clear_on_submit=True):
+    # Nota: Removido clear_on_submit para evitar que widgets sumam antes do processamento
+    with st.form("contabil"):
         contas_existentes = sorted(df['descricao'].unique().tolist()) if not df.empty else []
         opcoes_conta = ["+ Adicionar Nova Conta"] + contas_existentes
-        conta_sel = st.selectbox("Selecione a Conta", opcoes_conta)
         
-        desc = st.text_input("Nome da Nova Conta").upper().strip() if conta_sel == "+ Adicionar Nova Conta" else conta_sel
+        # Define o index padrão se estiver editando
+        idx_conta = 0
+        if st.session_state.edit_id and item_edit['descricao'] in contas_existentes:
+            idx_conta = opcoes_conta.index(item_edit['descricao'])
+            
+        conta_sel = st.selectbox("Selecione a Conta", opcoes_conta, index=idx_conta)
+        
+        # Mostra campo de texto apenas se for nova conta
+        if conta_sel == "+ Adicionar Nova Conta":
+            desc = st.text_input("Nome da Nova Conta", value="").upper().strip()
+        else:
+            desc = conta_sel
 
         nat_op_list = [
             "Integralização de Capital Social", "Venda de Mercadorias/Serviços", 
@@ -92,7 +103,11 @@ with st.sidebar:
             "Pagamento de Juros/Multas (Encargos Financeiros)", 
             "Tarifas e Taxas Bancárias (Encargos Financeiros)", "Outros"
         ]
-        natureza_op = st.selectbox("Natureza da Operação", nat_op_list)
+        
+        # Busca index da natureza de operação
+        default_nat_op = item_edit.get('natureza_operacao', 'Outros')
+        idx_nat_op = nat_op_list.index(default_nat_op) if default_nat_op in nat_op_list else 0
+        natureza_op = st.selectbox("Natureza da Operação", nat_op_list, index=idx_nat_op)
         
         nat_list = ["Ativo", "Passivo", "Patrimônio Líquido", "Receita", "Despesa", "Encargos Financeiros"]
         nat = st.selectbox("Grupo", nat_list, index=nat_list.index(item_edit['natureza']))
@@ -101,13 +116,16 @@ with st.sidebar:
         just = st.text_area("Justificativa", value=item_edit['justificativa'])
         
         if st.form_submit_button("Confirmar"):
-            payload = {"user_id": user_id, "descricao": desc, "natureza": nat, "tipo": tipo, "valor": valor, "justificativa": just, "natureza_operacao": natureza_op}
-            if st.session_state.edit_id:
-                supabase.table("lancamentos").update(payload).eq("id", st.session_state.edit_id).execute()
-                st.session_state.edit_id = None
+            if not desc:
+                st.error("Informe o nome da conta!")
             else:
-                supabase.table("lancamentos").insert(payload).execute()
-            st.rerun()
+                payload = {"user_id": user_id, "descricao": desc, "natureza": nat, "tipo": tipo, "valor": valor, "justificativa": just, "natureza_operacao": natureza_op}
+                if st.session_state.edit_id:
+                    supabase.table("lancamentos").update(payload).eq("id", st.session_state.edit_id).execute()
+                    st.session_state.edit_id = None
+                else:
+                    supabase.table("lancamentos").insert(payload).execute()
+                st.rerun()
 
 # --- INTERFACE ---
 st.title("📑 Sistema Contábil Digital")
@@ -115,7 +133,7 @@ st.title("📑 Sistema Contábil Digital")
 if not df.empty:
     t = st.tabs(["📊 Razonetes", "🧾 Balancete", "📈 DRE", "⚙️ Gestão"])
     
-    with t[0]: # Razonetes (Preservado)
+    with t[0]: # Razonetes
         cols = st.columns(3)
         for i, conta in enumerate(sorted(df['descricao'].unique())):
             with cols[i % 3]:
@@ -132,7 +150,7 @@ if not df.empty:
                 elif saldo < 0: st.markdown(f"**Saldo C: R$ {abs(saldo):,.2f}**")
                 else: st.write("Conta Zerada")
 
-    with t[1]: # Balancete (Preservado)
+    with t[1]: # Balancete
         st.subheader("Balancete de Verificação de Saldos")
         bal_data = []
         for conta in sorted(df['descricao'].unique()):
@@ -147,7 +165,7 @@ if not df.empty:
         col_b1.metric("Total Saldos Devedores", f"R$ {t_dev:,.2f}")
         col_b2.metric("Total Saldos Credores", f"R$ {t_cre:,.2f}")
 
-    with t[2]: # DRE com EBITDA e Lucro Real (Solicitado)
+    with t[2]: # DRE
         st.subheader("DRE - Análise Vertical e Resultados")
         rec = df[df['natureza'] == 'Receita']['valor'].sum()
         des = df[df['natureza'] == 'Despesa']['valor'].sum()
@@ -171,7 +189,7 @@ if not df.empty:
             ])
             st.table(dre_df.style.format({"Valor": "R$ {:.2f}"}))
 
-    with t[3]: # Gestão (Preservado)
+    with t[3]: # Gestão
         st.subheader("Gerenciar Lançamentos")
         for idx, row in df.iterrows():
             c1, c2, c3 = st.columns([0.6, 0.2, 0.2])
