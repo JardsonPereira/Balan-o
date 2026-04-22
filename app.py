@@ -153,74 +153,78 @@ if not df.empty:
         """, unsafe_allow_html=True)
 
         grupos = ["Ativo", "Passivo", "Patrimônio Líquido", "Receita", "Despesa", "Encargos Financeiros"]
-        
         for grupo in grupos:
             df_grupo = df[df['natureza'] == grupo]
             if not df_grupo.empty:
                 st.markdown(f"<div class='grupo-header'>{grupo.upper()}</div>", unsafe_allow_html=True)
                 contas_grupo = sorted(df_grupo['descricao'].unique())
                 cols = st.columns(3)
-                
                 for i, conta in enumerate(contas_grupo):
                     with cols[i % 3]:
                         df_c = df_grupo[df_grupo['descricao'] == conta]
                         v_deb_sum = df_c[df_c['tipo'] == 'Débito']['valor'].sum()
                         v_cre_sum = df_c[df_c['tipo'] == 'Crédito']['valor'].sum()
                         saldo = v_deb_sum - v_cre_sum
-
                         deb_html = "".join([f"<div class='valor-item valor-deb'>D: {r['valor']:,.2f}<span class='just-hint'>{r['justificativa']}</span></div>" for _, r in df_c[df_c['tipo'] == 'Débito'].iterrows()])
                         cre_html = "".join([f"<div class='valor-item valor-cre'>C: {r['valor']:,.2f}<span class='just-hint'>{r['justificativa']}</span></div>" for _, r in df_c[df_c['tipo'] == 'Crédito'].iterrows()])
-
                         txt_saldo = f"Saldo D: R$ {saldo:,.2f}" if saldo > 0 else f"Saldo C: R$ {abs(saldo):,.2f}" if saldo < 0 else "Zerada"
                         cor_saldo = "#1e7e34" if saldo > 0 else "#d32f2f" if saldo < 0 else "#212529"
-
                         st.markdown(f"""
                             <div class="conta-card">
                                 <div class="conta-titulo">{conta}</div>
-                                <div class="conta-corpo">
-                                    <div class="lado-debito">{deb_html}</div>
-                                    <div class="lado-credito">{cre_html}</div>
-                                </div>
+                                <div class="conta-corpo"><div class="lado-debito">{deb_html}</div><div class="lado-credito">{cre_html}</div></div>
                                 <div class="conta-rodape" style="color: {cor_saldo};">{txt_saldo}</div>
                             </div>
                         """, unsafe_allow_html=True)
 
     elif opcao_menu == "🧾 Balancete":
-        st.subheader("Balancete de Verificação")
+        st.subheader("Balancete de Verificação de Saldos")
         bal_data = []
         for conta in sorted(df['descricao'].unique()):
             df_c = df[df['descricao'] == conta]
             d = df_c[df_c['tipo'] == 'Débito']['valor'].sum()
             c = df_c[df_c['tipo'] == 'Crédito']['valor'].sum()
             bal_data.append({"Conta": conta, "Saldo Devedor": d-c if d>c else 0, "Saldo Credor": c-d if c>d else 0})
+        
         bal_df = pd.DataFrame(bal_data)
-        st.table(bal_df.style.format({"Saldo Devedor": "R$ {:.2f}", "Saldo Credor": "R$ {:.2f}"}))
+        
+        # Estilização profissional do Balancete
+        styled_bal = bal_df.style.format({
+            "Saldo Devedor": "R$ {:,.2f}",
+            "Saldo Credor": "R$ {:,.2f}"
+        }).set_table_styles([
+            {'selector': 'th', 'props': [('background-color', '#202124'), ('color', 'white'), ('text-align', 'center'), ('font-weight', 'bold')]},
+            {'selector': 'td', 'props': [('text-align', 'right'), ('padding', '10px')]},
+            {'selector': 'tr:nth-child(even)', 'props': [('background-color', '#f8f9fa')]}
+        ], overwrite=False)
+
+        st.table(styled_bal)
+        
         t_dev, t_cre = bal_df["Saldo Devedor"].sum(), bal_df["Saldo Credor"].sum()
         col_b1, col_b2 = st.columns(2)
-        col_b1.metric("Total Devedores", f"R$ {t_dev:,.2f}")
-        col_b2.metric("Total Credores", f"R$ {t_cre:,.2f}")
+        col_b1.metric("Total de Saldos Devedores", f"R$ {t_dev:,.2f}", delta=None)
+        col_b2.metric("Total de Saldos Credores", f"R$ {t_cre:,.2f}", delta=None)
+        
+        if round(t_dev, 2) == round(t_cre, 2):
+            st.success("✅ O Balancete está equilibrado (Débitos = Créditos)")
+        else:
+            st.error("❌ O Balancete está desequilibrado! Verifique seus lançamentos.")
 
     elif opcao_menu == "📈 DRE":
         st.subheader("Demonstração do Resultado")
         df_rec = df[df['natureza'] == 'Receita'].groupby('descricao')['valor'].sum()
         df_des = df[df['natureza'] == 'Despesa'].groupby('descricao')['valor'].sum()
         df_enc = df[df['natureza'] == 'Encargos Financeiros'].groupby('descricao')['valor'].sum()
-        
         rec_total, des_total, enc_total = df_rec.sum(), df_des.sum(), df_enc.sum()
         ebitda = rec_total - des_total
         lucro_real = ebitda - enc_total
-
         with st.expander(f"(=) RECEITA BRUTA OPERACIONAL: R$ {rec_total:,.2f}", expanded=True):
             for nome, valor in df_rec.items(): st.write(f"   (+) {nome}: R$ {valor:,.2f}")
-
         with st.expander(f"(-) DESPESAS OPERACIONAIS: R$ {-des_total:,.2f}", expanded=False):
             for nome, valor in df_des.items(): st.write(f"   (-) {nome}: R$ {valor:,.2f}")
-
         st.info(f"**(=) EBITDA (LAJIDA): R$ {ebitda:,.2f}**")
-
         with st.expander(f"(-) RESULTADO FINANCEIRO: R$ {-enc_total:,.2f}", expanded=False):
             for nome, valor in df_enc.items(): st.write(f"   (-) {nome}: R$ {valor:,.2f}")
-
         st.success(f"### **(=) LUCRO REAL LÍQUIDO: R$ {lucro_real:,.2f}**")
 
     elif opcao_menu == "⚙️ Gestão":
@@ -234,7 +238,6 @@ if not df.empty:
             else:
                 st.session_state.confirm_reset = True
                 st.warning("Clique novamente para confirmar a limpeza TOTAL.")
-        
         st.divider()
         for idx, row in df.iterrows():
             c1, c2, c3 = st.columns([0.6, 0.2, 0.2])
