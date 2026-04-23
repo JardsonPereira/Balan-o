@@ -22,7 +22,7 @@ if 'form_count' not in st.session_state: st.session_state.form_count = 0
 if 'menu_opcao' not in st.session_state: st.session_state.menu_opcao = "📊 Razonetes"
 if 'auth_mode' not in st.session_state: st.session_state.auth_mode = "login"
 
-# --- FUNÇÃO GERAR PDF (ESTÁVEL) ---
+# --- FUNÇÃO GERAR PDF ---
 def gerar_pdf_bytes(dados, titulo_relatorio):
     pdf = FPDF()
     pdf.add_page()
@@ -30,14 +30,12 @@ def gerar_pdf_bytes(dados, titulo_relatorio):
     pdf.cell(190, 10, txt=titulo_relatorio.upper(), ln=True, align="C")
     pdf.ln(10)
     pdf.set_font("Helvetica", "B", 8)
-    
     pdf.cell(70, 8, "CONTA", border=1, align="C")
     pdf.cell(30, 8, "DEBITO", border=1, align="C")
     pdf.cell(30, 8, "CREDITO", border=1, align="C")
     pdf.cell(30, 8, "S. DEV", border=1, align="C")
     pdf.cell(30, 8, "S. CRE", border=1, align="C")
     pdf.ln()
-    
     pdf.set_font("Helvetica", "", 8)
     for _, row in dados.iterrows():
         pdf.cell(70, 7, str(row["CONTA"])[:40], border=1)
@@ -46,7 +44,6 @@ def gerar_pdf_bytes(dados, titulo_relatorio):
         pdf.cell(30, 7, f"{row['SALDO DEVEDOR']:,.2f}", border=1, align="R")
         pdf.cell(30, 7, f"{row['SALDO CREDOR']:,.2f}", border=1, align="R")
         pdf.ln()
-    
     pdf_out = pdf.output()
     return bytes(pdf_out) if isinstance(pdf_out, bytearray) else pdf_out
 
@@ -88,7 +85,7 @@ user_id = st.session_state.user.id
 res_db = supabase.table("lancamentos").select("*").eq("user_id", user_id).execute()
 df = pd.DataFrame(res_db.data)
 
-# CORREÇÃO CRÍTICA: Garante que a coluna categoria_dfc exista para evitar KeyError
+# Blindagem contra KeyError: categoria_dfc
 if not df.empty and 'categoria_dfc' not in df.columns:
     df['categoria_dfc'] = 'Operacional'
 
@@ -113,8 +110,7 @@ with st.sidebar:
         nat = st.selectbox("Grupo", ["Ativo", "Passivo", "Patrimônio Líquido", "Receita", "Despesa", "Encargos Financeiros"], index=["Ativo", "Passivo", "Patrimônio Líquido", "Receita", "Despesa", "Encargos Financeiros"].index(item_edit['natureza']))
         
         cat_dfc_list = ["Operacional", "Investimento", "Financiamento", "N/A (Não Financeiro)"]
-        idx_cat = cat_dfc_list.index(item_edit.get('categoria_dfc', 'Operacional')) if item_edit.get('categoria_dfc') in cat_dfc_list else 0
-        cat_dfc = st.selectbox("Categoria DFC", cat_dfc_list, index=idx_cat)
+        cat_dfc = st.selectbox("Categoria DFC", cat_dfc_list, index=cat_dfc_list.index(item_edit.get('categoria_dfc', 'Operacional')))
         
         tipo = st.radio("Operação", ["Débito", "Crédito"], horizontal=True)
         valor = st.number_input("Valor", min_value=0.0, value=float(item_edit['valor']))
@@ -198,13 +194,27 @@ if not df.empty:
         df_f['SAÍDA'] = df_f.apply(lambda x: x['valor'] if x['tipo'] == 'Crédito' else 0, axis=1)
         df_f['SALDO_LIQUIDO'] = df_f['ENTRADA'] - df_f['SAÍDA']
         
-        # Agrupamento seguro
-        df_cat = df_f.groupby('categoria_dfc')[['ENTRADA', 'SAÍDA', 'SALDO_LIQUIDO']].sum()
+        # --- LÓGICA DE LIQUIDEZ ---
+        total_entradas = df_f['ENTRADA'].sum()
+        total_saidas = df_f['SAÍDA'].sum()
+        liquidez_absoluta = total_entradas - total_saidas
         
+        st.markdown("### 🔍 Análise de Liquidez")
+        if liquidez_absoluta > 0:
+            st.success(f"**CAIXA COM LIQUIDEZ:** O saldo disponível (R$ {liquidez_absoluta:,.2f}) cobre todas as saídas registradas.")
+        elif liquidez_absoluta == 0:
+            st.warning("**CAIXA EM EQUILÍBRIO:** O caixa está operando no limite (Break-even). Não há sobra para imprevistos.")
+        else:
+            st.error(f"**ALERTA DE INSOLVÊNCIA:** O caixa está negativo em R$ {abs(liquidez_absoluta):,.2f}. As saídas superam as entradas.")
+
+        # Métricas visuais
         c1, c2, c3 = st.columns(3)
-        c1.metric("Operacional", f"R$ {df_cat.loc['Operacional', 'SALDO_LIQUIDO'] if 'Operacional' in df_cat.index else 0:,.2f}")
-        c2.metric("Investimento", f"R$ {df_cat.loc['Investimento', 'SALDO_LIQUIDO'] if 'Investimento' in df_cat.index else 0:,.2f}")
-        c3.metric("Financiamento", f"R$ {df_cat.loc['Financiamento', 'SALDO_LIQUIDO'] if 'Financiamento' in df_cat.index else 0:,.2f}")
+        df_cat = df_f.groupby('categoria_dfc')[['ENTRADA', 'SAÍDA', 'SALDO_LIQUIDO']].sum()
+        c1.metric("Fluxo Operacional", f"R$ {df_cat.loc['Operacional', 'SALDO_LIQUIDO'] if 'Operacional' in df_cat.index else 0:,.2f}")
+        c2.metric("Total Entradas", f"R$ {total_entradas:,.2f}")
+        c3.metric("Total Saídas", f"R$ {total_saidas:,.2f}", delta_color="inverse")
+
+        st.write("---")
         st.dataframe(df_f[['descricao', 'categoria_dfc', 'ENTRADA', 'SAÍDA', 'justificativa']], use_container_width=True)
 
     elif opcao == "⚙️ Gestão":
