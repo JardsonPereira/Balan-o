@@ -96,7 +96,7 @@ with st.sidebar:
     if st.button("Encerrar Sessão", use_container_width=True): st.session_state.user = None; st.rerun()
     st.divider()
     
-    # Lógica de Campos em Branco pós-lançamento
+    # Define valores padrão para campos vazios ou para edição
     if st.session_state.edit_id and not df.empty:
         st.subheader("📝 Editar Registro")
         items = df[df['id'] == st.session_state.edit_id]
@@ -105,6 +105,7 @@ with st.sidebar:
         st.subheader("➕ Novo Lançamento")
         item_edit = {"descricao": "", "natureza": "Ativo", "tipo": "Débito", "valor": 0.0, "justificativa": "", "categoria_dfc": "Atividade Operacional", "data_lancamento": date.today()}
 
+    # clear_on_submit=True limpa os inputs visuais após o envio
     with st.form(key=f"f_{st.session_state.form_count}", clear_on_submit=True):
         data_sel = st.date_input("Data do Fato", value=item_edit.get('data_lancamento', date.today()))
         contas_existentes = sorted(df['descricao'].unique().tolist()) if not df.empty else []
@@ -112,12 +113,12 @@ with st.sidebar:
         desc = st.text_input("Nome da Conta", value=item_edit.get('descricao', "")).upper() if sel == "(NOVA)" else sel
         nat = st.selectbox("Grupo", ["Ativo", "Passivo", "Patrimônio Líquido", "Receita", "Despesa", "Encargos Financeiros"], index=["Ativo", "Passivo", "Patrimônio Líquido", "Receita", "Despesa", "Encargos Financeiros"].index(item_edit.get('natureza', 'Ativo')))
         cat_dfc_list = ["Atividade Operacional", "Atividade de Investimento", "Atividade de Financiamento", "N/A (Não Financeiro)"]
-        cat_dfc = st.selectbox("DFC", cat_dfc_list, index=cat_dfc_list.index(item_edit.get('categoria_dfc', 'Atividade Operacional')))
-        tipo = st.radio("Tipo", ["Débito (Entrada)", "Crédito (Saída)"], horizontal=True, index=0 if item_edit.get('tipo') == 'Débito' else 1)
+        cat_dfc = st.selectbox("Classificação DFC", cat_dfc_list, index=cat_dfc_list.index(item_edit.get('categoria_dfc', 'Atividade Operacional')))
+        tipo = st.radio("Operação", ["Débito (Entrada)", "Crédito (Saída)"], horizontal=True, index=0 if item_edit.get('tipo') == 'Débito' else 1)
         valor = st.number_input("Valor", min_value=0.0, value=float(item_edit.get('valor', 0.0)))
         just = st.text_input("Histórico", value=item_edit.get('justificativa', ""))
         
-        if st.form_submit_button("Salvar Registro", use_container_width=True, type="primary"):
+        if st.form_submit_button("Efetivar Lançamento", use_container_width=True, type="primary"):
             tipo_db = "Débito" if "Débito" in tipo else "Crédito"
             payload = {
                 "user_id": user_id, "descricao": desc, "natureza": nat, "tipo": tipo_db, 
@@ -127,13 +128,15 @@ with st.sidebar:
             try:
                 if st.session_state.edit_id:
                     supabase.table("lancamentos").update(payload).eq("id", st.session_state.edit_id).execute()
+                    st.session_state.edit_id = None
                 else:
                     supabase.table("lancamentos").insert(payload).execute()
-                st.session_state.edit_id = None
-                st.session_state.form_count += 1 # Reseta o form limpando campos
+                
+                # Incrementa para resetar o formulário completamente
+                st.session_state.form_count += 1
                 st.rerun()
-            except Exception:
-                st.error("Erro ao salvar. Verifique as colunas do banco.")
+            except Exception as e:
+                st.error(f"Erro ao processar: {e}")
 
 # --- CSS ---
 st.markdown("<style>.stApp { background-color: #f8fafc; } .dfc-resumo { background: #f1f5f9; padding: 15px; border-radius: 10px; border-left: 5px solid #1e3a8a; } .group-label { background: #e2e8f0; color: #1e293b; padding: 5px 12px; border-radius: 4px; font-weight: 700; margin-top: 1rem; font-size: 0.7rem; text-transform: uppercase; }</style>", unsafe_allow_html=True)
@@ -160,7 +163,9 @@ if not df.empty:
                         df_c = df_g[df_g['descricao'] == c_nome]
                         v_d, v_c = df_c[df_c['tipo']=='Débito']['valor'].sum(), df_c[df_c['tipo']=='Crédito']['valor'].sum()
                         saldo = v_d - v_c
-                        st.container(border=True).write(f"**{c_nome}** \nSaldo: R$ {abs(saldo):,.2f} ({'D' if saldo>=0 else 'C'})")
+                        with st.container(border=True):
+                            st.write(f"**{c_nome}**")
+                            st.write(f"Saldo: R$ {abs(saldo):,.2f} ({'D' if saldo>=0 else 'C'})")
 
     elif opcao == "🧾 Balancete":
         st.subheader("Balancete de Verificação")
@@ -172,7 +177,7 @@ if not df.empty:
             bal_data.append({"CONTA": c_n, "DEBITO": d_s, "CREDITO": c_s, "SALDO DEVEDOR": s if s > 0 else 0, "SALDO CREDOR": abs(s) if s < 0 else 0})
         df_bal = pd.DataFrame(bal_data)
         st.table(df_bal.style.format({c: "{:,.2f}" for c in ["DEBITO", "CREDITO", "SALDO DEVEDOR", "SALDO CREDOR"]}))
-        st.download_button("📥 PDF", data=gerar_pdf_bytes(df_bal, "BALANCETE"), file_name="balancete.pdf")
+        st.download_button("📥 Baixar PDF", data=gerar_pdf_bytes(df_bal, "BALANCETE"), file_name="balancete.pdf")
 
     elif opcao == "📈 DRE":
         st.subheader("DRE (Competência)")
@@ -183,15 +188,15 @@ if not df.empty:
         st.write("Despesas:", des)
 
     elif opcao == "💸 DFC Real":
-        st.subheader("💸 DFC - Período de Caixa")
+        st.subheader("💸 DFC - Consulta por Período")
         
-        # --- FILTRO DE PERÍODO ---
+        # Filtro de Período Integrado
         c_p1, c_p2 = st.columns(2)
-        data_inicio = c_p1.date_input("Início da Consulta", value=date(date.today().year, date.today().month, 1))
-        data_fim = c_p2.date_input("Fim da Consulta", value=date.today())
+        data_ini = c_p1.date_input("Início", value=date(date.today().year, date.today().month, 1))
+        data_fim = c_p2.date_input("Fim", value=date.today())
         
         df_f = df[(df['categoria_dfc'] != "N/A (Não Financeiro)") & 
-                  (df['data_lancamento'] >= data_inicio) & 
+                  (df['data_lancamento'] >= data_ini) & 
                   (df['data_lancamento'] <= data_fim)].copy()
         
         if not df_f.empty:
@@ -200,30 +205,36 @@ if not df.empty:
             df_f['SAÍDA'] = df_f.apply(lambda x: x['valor'] if x['tipo'] == 'Crédito' else 0, axis=1)
             
             ent, sai = df_f['ENTRADA'].sum(), df_f['SAÍDA'].sum()
-            saldo_ini = st.number_input("Saldo Anterior ao Período", min_value=0.0, value=0.0)
+            saldo_ant = st.number_input("Saldo Inicial do Caixa", min_value=0.0, value=0.0)
             
-            st.markdown(f"<div class='dfc-resumo'>Saldo Inicial: R$ {saldo_ini:,.2f}<br>(+) Entradas: R$ {ent:,.2f}<br>(-) Saídas: R$ {sai:,.2f}<br><b>(=) SALDO FINAL NO PERÍODO: R$ {saldo_ini + ent - sai:,.2f}</b></div>", unsafe_allow_html=True)
+            st.markdown(f"<div class='dfc-resumo'>Saldo Inicial: R$ {saldo_ant:,.2f}<br>(+) Entradas: R$ {ent:,.2f}<br>(-) Saídas: R$ {sai:,.2f}<br><b>(=) SALDO FINAL: R$ {saldo_ant + ent - sai:,.2f}</b></div>", unsafe_allow_html=True)
             
             st.divider()
             df_cat = df_f.groupby('categoria_dfc')[['ENTRADA', 'SAÍDA']].sum()
-            df_cat['LIQUIDEZ'] = df_cat['ENTRADA'] - df_cat['SAÍDA']
+            df_cat['SALDO'] = df_cat['ENTRADA'] - df_cat['SAÍDA']
             
             cols = st.columns(3)
-            for i, cat in enumerate(["Atividade Operacional", "Atividade de Investimento", "Atividade de Financiamento"]):
-                val = df_cat.loc[cat, 'LIQUIDEZ'] if cat in df_cat.index else 0
-                cols[i].metric(cat.split(" de ")[-1], f"R$ {val:,.2f}")
+            cats = ["Atividade Operacional", "Atividade de Investimento", "Atividade de Financiamento"]
+            for i, cat in enumerate(cats):
+                val = df_cat.loc[cat, 'SALDO'] if cat in df_cat.index else 0
+                cols[i].metric(cat.replace("Atividade de ", ""), f"R$ {val:,.2f}")
 
-            st.write("#### Movimentações do Período")
-            st.dataframe(df_f[['data_lancamento', 'descricao', 'categoria_dfc', 'ENTRADA', 'SAÍDA', 'justificativa']], use_container_width=True)
+            st.write("#### Extrato de Movimentações")
+            st.dataframe(df_f[['data_lancamento', 'descricao', 'ENTRADA', 'SAÍDA', 'justificativa']], use_container_width=True)
         else:
-            st.warning("Sem movimentações reais neste período.")
+            st.warning("Nenhuma movimentação financeira real no período selecionado.")
 
     elif opcao == "⚙️ Gestão":
+        st.subheader("Manutenção de Registros")
         for _, r in df.iterrows():
             with st.container(border=True):
                 c1, c2 = st.columns([4, 1])
-                c1.write(f"**{r['data_lancamento'].strftime('%d/%m/%Y')} - {r['descricao']}** | {r['tipo']}")
-                if c2.button("✏️", key=f"e_{r['id']}"): st.session_state.edit_id = r['id']; st.rerun()
-                if c2.button("🗑️", key=f"d_{r['id']}"): supabase.table("lancamentos").delete().eq("id", r['id']).execute(); st.rerun()
+                c1.write(f"**{r['data_lancamento'].strftime('%d/%m/%Y')} - {r['descricao']}** | {r['valor']:,.2f}")
+                if c2.button("✏️", key=f"e_{r['id']}"): 
+                    st.session_state.edit_id = r['id']
+                    st.rerun()
+                if c2.button("🗑️", key=f"d_{r['id']}"): 
+                    supabase.table("lancamentos").delete().eq("id", r['id']).execute()
+                    st.rerun()
 else:
-    st.info("Sistema vazio.")
+    st.info("Aguardando lançamentos.")
