@@ -198,15 +198,7 @@ if not df.empty:
             ent, sai = df_f[df_f['tipo']=='Débito']['valor'].sum(), df_f[df_f['tipo']=='Crédito']['valor'].sum()
             saldo_ant = st.number_input("Saldo Anterior", min_value=0.0, value=0.0)
             
-            # --- CORREÇÃO DO MARKDOWN ABAIXO ---
-            resumo_html = f"""
-            <div class='dfc-resumo'>
-                Saldo Inicial: R$ {saldo_ant:,.2f}<br>
-                (+) Entradas: R$ {ent:,.2f}<br>
-                (-) Saídas: R$ {sai:,.2f}<br>
-                <b>(=) SALDO FINAL: R$ {saldo_ant + ent - sai:,.2f}</b>
-            </div>
-            """
+            resumo_html = f"<div class='dfc-resumo'>Saldo Inicial: R$ {saldo_ant:,.2f}<br>(+) Entradas: R$ {ent:,.2f}<br>(-) Saídas: R$ {sai:,.2f}<br><b>(=) SALDO FINAL: R$ {saldo_ant + ent - sai:,.2f}</b></div>"
             st.markdown(resumo_html, unsafe_allow_html=True)
             
             st.divider()
@@ -224,6 +216,24 @@ if not df.empty:
 
     elif opcao == "⚙️ Gestão":
         st.subheader("Manutenção de Registros")
+        
+        # --- NOVO: OPÇÃO DE RESETAR TUDO ---
+        with st.expander("🚨 ZONA DE PERIGO: Resetar Lançamentos"):
+            st.warning("Esta ação excluirá permanentemente TODOS os seus lançamentos desta conta.")
+            confirm = st.text_input("Para confirmar, digite 'RESETAR' abaixo:")
+            if st.button("EXCLUIR TUDO", type="primary"):
+                if confirm == "RESETAR":
+                    try:
+                        supabase.table("lancamentos").delete().eq("user_id", user_id).execute()
+                        st.success("Todos os registros foram apagados com sucesso!")
+                        st.rerun()
+                    except Exception as e:
+                        st.error(f"Erro ao resetar: {e}")
+                else:
+                    st.error("Palavra de confirmação incorreta.")
+        
+        st.divider()
+        
         for _, r in df.iterrows():
             with st.container(border=True):
                 c_inf, c_btn = st.columns([4, 1])
