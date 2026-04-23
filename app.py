@@ -22,12 +22,13 @@ if 'form_count' not in st.session_state: st.session_state.form_count = 0
 if 'menu_opcao' not in st.session_state: st.session_state.menu_opcao = "📊 Razonetes"
 if 'auth_mode' not in st.session_state: st.session_state.auth_mode = "login"
 
-# --- FUNÇÃO GERAR PDF (CORRIGIDA PARA DOWNLOAD_BUTTON) ---
+# --- FUNÇÃO GERAR PDF (CORREÇÃO DEFINITIVA DE ENCODING) ---
 def gerar_pdf_bytes(dados, titulo_relatorio):
     pdf = FPDF()
     pdf.add_page()
     pdf.set_font("Arial", "B", 16)
-    pdf.cell(190, 10, txt="RELATORIO CONTABIL DIGITAL", ln=True, align="C")
+    # Título sem acentos para evitar erros de fonte padrão
+    pdf.cell(190, 10, txt=f"{titulo_relatorio}", ln=True, align="C")
     pdf.ln(10)
     
     pdf.set_font("Arial", "B", 10)
@@ -39,12 +40,15 @@ def gerar_pdf_bytes(dados, titulo_relatorio):
     
     pdf.set_font("Arial", "", 9)
     for _, row in dados.iterrows():
-        pdf.cell(80, 7, str(row["CONTA"]), border=1)
+        # Limpa caracteres que o PDF básico não suporta
+        conta_texto = str(row["CONTA"]).encode('ascii', 'ignore').decode('ascii')
+        pdf.cell(80, 7, conta_texto, border=1)
         pdf.cell(35, 7, f"{row['DEBITO']:,.2f}", border=1)
         pdf.cell(35, 7, f"{row['CREDITO']:,.2f}", border=1)
         pdf.cell(40, 7, f"{row['SALDO']:,.2f}", border=1)
         pdf.ln()
-    return pdf.output(dest='S').encode('latin-1')
+    
+    return pdf.output() # O fpdf2 já retorna bytes por padrão no Streamlit se usado assim
 
 # --- INTERFACE DE AUTENTICAÇÃO ---
 def tela_autenticacao():
@@ -101,8 +105,11 @@ with st.sidebar:
     st.markdown(f"**Operador:** {st.session_state.user.email}")
     if st.button("Sair"): st.session_state.user = None; st.rerun()
     st.divider()
+    
     if st.session_state.edit_id and not df.empty:
-        item_edit = df[df['id'] == st.session_state.edit_id].iloc[0]
+        # Filtra para edição
+        items = df[df['id'] == st.session_state.edit_id]
+        item_edit = items.iloc[0] if not items.empty else {"descricao": "", "natureza": "Ativo", "tipo": "Débito", "valor": 0.0, "justificativa": ""}
     else:
         item_edit = {"descricao": "", "natureza": "Ativo", "tipo": "Débito", "valor": 0.0, "justificativa": ""}
 
@@ -174,9 +181,10 @@ if not df.empty:
             bal_list.append({"CONTA": c_n, "DEBITO": d_s, "CREDITO": c_s, "SALDO": d_s-c_s})
         df_bal = pd.DataFrame(bal_list)
         st.table(df_bal)
-        # CORREÇÃO DO ERRO DO PDF: Gerar bytes antes do botão
-        pdf_out = gerar_pdf_bytes(df_bal, "BALANCETE")
-        st.download_button("📥 Baixar PDF", data=pdf_out, file_name="balancete.pdf", mime="application/pdf")
+        
+        # Chamada corrigida da função de PDF
+        pdf_out = gerar_pdf_bytes(df_bal, "BALANCETE DE VERIFICACAO")
+        st.download_button("📥 Baixar PDF do Balancete", data=pdf_out, file_name="balancete.pdf", mime="application/pdf")
 
     elif st.session_state.menu_opcao == "📈 DRE":
         st.subheader("DRE")
