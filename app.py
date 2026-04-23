@@ -22,7 +22,7 @@ if 'form_count' not in st.session_state: st.session_state.form_count = 0
 if 'menu_opcao' not in st.session_state: st.session_state.menu_opcao = "📊 Razonetes"
 if 'auth_mode' not in st.session_state: st.session_state.auth_mode = "login"
 
-# --- FUNÇÃO GERAR PDF (ESTABILIZADA) ---
+# --- FUNÇÃO GERAR PDF ---
 def gerar_pdf_bytes(dados, titulo_relatorio):
     pdf = FPDF()
     pdf.add_page()
@@ -30,15 +30,12 @@ def gerar_pdf_bytes(dados, titulo_relatorio):
     pdf.cell(190, 10, txt=titulo_relatorio.upper(), ln=True, align="C")
     pdf.ln(10)
     pdf.set_font("Helvetica", "B", 8)
-    
-    # Cabeçalho para o modelo de 5 colunas
     pdf.cell(70, 8, "CONTA", border=1, align="C")
     pdf.cell(30, 8, "DEBITO", border=1, align="C")
     pdf.cell(30, 8, "CREDITO", border=1, align="C")
     pdf.cell(30, 8, "S. DEV", border=1, align="C")
     pdf.cell(30, 8, "S. CRE", border=1, align="C")
     pdf.ln()
-    
     pdf.set_font("Helvetica", "", 8)
     for _, row in dados.iterrows():
         pdf.cell(70, 7, str(row["CONTA"])[:40], border=1)
@@ -47,7 +44,6 @@ def gerar_pdf_bytes(dados, titulo_relatorio):
         pdf.cell(30, 7, f"{row['SALDO DEVEDOR']:,.2f}", border=1, align="R")
         pdf.cell(30, 7, f"{row['SALDO CREDOR']:,.2f}", border=1, align="R")
         pdf.ln()
-    
     pdf_out = pdf.output()
     return bytes(pdf_out) if isinstance(pdf_out, bytearray) else pdf_out
 
@@ -92,27 +88,32 @@ df = pd.DataFrame(res_db.data)
 # --- SIDEBAR OPERACIONAL ---
 with st.sidebar:
     st.markdown(f"### 🏢 Enterprise Panel")
-    st.caption(f"Usuário: {st.session_state.user.email}")
-    if st.button("Sair", use_container_width=True): st.session_state.user = None; st.rerun()
+    if st.button("Encerrar Sessão", use_container_width=True): st.session_state.user = None; st.rerun()
     st.divider()
     
     if st.session_state.edit_id and not df.empty:
-        st.subheader("📝 Editar")
+        st.subheader("📝 Editar Registro")
         item_edit = df[df['id'] == st.session_state.edit_id].iloc[0]
     else:
-        st.subheader("➕ Novo")
-        item_edit = {"descricao": "", "natureza": "Ativo", "tipo": "Débito", "valor": 0.0, "justificativa": ""}
+        st.subheader("➕ Novo Lançamento")
+        item_edit = {"descricao": "", "natureza": "Ativo", "tipo": "Débito", "valor": 0.0, "justificativa": "", "categoria_dfc": "Operacional"}
 
     with st.form(key=f"f_{st.session_state.form_count}"):
         contas_existentes = sorted(df['descricao'].unique().tolist()) if not df.empty else []
-        sel = st.selectbox("Conta", ["(NOVA)"] + contas_existentes)
+        sel = st.selectbox("Conta Contábil", ["(NOVA)"] + contas_existentes)
         desc = st.text_input("Nome da Conta", value=item_edit['descricao']).upper() if sel == "(NOVA)" else sel
         nat = st.selectbox("Grupo", ["Ativo", "Passivo", "Patrimônio Líquido", "Receita", "Despesa", "Encargos Financeiros"], index=["Ativo", "Passivo", "Patrimônio Líquido", "Receita", "Despesa", "Encargos Financeiros"].index(item_edit['natureza']))
+        
+        # --- NOVO: CATEGORIA DFC ---
+        cat_dfc_list = ["Operacional", "Investimento", "Financiamento", "N/A (Não Financeiro)"]
+        cat_dfc = st.selectbox("Categoria DFC (Fluxo de Caixa)", cat_dfc_list, index=cat_dfc_list.index(item_edit.get('categoria_dfc', 'Operacional')))
+        
         tipo = st.radio("Operação", ["Débito", "Crédito"], horizontal=True)
         valor = st.number_input("Valor", min_value=0.0, value=float(item_edit['valor']))
-        just = st.text_input("Histórico", value=item_edit['justificativa'])
+        just = st.text_input("Histórico/Justificativa", value=item_edit['justificativa'])
+        
         if st.form_submit_button("Salvar Registro", use_container_width=True, type="primary"):
-            payload = {"user_id": user_id, "descricao": desc, "natureza": nat, "tipo": tipo, "valor": valor, "justificativa": just}
+            payload = {"user_id": user_id, "descricao": desc, "natureza": nat, "tipo": tipo, "valor": valor, "justificativa": just, "categoria_dfc": cat_dfc}
             if st.session_state.edit_id: supabase.table("lancamentos").update(payload).eq("id", st.session_state.edit_id).execute()
             else: supabase.table("lancamentos").insert(payload).execute()
             st.session_state.edit_id = None; st.session_state.form_count += 1; st.rerun()
@@ -131,7 +132,7 @@ st.markdown("""
 # --- NAVEGAÇÃO ---
 st.markdown("<h2 style='color: #0f172a; font-weight: 700;'>Dashboard Contábil</h2>", unsafe_allow_html=True)
 nav = st.columns(5)
-btns = ["📊 Razonetes", "🧾 Balancete", "📈 DRE", "💸 Fluxo de Caixa", "⚙️ Gestão"]
+btns = ["📊 Razonetes", "🧾 Balancete", "📈 DRE", "💸 Fluxo (DFC)", "⚙️ Gestão"]
 for i, b_name in enumerate(btns):
     if nav[i].button(b_name, use_container_width=True): st.session_state.menu_opcao = b_name
 st.divider()
@@ -170,7 +171,6 @@ if not df.empty:
             bal_data.append({"CONTA": c_n, "DEBITO": d_s, "CREDITO": c_s, "SALDO DEVEDOR": s if s > 0 else 0, "SALDO CREDOR": abs(s) if s < 0 else 0})
         df_bal = pd.DataFrame(bal_data)
         st.table(df_bal.style.format({c: "{:,.2f}" for c in ["DEBITO", "CREDITO", "SALDO DEVEDOR", "SALDO CREDOR"]}))
-        
         pdf_bytes = gerar_pdf_bytes(df_bal, "BALANCETE DE VERIFICACAO")
         st.download_button("📥 Baixar Relatório PDF", data=pdf_bytes, file_name="balancete.pdf")
 
@@ -179,38 +179,23 @@ if not df.empty:
         rec = df[df['natureza'] == 'Receita'].groupby('descricao')['valor'].sum()
         des = df[df['natureza'] == 'Despesa'].groupby('descricao')['valor'].sum()
         enc = df[df['natureza'] == 'Encargos Financeiros'].groupby('descricao')['valor'].sum()
-        r_t, d_t, e_t = rec.sum(), des.sum(), enc.sum()
-        
-        st.success(f"**LUCRO LÍQUIDO: R$ {r_t - d_t - e_t:,.2f}**")
-        with st.expander(f"(+) RECEITA BRUTA: R$ {r_t:,.2f}", expanded=True):
-            for n, v in rec.items(): st.write(f"• {n}: R$ {v:,.2f}")
-        with st.expander(f"(-) DESPESAS OPERACIONAIS: R$ {d_t:,.2f}", expanded=True):
-            for n, v in des.items(): st.write(f"• {n}: R$ {v:,.2f}")
-        with st.expander(f"(-) RESULTADO FINANCEIRO: R$ {e_t:,.2f}"):
-            for n, v in enc.items(): st.write(f"• {n}: R$ {v:,.2f}")
+        st.success(f"**LUCRO LÍQUIDO: R$ {rec.sum() - des.sum() - enc.sum():,.2f}**")
+        with st.expander("(+) RECEITA BRUTA"): st.write(rec)
+        with st.expander("(-) DESPESAS OPERACIONAIS"): st.write(des)
+        with st.expander("(-) RESULTADO FINANCEIRO"): st.write(enc)
 
-    elif opcao == "💸 Fluxo de Caixa":
-        st.subheader("Fluxo de Caixa Operacional")
+    elif opcao == "💸 Fluxo (DFC)":
+        st.subheader("💸 DFC - Demonstração do Fluxo de Caixa")
+        st.info("Pergunta central: 'Temos dinheiro para pagar os boletos hoje?' (Entradas e Saídas Reais)")
+        
         df_f = df.copy()
+        # Classificação de entradas e saídas reais de dinheiro
         df_f['ENTRADA'] = df_f.apply(lambda x: x['valor'] if x['tipo'] == 'Débito' else 0, axis=1)
         df_f['SAÍDA'] = df_f.apply(lambda x: x['valor'] if x['tipo'] == 'Crédito' else 0, axis=1)
+        df_f['SALDO_LIQUIDO'] = df_f['ENTRADA'] - df_f['SAÍDA']
+
+        # Agrupamento por Categoria DFC
+        df_cat = df_f.groupby('categoria_dfc')[['ENTRADA', 'SAÍDA', 'SALDO_LIQUIDO']].sum()
         
         c1, c2, c3 = st.columns(3)
-        ent, sai = df_f['ENTRADA'].sum(), df_f['SAÍDA'].sum()
-        c1.metric("Entradas", f"R$ {ent:,.2f}")
-        c2.metric("Saídas", f"R$ {sai:,.2f}", delta_color="inverse")
-        c3.metric("Saldo Líquido", f"R$ {ent - sai:,.2f}")
-        
-        st.dataframe(df_f[['descricao', 'ENTRADA', 'SAÍDA', 'justificativa']], use_container_width=True)
-
-    elif opcao == "⚙️ Gestão":
-        st.subheader("Manutenção de Registros")
-        for _, r in df.iterrows():
-            with st.container(border=True):
-                c_a, c_b = st.columns([4, 1])
-                c_a.write(f"**{r['descricao']}** | {r['natureza']} | {r['tipo']}")
-                c_a.caption(f"Valor: R$ {r['valor']:,.2f} | Histórico: {r['justificativa']}")
-                if c_b.button("✏️", key=f"e_{r['id']}"): st.session_state.edit_id = r['id']; st.rerun()
-                if c_b.button("🗑️", key=f"d_{r['id']}"): supabase.table("lancamentos").delete().eq("id", r['id']).execute(); st.rerun()
-else:
-    st.info("Sistema aguardando lançamentos.")
+        c1.metric("Fluxo Operacional", f"R$ {df_cat.loc['Operacional', 'SALDO_LIQUIDO'] if 'Operacional' in df_cat.index else 0:,.2f}")
