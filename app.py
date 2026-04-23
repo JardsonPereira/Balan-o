@@ -22,7 +22,7 @@ if 'form_count' not in st.session_state: st.session_state.form_count = 0
 if 'menu_opcao' not in st.session_state: st.session_state.menu_opcao = "📊 Razonetes"
 if 'auth_mode' not in st.session_state: st.session_state.auth_mode = "login"
 
-# --- FUNÇÃO GERAR PDF (VERSÃO ESTÁVEL) ---
+# --- FUNÇÃO GERAR PDF ---
 def gerar_pdf_bytes(dados, titulo_relatorio):
     pdf = FPDF()
     pdf.add_page()
@@ -31,21 +31,18 @@ def gerar_pdf_bytes(dados, titulo_relatorio):
     pdf.ln(10)
     
     pdf.set_font("Helvetica", "B", 10)
-    pdf.cell(70, 8, "CONTA", border=1)
-    pdf.cell(30, 8, "DEBITO", border=1)
-    pdf.cell(30, 8, "CREDITO", border=1)
-    pdf.cell(30, 8, "S. DEV", border=1)
-    pdf.cell(30, 8, "S. CRE", border=1)
+    # Ajuste de largura das colunas para Balancete simplificado
+    pdf.cell(110, 8, "CONTA", border=1)
+    pdf.cell(40, 8, "DEBITO", border=1)
+    pdf.cell(40, 8, "CREDITO", border=1)
     pdf.ln()
     
     pdf.set_font("Helvetica", "", 9)
     for _, row in dados.iterrows():
         conta_limpa = str(row["CONTA"]).encode('ascii', 'ignore').decode('ascii')
-        pdf.cell(70, 7, conta_limpa, border=1)
-        pdf.cell(30, 7, f"{row['DEBITO']:,.2f}", border=1)
-        pdf.cell(30, 7, f"{row['CREDITO']:,.2f}", border=1)
-        pdf.cell(30, 7, f"{row['SALDO DEVEDOR']:,.2f}", border=1)
-        pdf.cell(30, 7, f"{row['SALDO CREDOR']:,.2f}", border=1)
+        pdf.cell(110, 7, conta_limpa, border=1)
+        pdf.cell(40, 7, f"{row['DEBITO']:,.2f}", border=1)
+        pdf.cell(40, 7, f"{row['CREDITO']:,.2f}", border=1)
         pdf.ln()
     
     pdf_output = pdf.output()
@@ -167,28 +164,25 @@ if not df.empty:
                         st.markdown(f"<div class='total-box'>SALDO: R$ {abs(saldo):,.2f} ({'D' if saldo>=0 else 'C'})</div></div>", unsafe_allow_html=True)
 
     elif st.session_state.menu_opcao == "🧾 Balancete":
-        st.subheader("BALANCETE DE VERIFICAÇÃO")
+        st.subheader("BALANCETE DE MOVIMENTAÇÃO")
         bal_list = []
         for c_n in sorted(df['descricao'].unique()):
             temp = df[df['descricao'] == c_n]
             d_s, c_s = temp[temp['tipo'] == 'Débito']['valor'].sum(), temp[temp['tipo'] == 'Crédito']['valor'].sum()
-            saldo_atual = d_s - c_s
             bal_list.append({
                 "CONTA": c_n, 
                 "DEBITO": d_s, 
-                "CREDITO": c_s, 
-                "SALDO DEVEDOR": saldo_atual if saldo_atual > 0 else 0,
-                "SALDO CREDOR": abs(saldo_atual) if saldo_atual < 0 else 0
+                "CREDITO": c_s
             })
         df_bal = pd.DataFrame(bal_list)
-        st.table(df_bal.style.format({c: "{:,.2f}" for c in ["DEBITO", "CREDITO", "SALDO DEVEDOR", "SALDO CREDOR"]}))
+        st.table(df_bal.style.format({c: "{:,.2f}" for c in ["DEBITO", "CREDITO"]}))
         
         c1, c2 = st.columns(2)
-        c1.metric("Total Devedor", f"R$ {df_bal['SALDO DEVEDOR'].sum():,.2f}")
-        c2.metric("Total Credor", f"R$ {df_bal['SALDO CREDOR'].sum():,.2f}")
+        c1.metric("Total de Débitos", f"R$ {df_bal['DEBITO'].sum():,.2f}")
+        c2.metric("Total de Créditos", f"R$ {df_bal['CREDITO'].sum():,.2f}")
         
         try:
-            pdf_data = gerar_pdf_bytes(df_bal, "BALANCETE DE VERIFICACAO")
+            pdf_data = gerar_pdf_bytes(df_bal, "BALANCETE DE MOVIMENTACAO")
             st.download_button("📥 Baixar PDF do Balancete", data=pdf_data, file_name="balancete.pdf", mime="application/pdf")
         except: st.error("Erro ao processar PDF.")
 
