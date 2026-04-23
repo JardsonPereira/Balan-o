@@ -85,7 +85,7 @@ user_id = st.session_state.user.id
 res_db = supabase.table("lancamentos").select("*").eq("user_id", user_id).execute()
 df = pd.DataFrame(res_db.data)
 
-# Blindagem contra KeyError: categoria_dfc
+# Garante que a coluna categoria_dfc exista no DataFrame para a lógica local
 if not df.empty and 'categoria_dfc' not in df.columns:
     df['categoria_dfc'] = 'Operacional'
 
@@ -117,10 +117,33 @@ with st.sidebar:
         just = st.text_input("Histórico", value=item_edit['justificativa'])
         
         if st.form_submit_button("Salvar Registro", use_container_width=True, type="primary"):
-            payload = {"user_id": user_id, "descricao": desc, "natureza": nat, "tipo": tipo, "valor": valor, "justificativa": just, "categoria_dfc": cat_dfc}
-            if st.session_state.edit_id: supabase.table("lancamentos").update(payload).eq("id", st.session_state.edit_id).execute()
-            else: supabase.table("lancamentos").insert(payload).execute()
-            st.session_state.edit_id = None; st.session_state.form_count += 1; st.rerun()
+            payload = {
+                "user_id": user_id, 
+                "descricao": desc, 
+                "natureza": nat, 
+                "tipo": tipo, 
+                "valor": valor, 
+                "justificativa": just, 
+                "categoria_dfc": cat_dfc
+            }
+            try:
+                if st.session_state.edit_id:
+                    # Tenta atualizar. Se der APIError, pode ser a coluna categoria_dfc faltando no banco.
+                    supabase.table("lancamentos").update(payload).eq("id", st.session_state.edit_id).execute()
+                else:
+                    supabase.table("lancamentos").insert(payload).execute()
+                st.session_state.edit_id = None; st.session_state.form_count += 1; st.rerun()
+            except Exception as e:
+                # Se falhar, tenta enviar sem a categoria_dfc (compatibilidade com tabelas antigas)
+                if "categoria_dfc" in payload:
+                    del payload["categoria_dfc"]
+                    if st.session_state.edit_id:
+                        supabase.table("lancamentos").update(payload).eq("id", st.session_state.edit_id).execute()
+                    else:
+                        supabase.table("lancamentos").insert(payload).execute()
+                    st.session_state.edit_id = None; st.session_state.form_count += 1; st.rerun()
+                else:
+                    st.error(f"Erro ao salvar no banco de dados: {e}")
 
 # --- CSS VISUAL ---
 st.markdown("""
@@ -194,7 +217,6 @@ if not df.empty:
         df_f['SAÍDA'] = df_f.apply(lambda x: x['valor'] if x['tipo'] == 'Crédito' else 0, axis=1)
         df_f['SALDO_LIQUIDO'] = df_f['ENTRADA'] - df_f['SAÍDA']
         
-        # --- LÓGICA DE LIQUIDEZ ---
         total_entradas = df_f['ENTRADA'].sum()
         total_saidas = df_f['SAÍDA'].sum()
         liquidez_absoluta = total_entradas - total_saidas
@@ -203,18 +225,15 @@ if not df.empty:
         if liquidez_absoluta > 0:
             st.success(f"**CAIXA COM LIQUIDEZ:** O saldo disponível (R$ {liquidez_absoluta:,.2f}) cobre todas as saídas registradas.")
         elif liquidez_absoluta == 0:
-            st.warning("**CAIXA EM EQUILÍBRIO:** O caixa está operando no limite (Break-even). Não há sobra para imprevistos.")
+            st.warning("**CAIXA EM EQUILÍBRIO:** O caixa está operando no limite.")
         else:
-            st.error(f"**ALERTA DE INSOLVÊNCIA:** O caixa está negativo em R$ {abs(liquidez_absoluta):,.2f}. As saídas superam as entradas.")
+            st.error(f"**ALERTA DE INSOLVÊNCIA:** O caixa está negativo em R$ {abs(liquidez_absoluta):,.2f}.")
 
-        # Métricas visuais
         c1, c2, c3 = st.columns(3)
         df_cat = df_f.groupby('categoria_dfc')[['ENTRADA', 'SAÍDA', 'SALDO_LIQUIDO']].sum()
         c1.metric("Fluxo Operacional", f"R$ {df_cat.loc['Operacional', 'SALDO_LIQUIDO'] if 'Operacional' in df_cat.index else 0:,.2f}")
         c2.metric("Total Entradas", f"R$ {total_entradas:,.2f}")
         c3.metric("Total Saídas", f"R$ {total_saidas:,.2f}", delta_color="inverse")
-
-        st.write("---")
         st.dataframe(df_f[['descricao', 'categoria_dfc', 'ENTRADA', 'SAÍDA', 'justificativa']], use_container_width=True)
 
     elif opcao == "⚙️ Gestão":
