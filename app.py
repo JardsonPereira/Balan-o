@@ -85,10 +85,15 @@ user_id = st.session_state.user.id
 res_db = supabase.table("lancamentos").select("*").eq("user_id", user_id).execute()
 df = pd.DataFrame(res_db.data)
 
+# Blindagem: Garante que as colunas existam no DataFrame para evitar que o app suma com os dados
 if not df.empty:
     if 'categoria_dfc' not in df.columns: df['categoria_dfc'] = 'Atividade Operacional'
     if 'data_lancamento' not in df.columns: df['data_lancamento'] = datetime.today().strftime('%Y-%m-%d')
+    # Converte para data para facilitar filtros
     df['data_lancamento'] = pd.to_datetime(df['data_lancamento']).dt.date
+else:
+    # Se o DF estiver vazio, criamos um DataFrame vazio com as colunas para não dar erro de lógica
+    df = pd.DataFrame(columns=['id', 'user_id', 'descricao', 'natureza', 'tipo', 'valor', 'justificativa', 'categoria_dfc', 'data_lancamento'])
 
 # --- SIDEBAR OPERACIONAL ---
 with st.sidebar:
@@ -189,6 +194,7 @@ if not df.empty:
         data_i = c1.date_input("Início", value=date(date.today().year, date.today().month, 1))
         data_f = c2.date_input("Fim", value=date.today())
         
+        # Filtro de data rigoroso
         df_f = df[(df['categoria_dfc'] != "N/A (Não Financeiro)") & 
                   (df['data_lancamento'] >= data_i) & 
                   (df['data_lancamento'] <= data_f)].copy()
@@ -212,32 +218,26 @@ if not df.empty:
             st.write("#### Extrato do Período")
             st.dataframe(df_f[['data_lancamento', 'descricao', 'tipo', 'valor', 'justificativa']], use_container_width=True)
         else:
-            st.warning("Nenhum dado financeiro no período.")
+            st.warning("Nenhum dado financeiro no período selecionado. Verifique as datas ou a categoria DFC.")
 
     elif opcao == "⚙️ Gestão":
         st.subheader("Manutenção de Registros")
         
-        # --- NOVO: OPÇÃO DE RESETAR TUDO ---
         with st.expander("🚨 ZONA DE PERIGO: Resetar Lançamentos"):
-            st.warning("Esta ação excluirá permanentemente TODOS os seus lançamentos desta conta.")
-            confirm = st.text_input("Para confirmar, digite 'RESETAR' abaixo:")
+            st.warning("Esta ação excluirá permanentemente TODOS os seus lançamentos.")
+            confirm = st.text_input("Para confirmar, digite 'RESETAR':")
             if st.button("EXCLUIR TUDO", type="primary"):
                 if confirm == "RESETAR":
-                    try:
-                        supabase.table("lancamentos").delete().eq("user_id", user_id).execute()
-                        st.success("Todos os registros foram apagados com sucesso!")
-                        st.rerun()
-                    except Exception as e:
-                        st.error(f"Erro ao resetar: {e}")
-                else:
-                    st.error("Palavra de confirmação incorreta.")
-        
+                    supabase.table("lancamentos").delete().eq("user_id", user_id).execute()
+                    st.rerun()
+
         st.divider()
-        
         for _, r in df.iterrows():
             with st.container(border=True):
                 c_inf, c_btn = st.columns([4, 1])
-                c_inf.write(f"**{r['data_lancamento'].strftime('%d/%m/%Y')} - {r['descricao']}** | R$ {r['valor']:,.2f}")
+                # Formatação de data segura
+                data_str = r['data_lancamento'].strftime('%d/%m/%Y') if hasattr(r['data_lancamento'], 'strftime') else str(r['data_lancamento'])
+                c_inf.write(f"**{data_str} - {r['descricao']}** | R$ {r['valor']:,.2f}")
                 if c_btn.button("✏️", key=f"e_{r['id']}"): 
                     st.session_state.edit_id = r['id']
                     st.rerun()
@@ -245,4 +245,4 @@ if not df.empty:
                     supabase.table("lancamentos").delete().eq("id", r['id']).execute()
                     st.rerun()
 else:
-    st.info("Sistema vazio.")
+    st.info("O sistema está vazio. Realize um lançamento na barra lateral para começar.")
