@@ -22,12 +22,13 @@ if 'form_count' not in st.session_state: st.session_state.form_count = 0
 if 'menu_opcao' not in st.session_state: st.session_state.menu_opcao = "📊 Razonetes"
 if 'auth_mode' not in st.session_state: st.session_state.auth_mode = "login"
 
-# --- FUNÇÃO GERAR PDF (CORREÇÃO PARA BALANCETE) ---
+# --- FUNÇÃO GERAR PDF (CORRIGIDA PARA BYTES PURO) ---
 def gerar_pdf_bytes(dados, titulo_relatorio):
     pdf = FPDF()
     pdf.add_page()
     pdf.set_font("Helvetica", "B", 16)
-    pdf.cell(190, 10, txt=titulo_relatorio, ln=True, align="C")
+    # Removendo acentos do título para compatibilidade total
+    pdf.cell(190, 10, txt=titulo_relatorio.upper(), ln=True, align="C")
     pdf.ln(10)
     
     # Cabeçalho
@@ -41,18 +42,23 @@ def gerar_pdf_bytes(dados, titulo_relatorio):
     # Dados
     pdf.set_font("Helvetica", "", 9)
     for _, row in dados.iterrows():
-        pdf.cell(80, 7, str(row["CONTA"]), border=1)
+        # Limpa caracteres especiais da conta
+        conta_limpa = str(row["CONTA"]).encode('ascii', 'ignore').decode('ascii')
+        pdf.cell(80, 7, conta_limpa, border=1)
         pdf.cell(35, 7, f"{row['DEBITO']:,.2f}", border=1)
         pdf.cell(35, 7, f"{row['CREDITO']:,.2f}", border=1)
         pdf.cell(40, 7, f"{row['SALDO']:,.2f}", border=1)
         pdf.ln()
     
-    # Retorna o PDF como stream de bytes compatível com Streamlit
-    return pdf.output()
+    # SOLUÇÃO DO ERRO: Converter explicitamente o output para bytes
+    pdf_output = pdf.output()
+    if isinstance(pdf_output, bytearray):
+        return bytes(pdf_output)
+    return pdf_output
 
 # --- INTERFACE DE AUTENTICAÇÃO ---
 def tela_autenticacao():
-    st.markdown("<h2 style='text-align: center; font-family: monospace;'>SISTEMA CONTÁBIL - ACESSO</h2>", unsafe_allow_html=True)
+    st.markdown("<h2 style='text-align: center; font-family: monospace;'>SISTEMA CONTABIL - ACESSO</h2>", unsafe_allow_html=True)
     c1, c2, c3 = st.columns([1, 1.5, 1])
     with c2:
         if st.session_state.auth_mode == "login":
@@ -137,7 +143,7 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
-st.markdown("<div class='terminal-header'>SISTEMA DE CONSULTA > MÓDULO CONTÁBIL</div>", unsafe_allow_html=True)
+st.markdown("<div class='terminal-header'>SISTEMA DE CONSULTA > MODULO CONTABIL</div>", unsafe_allow_html=True)
 
 # Navegação
 cols_nav = st.columns(4)
@@ -162,11 +168,11 @@ if not df.empty:
                         st.markdown(f"<div class='razonete-box'><div class='razonete-header'>{c_nome}</div>", unsafe_allow_html=True)
                         ca, cb = st.columns(2)
                         with ca:
-                            st.markdown("<div style='padding:5px;'><div class='col-label'>DÉBITO (D)</div>", unsafe_allow_html=True)
+                            st.markdown("<div style='padding:5px;'><div class='col-label'>DEBITO (D)</div>", unsafe_allow_html=True)
                             for _, r in df_c[df_c['tipo'] == 'Débito'].iterrows(): st.write(f"🟢 {r['valor']:,.2f}")
                             st.markdown("</div>", unsafe_allow_html=True)
                         with cb:
-                            st.markdown("<div style='padding:5px;'><div class='col-label' style='text-align:right'>CRÉDITO (C)</div>", unsafe_allow_html=True)
+                            st.markdown("<div style='padding:5px;'><div class='col-label' style='text-align:right'>CREDITO (C)</div>", unsafe_allow_html=True)
                             for _, r in df_c[df_c['tipo'] == 'Crédito'].iterrows(): st.markdown(f"<div style='text-align:right; color:red;'>{r['valor']:,.2f} 🔴</div>", unsafe_allow_html=True)
                             st.markdown("</div>", unsafe_allow_html=True)
                         st.markdown(f"<div class='total-box'>SALDO: R$ {abs(saldo):,.2f} ({'D' if saldo>=0 else 'C'})</div></div>", unsafe_allow_html=True)
@@ -181,12 +187,12 @@ if not df.empty:
         df_bal = pd.DataFrame(bal_list)
         st.table(df_bal)
         
-        # Correção definitiva para o download de PDF
+        # Download do PDF blindado
         try:
-            pdf_out = gerar_pdf_bytes(df_bal, "BALANCETE DE VERIFICACAO")
+            pdf_data = gerar_pdf_bytes(df_bal, "BALANCETE DE VERIFICACAO")
             st.download_button(
                 label="📥 Baixar PDF do Balancete",
-                data=pdf_out,
+                data=pdf_data,
                 file_name="balancete.pdf",
                 mime="application/pdf"
             )
