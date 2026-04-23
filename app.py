@@ -1,233 +1,192 @@
-import streamlit as st
-import pandas as pd
-from fpdf import FPDF
-from supabase import create_client, Client
-from datetime import datetime, date
-
-# --- CONFIGURAÇÃO ---
-st.set_page_config(page_title="ERP Contábil Pro", layout="wide", initial_sidebar_state="expanded")
-
-# Conexão Supabase
-try:
-    url: str = st.secrets["SUPABASE_URL"]
-    key: str = st.secrets["SUPABASE_KEY"]
-    supabase: Client = create_client(url, key)
-except Exception:
-    st.error("Erro de conexão. Verifique as Secrets.")
-    st.stop()
-
-# --- ESTADOS ---
-if 'user' not in st.session_state: st.session_state.user = None
-if 'edit_id' not in st.session_state: st.session_state.edit_id = None
-if 'form_count' not in st.session_state: st.session_state.form_count = 0
-if 'menu_opcao' not in st.session_state: st.session_state.menu_opcao = "📊 Razonetes"
-if 'auth_mode' not in st.session_state: st.session_state.auth_mode = "login"
-
-# --- FUNÇÃO GERAR PDF ---
-def gerar_pdf_bytes(dados, titulo_relatorio):
-    pdf = FPDF()
-    pdf.add_page()
-    pdf.set_font("Helvetica", "B", 14)
-    pdf.cell(190, 10, txt=titulo_relatorio.upper(), ln=True, align="C")
-    pdf.ln(10)
-    pdf.set_font("Helvetica", "B", 8)
-    # Colunas conforme o modelo de 5 colunas
-    pdf.cell(70, 8, "CONTA", border=1, align="C")
-    pdf.cell(30, 8, "DEBITO", border=1, align="C")
-    pdf.cell(30, 8, "CREDITO", border=1, align="C")
-    pdf.cell(30, 8, "S. DEV", border=1, align="C")
-    pdf.cell(30, 8, "S. CRE", border=1, align="C")
-    pdf.ln()
-    pdf.set_font("Helvetica", "", 8)
-    for _, row in dados.iterrows():
-        pdf.cell(70, 7, str(row["CONTA"])[:40], border=1)
-        pdf.cell(30, 7, f"{row['DEBITO']:,.2f}", border=1, align="R")
-        pdf.cell(30, 7, f"{row['CREDITO']:,.2f}", border=1, align="R")
-        pdf.cell(30, 7, f"{row['SALDO DEVEDOR']:,.2f}", border=1, align="R")
-        pdf.cell(30, 7, f"{row['SALDO CREDOR']:,.2f}", border=1, align="R")
-        pdf.ln()
-    return bytes(pdf.output()) if isinstance(pdf.output(), bytearray) else pdf.output()
-
-# --- INTERFACE DE AUTENTICAÇÃO ---
-def tela_autenticacao():
-    st.markdown("<h1 style='text-align: center; color: #1e3a8a;'>ERP CONTÁBIL PRO</h1>", unsafe_allow_html=True)
-    c1, c2, c3 = st.columns([1, 1.2, 1])
-    with c2:
-        with st.container(border=True):
-            if st.session_state.auth_mode == "login":
-                st.subheader("Login")
-                email = st.text_input("Usuário").lower().strip()
-                senha = st.text_input("Senha", type="password")
-                if st.button("Acessar Painel", use_container_width=True, type="primary"):
-                    try:
-                        res = supabase.auth.sign_in_with_password({"email": email, "password": senha})
-                        st.session_state.user = res.user
-                        st.rerun()
-                    except: st.error("Acesso negado.")
-                if st.button("Solicitar Cadastro", use_container_width=True): st.session_state.auth_mode = "cadastro"; st.rerun()
-
-            elif st.session_state.auth_mode == "cadastro":
-                st.subheader("Nova Conta")
-                new_email = st.text_input("E-mail").lower().strip()
-                new_pass = st.text_input("Senha", type="password")
-                if st.button("Finalizar Registro", use_container_width=True, type="primary"):
-                    try:
-                        supabase.auth.sign_up({"email": new_email, "password": new_pass})
-                        st.success("Verifique seu e-mail!")
-                    except Exception as e: st.error(f"Erro: {e}")
-                if st.button("Voltar ao Login"): st.session_state.auth_mode = "login"; st.rerun()
-
-if st.session_state.user is None:
-    tela_autenticacao()
-    st.stop()
-
-# --- CARREGAR DADOS ---
-user_id = st.session_state.user.id
-try:
-    res_db = supabase.table("lancamentos").select("*").eq("user_id", user_id).execute()
-    df = pd.DataFrame(res_db.data)
-except:
-    df = pd.DataFrame()
-
-# Garantia de colunas e limpeza pós-reset
-if not df.empty:
-    if 'data_lancamento' not in df.columns: df['data_lancamento'] = datetime.today().strftime('%Y-%m-%d')
-    if 'categoria_dfc' not in df.columns: df['categoria_dfc'] = 'Atividade Operacional'
-    df['data_lancamento'] = pd.to_datetime(df['data_lancamento']).dt.date
-
-# --- SIDEBAR OPERACIONAL ---
-with st.sidebar:
-    st.markdown(f"### 🏢 Enterprise Panel")
-    st.caption(f"Usuário: {st.session_state.user.email}")
-    if st.button("Encerrar Sessão", use_container_width=True): st.session_state.user = None; st.rerun()
-    st.divider()
-    
-    if st.session_state.edit_id and not df.empty and st.session_state.edit_id in df['id'].values:
-        st.subheader("📝 Editar Lançamento")
-        item_edit = df[df['id'] == st.session_state.edit_id].iloc[0].to_dict()
-    else:
-        st.subheader("➕ Novo Lançamento")
-        item_edit = {"descricao": "", "natureza": "Ativo", "tipo": "Débito", "valor": 0.0, "justificativa": "", "data_lancamento": date.today(), "categoria_dfc": "Atividade Operacional"}
-
-    with st.form(key=f"f_{st.session_state.form_count}", clear_on_submit=True):
-        f_data = st.date_input("Data do Fato", value=pd.to_datetime(item_edit.get('data_lancamento', date.today())))
-        contas_lista = sorted(df['descricao'].unique().tolist()) if not df.empty else []
-        sel = st.selectbox("Conta Contábil", ["(NOVA CONTA)"] + contas_lista)
-        f_desc = st.text_input("Título", value=item_edit['descricao']).upper() if sel == "(NOVA CONTA)" else sel
-        f_nat = st.selectbox("Grupo", ["Ativo", "Passivo", "Patrimônio Líquido", "Receita", "Despesa", "Encargos Financeiros"], index=["Ativo", "Passivo", "Patrimônio Líquido", "Receita", "Despesa", "Encargos Financeiros"].index(item_edit['natureza']))
-        f_dfc = st.selectbox("DFC", ["Atividade Operacional", "Atividade de Investimento", "Atividade de Financiamento", "N/A (Não Financeiro)"], index=["Atividade Operacional", "Atividade de Investimento", "Atividade de Financiamento", "N/A (Não Financeiro)"].index(item_edit.get('categoria_dfc', 'Atividade Operacional')))
-        f_tipo = st.radio("Natureza", ["Débito", "Crédito"], horizontal=True, index=0 if item_edit['tipo'] == 'Débito' else 1)
-        f_valor = st.number_input("Valor (R$)", min_value=0.0, value=float(item_edit['valor']))
-        f_just = st.text_input("Histórico", value=item_edit['justificativa'])
-        
-        if st.form_submit_button("Efetivar Registro", use_container_width=True, type="primary"):
-            payload = {"user_id": user_id, "descricao": f_desc, "natureza": f_nat, "tipo": f_tipo, "valor": f_valor, "justificativa": f_just, "data_lancamento": f_data.strftime('%Y-%m-%d'), "categoria_dfc": f_dfc}
-            if st.session_state.edit_id: supabase.table("lancamentos").update(payload).eq("id", st.session_state.edit_id).execute()
-            else: supabase.table("lancamentos").insert(payload).execute()
-            st.session_state.edit_id = None; st.session_state.form_count += 1; st.rerun()
-
-# --- CSS ESTILO ---
+# --- CSS PARA DESIGN PREMIUM ---
 st.markdown("""
-<style>
-    .stApp { background-color: #f8fafc; }
-    .razonete-card { background: white; border-radius: 8px; border: 1px solid #e2e8f0; margin-bottom: 20px; box-shadow: 0 2px 4px rgba(0,0,0,0.05); }
-    .razonete-header { background: #0f172a; color: white; padding: 10px; text-align: center; font-weight: bold; border-radius: 8px 8px 0 0; }
-    .group-label { background: #e2e8f0; padding: 8px; border-radius: 6px; font-weight: bold; margin: 20px 0 10px 0; font-size: 12px; text-transform: uppercase; }
-    .dfc-resumo { background: #f1f5f9; padding: 15px; border-radius: 10px; border-left: 5px solid #1e3a8a; margin-bottom: 20px; }
-</style>
+    <style>
+    /* Importação de Fonte */
+    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap');
+    
+    html, body, [class*="css"] {
+        font-family: 'Inter', sans-serif;
+    }
+
+    /* Fundo do App */
+    .stApp {
+        background-color: #f8fafc;
+    }
+
+    /* Customização dos Botões do Menu (Tabs) */
+    div.stButton > button {
+        border-radius: 8px;
+        border: 1px solid #e2e8f0;
+        background-color: white;
+        transition: all 0.3s ease;
+        font-weight: 600;
+        color: #475569;
+    }
+    
+    div.stButton > button:hover {
+        border-color: #3b82f6;
+        color: #3b82f6;
+        background-color: #eff6ff;
+    }
+
+    /* Estilo do Card Razonete */
+    .conta-card {
+        background: white;
+        border-radius: 12px;
+        box-shadow: 0 4px 15px rgba(0,0,0,0.05);
+        margin-bottom: 24px;
+        overflow: hidden;
+    }
+
+    .conta-titulo {
+        background: #1e293b;
+        color: #f8fafc;
+        padding: 12px;
+        text-align: center;
+        font-weight: 700;
+        letter-spacing: 0.5px;
+        text-transform: uppercase;
+        font-size: 0.9rem;
+    }
+
+    .conta-corpo {
+        display: flex;
+        min-height: 100px;
+        position: relative;
+    }
+
+    /* A Linha do "T" Contábil */
+    .conta-corpo::after {
+        content: "";
+        position: absolute;
+        left: 50%;
+        top: 0;
+        bottom: 0;
+        width: 1.5px;
+        background-color: #cbd5e1;
+    }
+
+    .lado-debito, .lado-credito {
+        flex: 1;
+        padding: 12px;
+    }
+
+    .valor-item {
+        font-size: 0.85rem;
+        margin-bottom: 6px;
+        padding: 4px 8px;
+        border-radius: 4px;
+    }
+
+    .valor-deb { 
+        color: #059669; 
+        background: #ecfdf5;
+        border-left: 3px solid #10b981;
+    }
+
+    .valor-cre { 
+        color: #dc2626; 
+        background: #fef2f2;
+        border-right: 3px solid #ef4444;
+        text-align: right;
+    }
+
+    .just-hint {
+        font-size: 0.7rem;
+        color: #64748b;
+        display: block;
+        font-weight: 400;
+    }
+
+    .conta-rodape {
+        padding: 10px;
+        background: #f1f5f9;
+        border-top: 1.5px solid #1e293b;
+        text-align: center;
+        font-weight: 700;
+        font-size: 0.9rem;
+    }
+
+    /* Grupo Header */
+    .grupo-header {
+        background: linear-gradient(90deg, #334155 0%, #1e293b 100%);
+        color: white;
+        padding: 10px 20px;
+        border-radius: 8px;
+        margin: 30px 0 15px 0;
+        font-weight: 600;
+        box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1);
+    }
+
+    /* Esconder o erro de estatísticas do Streamlit no loop de colunas */
+    [data-testid="stExpander"] { border: none; box-shadow: none; background: white; border-radius: 8px; margin-bottom: 5px;}
+    </style>
 """, unsafe_allow_html=True)
 
-# --- CABEÇALHO ---
-st.markdown("<h2 style='color: #0f172a; font-weight: 700;'>Dashboard Contábil</h2>", unsafe_allow_html=True)
-nav = st.columns(5)
-btns = ["📊 Razonetes", "🧾 Balancete", "📈 DRE", "💸 DFC Real", "⚙️ Gestão"]
-for i, b_name in enumerate(btns):
-    if nav[i].button(b_name, use_container_width=True): st.session_state.menu_opcao = b_name
+# --- INTERFACE PRINCIPAL ---
+st.title("📑 Sistema Contábil Digital")
+st.markdown("<p style='color: #64748b; margin-top: -20px;'>Gestão de lançamentos e demonstrações financeiras</p>", unsafe_allow_html=True)
 
+# --- MENU COM ESTILO DE TABS ---
+col_nav = st.columns(4)
+botoes = [
+    ("📊 Razonetes", "📊 Razonetes"),
+    ("🧾 Balancete", "🧾 Balancete"),
+    ("📈 DRE", "📈 DRE"),
+    ("⚙️ Gestão", "⚙️ Gestão")
+]
+
+for i, (label, opcao) in enumerate(botoes):
+    # Aplica um estilo diferente se o botão for a opção selecionada
+    if col_nav[i].button(label, use_container_width=True):
+        st.session_state.menu_opcao = opcao
+
+opcao_menu = st.session_state.menu_opcao
+
+# Indicador visual de qual menu está ativo
+st.markdown(f"<div style='text-align: center; margin-top: -15px;'><small>Visualizando: <b>{opcao_menu}</b></small></div>", unsafe_allow_html=True)
 st.divider()
 
 if not df.empty:
-    opcao = st.session_state.menu_opcao
-    
-    if opcao == "📊 Razonetes":
-        for n_label in ["Ativo", "Passivo", "Patrimônio Líquido", "Receita", "Despesa", "Encargos Financeiros"]:
-            df_g = df[df['natureza'] == n_label]
-            if not df_g.empty:
-                st.markdown(f"<div class='group-label'>{n_label}</div>", unsafe_allow_html=True)
-                cols_raz = st.columns(3)
-                for i, c_nome in enumerate(sorted(df_g['descricao'].unique())):
-                    with cols_raz[i % 3]:
-                        df_c = df_g[df_g['descricao'] == c_nome]
-                        v_d, v_c = df_c[df_c['tipo']=='Débito']['valor'].sum(), df_c[df_c['tipo']=='Crédito']['valor'].sum()
-                        saldo = v_d - v_c
-                        with st.container(border=True):
-                            st.write(f"**{c_nome}**")
-                            st.write(f"Saldo: R$ {abs(saldo):,.2f} ({'D' if saldo>=0 else 'C'})")
+    if opcao_menu == "📊 Razonetes":
+        grupos = ["Ativo", "Passivo", "Patrimônio Líquido", "Receita", "Despesa", "Encargos Financeiros"]
+        for grupo in grupos:
+            df_grupo = df[df['natureza'] == grupo]
+            if not df_grupo.empty:
+                st.markdown(f"<div class='grupo-header'>{grupo.upper()}</div>", unsafe_allow_html=True)
+                contas_grupo = sorted(df_grupo['descricao'].unique())
+                
+                # Grid de 3 colunas para Desktop, Streamlit ajusta automático no Mobile
+                cols = st.columns(3)
+                for i, conta in enumerate(contas_grupo):
+                    with cols[i % 3]:
+                        df_c = df_grupo[df_grupo['descricao'] == conta]
+                        v_deb_sum = df_c[df_c['tipo'] == 'Débito']['valor'].sum()
+                        v_cre_sum = df_c[df_c['tipo'] == 'Crédito']['valor'].sum()
+                        saldo = v_deb_sum - v_cre_sum
+                        
+                        deb_html = "".join([f"<div class='valor-item valor-deb'>{r['valor']:,.2f}<span class='just-hint'>{r['justificativa']}</span></div>" for _, r in df_c[df_c['tipo'] == 'Débito'].iterrows()])
+                        cre_html = "".join([f"<div class='valor-item valor-cre'>{r['valor']:,.2f}<span class='just-hint'>{r['justificativa']}</span></div>" for _, r in df_c[df_c['tipo'] == 'Crédito'].iterrows()])
+                        
+                        if saldo > 0:
+                            txt_saldo = f"Saldo Devedor: R$ {saldo:,.2f}"
+                            cor_saldo = "#059669"
+                        elif saldo < 0:
+                            txt_saldo = f"Saldo Credor: R$ {abs(saldo):,.2f}"
+                            cor_saldo = "#dc2626"
+                        else:
+                            txt_saldo = "Conta Zerada"
+                            cor_saldo = "#64748b"
 
-    elif opcao == "🧾 Balancete":
-        st.subheader("Balancete de Verificação (5 Colunas)")
-        bal_data = []
-        for c_n in sorted(df['descricao'].unique()):
-            temp = df[df['descricao'] == c_n]
-            d_s, c_s = temp[temp['tipo'] == 'Débito']['valor'].sum(), temp[temp['tipo'] == 'Crédito']['valor'].sum()
-            s = d_s - c_s
-            bal_data.append({
-                "CONTA": c_n, "DEBITO": d_s, "CREDITO": c_s, 
-                "SALDO DEVEDOR": s if s > 0 else 0, 
-                "SALDO CREDOR": abs(s) if s < 0 else 0
-            })
-        df_bal = pd.DataFrame(bal_data)
-        
-        # Tabela com linha de totais
-        st.table(df_bal.style.format({c: "{:,.2f}" for c in ["DEBITO", "CREDITO", "SALDO DEVEDOR", "SALDO CREDOR"]}))
-        
-        # Exibição dos Totais do Balancete
-        c1, c2, c3, c4 = st.columns(4)
-        c1.metric("Total Débito", f"R$ {df_bal['DEBITO'].sum():,.2f}")
-        c2.metric("Total Crédito", f"R$ {df_bal['CREDITO'].sum():,.2f}")
-        c3.metric("Total Devedor", f"R$ {df_bal['SALDO DEVEDOR'].sum():,.2f}")
-        c4.metric("Total Credor", f"R$ {df_bal['SALDO CREDOR'].sum():,.2f}")
-        
-        st.download_button("📥 Baixar PDF", data=gerar_pdf_bytes(df_bal, "BALANCETE"), file_name="balancete.pdf")
-
-    elif opcao == "📈 DRE":
-        st.subheader("Demonstração do Resultado")
-        rec = df[df['natureza'] == 'Receita'].groupby('descricao')['valor'].sum()
-        des = df[df['natureza'] == 'Despesa'].groupby('descricao')['valor'].sum()
-        enc = df[df['natureza'] == 'Encargos Financeiros'].groupby('descricao')['valor'].sum()
-        st.success(f"**LUCRO LÍQUIDO: R$ {rec.sum() - des.sum() - enc.sum():,.2f}**")
-        st.write("Receitas:", rec)
-        st.write("Despesas:", des)
-
-    elif opcao == "💸 DFC Real":
-        st.subheader("💸 Fluxo de Caixa Real por Período")
-        c1, c2 = st.columns(2)
-        d_i = c1.date_input("Início", value=date(date.today().year, date.today().month, 1))
-        d_f = c2.date_input("Fim", value=date.today())
-        
-        df_f = df[(df['categoria_dfc'] != "N/A (Não Financeiro)") & (df['data_lancamento'] >= d_i) & (df['data_lancamento'] <= d_f)].copy()
-        
-        if not df_f.empty:
-            df_f = df_f.sort_values(by='data_lancamento')
-            ent, sai = df_f[df_f['tipo']=='Débito']['valor'].sum(), df_f[df_f['tipo']=='Crédito']['valor'].sum()
-            saldo_ant = st.number_input("Saldo Anterior", min_value=0.0, value=0.0)
-            st.markdown(f"<div class='dfc-resumo'>Saldo Inicial: R$ {saldo_ant:,.2f}<br>(+) Entradas: R$ {ent:,.2f}<br>(-) Saídas: R$ {sai:,.2f}<br><b>(=) SALDO FINAL: R$ {saldo_ant + ent - sai:,.2f}</b></div>", unsafe_allow_html=True)
-            st.dataframe(df_f[['data_lancamento', 'descricao', 'valor', 'tipo', 'justificativa']], use_container_width=True)
-        else:
-            st.warning("Sem movimentações reais neste período.")
-
-    elif opcao == "⚙️ Gestão":
-        st.subheader("Manutenção")
-        for _, r in df.iterrows():
-            with st.container(border=True):
-                c1, c2 = st.columns([4, 1])
-                c1.write(f"**{r['data_lancamento'].strftime('%d/%m/%Y')} - {r['descricao']}** | R$ {r['valor']:,.2f}")
-                if c2.button("✏️", key=f"e_{r['id']}"): st.session_state.edit_id = r['id']; st.rerun()
-                if c2.button("🗑️", key=f"d_{r['id']}"): 
-                    supabase.table("lancamentos").delete().eq("id", r['id']).execute()
-                    st.rerun()
-        if st.button("RESETAR TUDO"):
-            supabase.table("lancamentos").delete().eq("user_id", user_id).execute()
-            st.rerun()
-else:
-    st.info("Sistema vazio. Utilize a barra lateral para realizar lançamentos.")
+                        st.markdown(f"""
+                            <div class="conta-card">
+                                <div class="conta-titulo">{conta}</div>
+                                <div class="conta-corpo">
+                                    <div class="lado-debito">{deb_html}</div>
+                                    <div class="lado-credito">{cre_html}</div>
+                                </div>
+                                <div class="conta-rodape" style="color: {cor_saldo};">
+                                    {txt_saldo}
+                                </div>
+                            </div>
+                        """, unsafe_allow_html=True)
