@@ -22,16 +22,14 @@ if 'form_count' not in st.session_state: st.session_state.form_count = 0
 if 'menu_opcao' not in st.session_state: st.session_state.menu_opcao = "📊 Razonetes"
 if 'auth_mode' not in st.session_state: st.session_state.auth_mode = "login"
 
-# --- FUNÇÃO GERAR PDF (CORRIGIDA PARA BYTES PURO) ---
+# --- FUNÇÃO GERAR PDF (VERSÃO ESTÁVEL) ---
 def gerar_pdf_bytes(dados, titulo_relatorio):
     pdf = FPDF()
     pdf.add_page()
     pdf.set_font("Helvetica", "B", 16)
-    # Removendo acentos do título para compatibilidade total
     pdf.cell(190, 10, txt=titulo_relatorio.upper(), ln=True, align="C")
     pdf.ln(10)
     
-    # Cabeçalho
     pdf.set_font("Helvetica", "B", 10)
     pdf.cell(80, 8, "CONTA", border=1)
     pdf.cell(35, 8, "DEBITO", border=1)
@@ -39,10 +37,8 @@ def gerar_pdf_bytes(dados, titulo_relatorio):
     pdf.cell(40, 8, "SALDO", border=1)
     pdf.ln()
     
-    # Dados
     pdf.set_font("Helvetica", "", 9)
     for _, row in dados.iterrows():
-        # Limpa caracteres especiais da conta
         conta_limpa = str(row["CONTA"]).encode('ascii', 'ignore').decode('ascii')
         pdf.cell(80, 7, conta_limpa, border=1)
         pdf.cell(35, 7, f"{row['DEBITO']:,.2f}", border=1)
@@ -50,11 +46,8 @@ def gerar_pdf_bytes(dados, titulo_relatorio):
         pdf.cell(40, 7, f"{row['SALDO']:,.2f}", border=1)
         pdf.ln()
     
-    # SOLUÇÃO DO ERRO: Converter explicitamente o output para bytes
     pdf_output = pdf.output()
-    if isinstance(pdf_output, bytearray):
-        return bytes(pdf_output)
-    return pdf_output
+    return bytes(pdf_output) if isinstance(pdf_output, bytearray) else pdf_output
 
 # --- INTERFACE DE AUTENTICAÇÃO ---
 def tela_autenticacao():
@@ -71,13 +64,9 @@ def tela_autenticacao():
                     st.session_state.user = res.user
                     st.rerun()
                 except: st.error("Erro no login. Verifique e-mail e senha.")
-            
             col_a, col_b = st.columns(2)
-            if col_a.button("Cadastrar", use_container_width=True):
-                st.session_state.auth_mode = "cadastro"; st.rerun()
-            if col_b.button("Recuperar Senha", use_container_width=True):
-                st.session_state.auth_mode = "recuperar"; st.rerun()
-
+            if col_a.button("Cadastrar", use_container_width=True): st.session_state.auth_mode = "cadastro"; st.rerun()
+            if col_b.button("Recuperar Senha", use_container_width=True): st.session_state.auth_mode = "recuperar"; st.rerun()
         elif st.session_state.auth_mode == "cadastro":
             st.subheader("Novo Cadastro")
             new_email = st.text_input("E-mail").lower().strip()
@@ -88,7 +77,6 @@ def tela_autenticacao():
                     st.success("Verifique seu e-mail para confirmar a conta!")
                 except Exception as e: st.error(f"Erro: {e}")
             if st.button("Voltar"): st.session_state.auth_mode = "login"; st.rerun()
-
         elif st.session_state.auth_mode == "recuperar":
             st.subheader("Recuperar")
             rem_email = st.text_input("E-mail cadastrado").lower().strip()
@@ -145,7 +133,6 @@ st.markdown("""
 
 st.markdown("<div class='terminal-header'>SISTEMA DE CONSULTA > MODULO CONTABIL</div>", unsafe_allow_html=True)
 
-# Navegação
 cols_nav = st.columns(4)
 botoes_nav = ["📊 Razonetes", "🧾 Balancete", "📈 DRE", "⚙️ Gestão"]
 for i, b_name in enumerate(botoes_nav):
@@ -178,7 +165,7 @@ if not df.empty:
                         st.markdown(f"<div class='total-box'>SALDO: R$ {abs(saldo):,.2f} ({'D' if saldo>=0 else 'C'})</div></div>", unsafe_allow_html=True)
 
     elif st.session_state.menu_opcao == "🧾 Balancete":
-        st.subheader("BALANCETE")
+        st.subheader("BALANCETE DE VERIFICAÇÃO")
         bal_list = []
         for c_n in sorted(df['descricao'].unique()):
             temp = df[df['descricao'] == c_n]
@@ -186,29 +173,36 @@ if not df.empty:
             bal_list.append({"CONTA": c_n, "DEBITO": d_s, "CREDITO": c_s, "SALDO": d_s-c_s})
         df_bal = pd.DataFrame(bal_list)
         st.table(df_bal)
-        
-        # Download do PDF blindado
         try:
             pdf_data = gerar_pdf_bytes(df_bal, "BALANCETE DE VERIFICACAO")
-            st.download_button(
-                label="📥 Baixar PDF do Balancete",
-                data=pdf_data,
-                file_name="balancete.pdf",
-                mime="application/pdf"
-            )
-        except Exception as e:
-            st.error(f"Erro ao gerar PDF: {e}")
+            st.download_button("📥 Baixar PDF do Balancete", data=pdf_data, file_name="balancete.pdf", mime="application/pdf")
+        except: st.error("Erro ao processar PDF.")
 
     elif st.session_state.menu_opcao == "📈 DRE":
-        st.subheader("DRE")
-        rec, des, enc = df[df['natureza'] == 'Receita']['valor'].sum(), df[df['natureza'] == 'Despesa']['valor'].sum(), df[df['natureza'] == 'Encargos Financeiros']['valor'].sum()
-        st.code(f"RECEITA: {rec:,.2f}\nDESPESA: {des:,.2f}\nFINANC:  {enc:,.2f}\nTOTAL:   {rec-des-enc:,.2f}")
+        st.subheader("DEMONSTRAÇÃO DO RESULTADO (DRE)")
+        df_rec = df[df['natureza'] == 'Receita'].groupby('descricao')['valor'].sum()
+        df_des = df[df['natureza'] == 'Despesa'].groupby('descricao')['valor'].sum()
+        df_enc = df[df['natureza'] == 'Encargos Financeiros'].groupby('descricao')['valor'].sum()
+        rec_t, des_t, enc_t = df_rec.sum(), df_des.sum(), df_enc.sum()
+        ebitda, lucro = rec_t - des_t, (rec_t - des_t) - enc_t
+        
+        with st.expander(f"(+) RECEITA BRUTA: R$ {rec_t:,.2f}", expanded=True):
+            for n, v in df_rec.items(): st.write(f"• {n}: R$ {v:,.2f}")
+        with st.expander(f"(-) DESPESAS OPERACIONAIS: R$ {-des_t:,.2f}", expanded=True):
+            for n, v in df_des.items(): st.write(f"• {n}: R$ {v:,.2f}")
+        st.info(f"**(=) EBITDA: R$ {ebitda:,.2f}**")
+        with st.expander(f"(-) RESULTADO FINANCEIRO: R$ {-enc_t:,.2f}", expanded=True):
+            for n, v in df_enc.items(): st.write(f"• {n}: R$ {v:,.2f}")
+        st.success(f"**(=) LUCRO LÍQUIDO DO EXERCÍCIO: R$ {lucro:,.2f}**")
 
     elif st.session_state.menu_opcao == "⚙️ Gestão":
+        st.subheader("GESTÃO E MANUTENÇÃO DE REGISTROS")
         for _, r in df.iterrows():
-            with st.expander(f"{r['descricao']} - R$ {r['valor']:,.2f}"):
+            with st.expander(f"📌 {r['descricao']} - R$ {r['valor']:,.2f} ({r['tipo']})"):
+                st.write(f"**GRUPO:** {r['natureza']} | **OPERAÇÃO:** {r['tipo']}")
+                if r['justificativa']: st.write(f"**HISTÓRICO:** {r['justificativa']}")
                 c1, c2 = st.columns(2)
-                if c1.button("Editar", key=f"e_{r['id']}"): st.session_state.edit_id = r['id']; st.rerun()
-                if c2.button("Excluir", key=f"d_{r['id']}"): supabase.table("lancamentos").delete().eq("id", r['id']).execute(); st.rerun()
+                if c1.button("✏️ EDITAR", key=f"e_{r['id']}"): st.session_state.edit_id = r['id']; st.rerun()
+                if c2.button("🗑️ EXCLUIR", key=f"d_{r['id']}"): supabase.table("lancamentos").delete().eq("id", r['id']).execute(); st.rerun()
 else:
     st.info("Terminal vazio.")
