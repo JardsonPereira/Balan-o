@@ -96,7 +96,6 @@ with st.sidebar:
     if st.button("Encerrar Sessão", use_container_width=True): st.session_state.user = None; st.rerun()
     st.divider()
     
-    # Lógica para determinar se o formulário deve carregar dados (Edição) ou ficar em branco (Novo)
     if st.session_state.edit_id and not df.empty:
         st.subheader("📝 Editar Registro")
         items = df[df['id'] == st.session_state.edit_id]
@@ -105,7 +104,6 @@ with st.sidebar:
         st.subheader("➕ Novo Lançamento")
         item_edit = {"descricao": "", "natureza": "Ativo", "tipo": "Débito", "valor": 0.0, "justificativa": "", "categoria_dfc": "Atividade Operacional", "data_lancamento": date.today()}
 
-    # O clear_on_submit aliado ao incremento do form_count garante a limpeza total
     with st.form(key=f"f_{st.session_state.form_count}", clear_on_submit=True):
         data_sel = st.date_input("Data do Fato", value=item_edit.get('data_lancamento', date.today()))
         contas_existentes = sorted(df['descricao'].unique().tolist()) if not df.empty else []
@@ -128,14 +126,12 @@ with st.sidebar:
             try:
                 if st.session_state.edit_id:
                     supabase.table("lancamentos").update(payload).eq("id", st.session_state.edit_id).execute()
-                    st.session_state.edit_id = None # Limpa o ID de edição após salvar
+                    st.session_state.edit_id = None
                 else:
                     supabase.table("lancamentos").insert(payload).execute()
-                
-                # Incrementa o contador para forçar um novo formulário limpo
                 st.session_state.form_count += 1
                 st.rerun()
-            except Exception as e:
+            except Exception:
                 st.error("Erro na comunicação com o banco de dados.")
 
 # --- CSS ---
@@ -201,4 +197,42 @@ if not df.empty:
             df_f = df_f.sort_values(by='data_lancamento')
             ent, sai = df_f[df_f['tipo']=='Débito']['valor'].sum(), df_f[df_f['tipo']=='Crédito']['valor'].sum()
             saldo_ant = st.number_input("Saldo Anterior", min_value=0.0, value=0.0)
-            st.markdown(f"<div class='dfc-res
+            
+            # --- CORREÇÃO DO MARKDOWN ABAIXO ---
+            resumo_html = f"""
+            <div class='dfc-resumo'>
+                Saldo Inicial: R$ {saldo_ant:,.2f}<br>
+                (+) Entradas: R$ {ent:,.2f}<br>
+                (-) Saídas: R$ {sai:,.2f}<br>
+                <b>(=) SALDO FINAL: R$ {saldo_ant + ent - sai:,.2f}</b>
+            </div>
+            """
+            st.markdown(resumo_html, unsafe_allow_html=True)
+            
+            st.divider()
+            df_cat = df_f.groupby('categoria_dfc')[['valor']].sum()
+            cols = st.columns(3)
+            cats = ["Atividade Operacional", "Atividade de Investimento", "Atividade de Financiamento"]
+            for i, cat in enumerate(cats):
+                val = df_cat.loc[cat, 'valor'] if cat in df_cat.index else 0
+                cols[i].metric(cat.replace("Atividade de ", ""), f"R$ {val:,.2f}")
+
+            st.write("#### Extrato do Período")
+            st.dataframe(df_f[['data_lancamento', 'descricao', 'tipo', 'valor', 'justificativa']], use_container_width=True)
+        else:
+            st.warning("Nenhum dado financeiro no período.")
+
+    elif opcao == "⚙️ Gestão":
+        st.subheader("Manutenção de Registros")
+        for _, r in df.iterrows():
+            with st.container(border=True):
+                c_inf, c_btn = st.columns([4, 1])
+                c_inf.write(f"**{r['data_lancamento'].strftime('%d/%m/%Y')} - {r['descricao']}** | R$ {r['valor']:,.2f}")
+                if c_btn.button("✏️", key=f"e_{r['id']}"): 
+                    st.session_state.edit_id = r['id']
+                    st.rerun()
+                if c_btn.button("🗑️", key=f"d_{r['id']}"): 
+                    supabase.table("lancamentos").delete().eq("id", r['id']).execute()
+                    st.rerun()
+else:
+    st.info("Sistema vazio.")
