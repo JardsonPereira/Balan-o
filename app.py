@@ -31,19 +31,21 @@ def gerar_pdf_bytes(dados, titulo_relatorio):
     pdf.ln(10)
     
     pdf.set_font("Helvetica", "B", 10)
-    pdf.cell(80, 8, "CONTA", border=1)
-    pdf.cell(35, 8, "DEBITO", border=1)
-    pdf.cell(35, 8, "CREDITO", border=1)
-    pdf.cell(40, 8, "SALDO", border=1)
+    pdf.cell(70, 8, "CONTA", border=1)
+    pdf.cell(30, 8, "DEBITO", border=1)
+    pdf.cell(30, 8, "CREDITO", border=1)
+    pdf.cell(30, 8, "S. DEV", border=1)
+    pdf.cell(30, 8, "S. CRE", border=1)
     pdf.ln()
     
     pdf.set_font("Helvetica", "", 9)
     for _, row in dados.iterrows():
         conta_limpa = str(row["CONTA"]).encode('ascii', 'ignore').decode('ascii')
-        pdf.cell(80, 7, conta_limpa, border=1)
-        pdf.cell(35, 7, f"{row['DEBITO']:,.2f}", border=1)
-        pdf.cell(35, 7, f"{row['CREDITO']:,.2f}", border=1)
-        pdf.cell(40, 7, f"{row['SALDO']:,.2f}", border=1)
+        pdf.cell(70, 7, conta_limpa, border=1)
+        pdf.cell(30, 7, f"{row['DEBITO']:,.2f}", border=1)
+        pdf.cell(30, 7, f"{row['CREDITO']:,.2f}", border=1)
+        pdf.cell(30, 7, f"{row['SALDO DEVEDOR']:,.2f}", border=1)
+        pdf.cell(30, 7, f"{row['SALDO CREDOR']:,.2f}", border=1)
         pdf.ln()
     
     pdf_output = pdf.output()
@@ -69,7 +71,7 @@ def tela_autenticacao():
             if col_b.button("Recuperar Senha", use_container_width=True): st.session_state.auth_mode = "recuperar"; st.rerun()
         elif st.session_state.auth_mode == "cadastro":
             st.subheader("Novo Cadastro")
-            new_email = st.text_input("E-mail").lower().strip()
+            new_email = st.text_input("E-mail para cadastro").lower().strip()
             new_pass = st.text_input("Senha", type="password")
             if st.button("Criar Conta", use_container_width=True):
                 try:
@@ -170,9 +172,21 @@ if not df.empty:
         for c_n in sorted(df['descricao'].unique()):
             temp = df[df['descricao'] == c_n]
             d_s, c_s = temp[temp['tipo'] == 'Débito']['valor'].sum(), temp[temp['tipo'] == 'Crédito']['valor'].sum()
-            bal_list.append({"CONTA": c_n, "DEBITO": d_s, "CREDITO": c_s, "SALDO": d_s-c_s})
+            saldo_atual = d_s - c_s
+            bal_list.append({
+                "CONTA": c_n, 
+                "DEBITO": d_s, 
+                "CREDITO": c_s, 
+                "SALDO DEVEDOR": saldo_atual if saldo_atual > 0 else 0,
+                "SALDO CREDOR": abs(saldo_atual) if saldo_atual < 0 else 0
+            })
         df_bal = pd.DataFrame(bal_list)
-        st.table(df_bal)
+        st.table(df_bal.style.format({c: "{:,.2f}" for c in ["DEBITO", "CREDITO", "SALDO DEVEDOR", "SALDO CREDOR"]}))
+        
+        c1, c2 = st.columns(2)
+        c1.metric("Total Devedor", f"R$ {df_bal['SALDO DEVEDOR'].sum():,.2f}")
+        c2.metric("Total Credor", f"R$ {df_bal['SALDO CREDOR'].sum():,.2f}")
+        
         try:
             pdf_data = gerar_pdf_bytes(df_bal, "BALANCETE DE VERIFICACAO")
             st.download_button("📥 Baixar PDF do Balancete", data=pdf_data, file_name="balancete.pdf", mime="application/pdf")
