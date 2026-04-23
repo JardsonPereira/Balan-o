@@ -44,8 +44,7 @@ def gerar_pdf_bytes(dados, titulo_relatorio):
         pdf.cell(30, 7, f"{row['SALDO DEVEDOR']:,.2f}", border=1, align="R")
         pdf.cell(30, 7, f"{row['SALDO CREDOR']:,.2f}", border=1, align="R")
         pdf.ln()
-    pdf_out = pdf.output()
-    return bytes(pdf_out) if isinstance(pdf_out, bytearray) else pdf_out
+    return bytes(pdf.output()) if isinstance(pdf.output(), bytearray) else pdf.output()
 
 # --- INTERFACE DE AUTENTICAÇÃO ---
 def tela_autenticacao():
@@ -63,6 +62,7 @@ def tela_autenticacao():
                         st.session_state.user = res.user
                         st.rerun()
                     except: st.error("Acesso negado.")
+                st.divider()
                 if st.button("Criar Nova Conta", use_container_width=True): 
                     st.session_state.auth_mode = "cadastro"; st.rerun()
             elif st.session_state.auth_mode == "cadastro":
@@ -72,7 +72,7 @@ def tela_autenticacao():
                 if st.button("Registrar", use_container_width=True, type="primary"):
                     try:
                         supabase.auth.sign_up({"email": new_email, "password": new_pass})
-                        st.success("Verifique seu e-mail para ativar!")
+                        st.success("Verifique seu e-mail!")
                     except Exception as e: st.error(f"Erro: {e}")
                 if st.button("Voltar"): st.session_state.auth_mode = "login"; st.rerun()
 
@@ -85,7 +85,6 @@ user_id = st.session_state.user.id
 res_db = supabase.table("lancamentos").select("*").eq("user_id", user_id).execute()
 df = pd.DataFrame(res_db.data)
 
-# Garante que a coluna categoria_dfc exista no DataFrame para a lógica local
 if not df.empty and 'categoria_dfc' not in df.columns:
     df['categoria_dfc'] = 'Operacional'
 
@@ -109,41 +108,28 @@ with st.sidebar:
         desc = st.text_input("Nome da Conta", value=item_edit['descricao']).upper() if sel == "(NOVA)" else sel
         nat = st.selectbox("Grupo", ["Ativo", "Passivo", "Patrimônio Líquido", "Receita", "Despesa", "Encargos Financeiros"], index=["Ativo", "Passivo", "Patrimônio Líquido", "Receita", "Despesa", "Encargos Financeiros"].index(item_edit['natureza']))
         
+        # DEFINIÇÃO DE MOVIMENTAÇÃO REAL DE DINHEIRO
         cat_dfc_list = ["Operacional", "Investimento", "Financiamento", "N/A (Não Financeiro)"]
-        cat_dfc = st.selectbox("Categoria DFC", cat_dfc_list, index=cat_dfc_list.index(item_edit.get('categoria_dfc', 'Operacional')))
+        cat_dfc = st.selectbox("Categoria DFC (Fluxo Real)", cat_dfc_list, index=cat_dfc_list.index(item_edit.get('categoria_dfc', 'Operacional')))
         
         tipo = st.radio("Operação", ["Débito", "Crédito"], horizontal=True)
         valor = st.number_input("Valor", min_value=0.0, value=float(item_edit['valor']))
         just = st.text_input("Histórico", value=item_edit['justificativa'])
         
         if st.form_submit_button("Salvar Registro", use_container_width=True, type="primary"):
-            payload = {
-                "user_id": user_id, 
-                "descricao": desc, 
-                "natureza": nat, 
-                "tipo": tipo, 
-                "valor": valor, 
-                "justificativa": just, 
-                "categoria_dfc": cat_dfc
-            }
+            payload = {"user_id": user_id, "descricao": desc, "natureza": nat, "tipo": tipo, "valor": valor, "justificativa": just, "categoria_dfc": cat_dfc}
             try:
                 if st.session_state.edit_id:
-                    # Tenta atualizar. Se der APIError, pode ser a coluna categoria_dfc faltando no banco.
                     supabase.table("lancamentos").update(payload).eq("id", st.session_state.edit_id).execute()
                 else:
                     supabase.table("lancamentos").insert(payload).execute()
                 st.session_state.edit_id = None; st.session_state.form_count += 1; st.rerun()
-            except Exception as e:
-                # Se falhar, tenta enviar sem a categoria_dfc (compatibilidade com tabelas antigas)
-                if "categoria_dfc" in payload:
-                    del payload["categoria_dfc"]
-                    if st.session_state.edit_id:
-                        supabase.table("lancamentos").update(payload).eq("id", st.session_state.edit_id).execute()
-                    else:
-                        supabase.table("lancamentos").insert(payload).execute()
-                    st.session_state.edit_id = None; st.session_state.form_count += 1; st.rerun()
-                else:
-                    st.error(f"Erro ao salvar no banco de dados: {e}")
+            except Exception:
+                # Fallback para tabelas sem a coluna categoria_dfc criada
+                del payload["categoria_dfc"]
+                if st.session_state.edit_id: supabase.table("lancamentos").update(payload).eq("id", st.session_state.edit_id).execute()
+                else: supabase.table("lancamentos").insert(payload).execute()
+                st.session_state.edit_id = None; st.session_state.form_count += 1; st.rerun()
 
 # --- CSS VISUAL ---
 st.markdown("""
@@ -159,7 +145,7 @@ st.markdown("""
 # --- NAVEGAÇÃO ---
 st.markdown("<h2 style='color: #0f172a; font-weight: 700;'>Dashboard Contábil</h2>", unsafe_allow_html=True)
 nav = st.columns(5)
-btns = ["📊 Razonetes", "🧾 Balancete", "📈 DRE", "💸 Fluxo (DFC)", "⚙️ Gestão"]
+btns = ["📊 Razonetes", "🧾 Balancete", "📈 DRE", "💸 Fluxo Real (DFC)", "⚙️ Gestão"]
 for i, b_name in enumerate(btns):
     if nav[i].button(b_name, use_container_width=True): st.session_state.menu_opcao = b_name
 st.divider()
@@ -198,50 +184,52 @@ if not df.empty:
             bal_data.append({"CONTA": c_n, "DEBITO": d_s, "CREDITO": c_s, "SALDO DEVEDOR": s if s > 0 else 0, "SALDO CREDOR": abs(s) if s < 0 else 0})
         df_bal = pd.DataFrame(bal_data)
         st.table(df_bal.style.format({c: "{:,.2f}" for c in ["DEBITO", "CREDITO", "SALDO DEVEDOR", "SALDO CREDOR"]}))
-        pdf_bytes = gerar_pdf_bytes(df_bal, "BALANCETE DE VERIFICACAO")
-        st.download_button("📥 Baixar PDF", data=pdf_bytes, file_name="balancete.pdf")
+        st.download_button("📥 Baixar PDF", data=gerar_pdf_bytes(df_bal, "BALANCETE"), file_name="balancete.pdf")
 
     elif opcao == "📈 DRE":
-        st.subheader("DRE Detalhada")
+        st.subheader("Demonstração do Resultado")
         rec = df[df['natureza'] == 'Receita'].groupby('descricao')['valor'].sum()
         des = df[df['natureza'] == 'Despesa'].groupby('descricao')['valor'].sum()
         enc = df[df['natureza'] == 'Encargos Financeiros'].groupby('descricao')['valor'].sum()
-        st.success(f"**LUCRO LÍQUIDO: R$ {rec.sum() - des.sum() - enc.sum():,.2f}**")
+        st.success(f"**LUCRO LÍQUIDO (Competência): R$ {rec.sum() - des.sum() - enc.sum():,.2f}**")
         with st.expander("(+) RECEITA BRUTA"): st.write(rec)
         with st.expander("(-) DESPESAS"): st.write(des)
 
-    elif opcao == "💸 Fluxo (DFC)":
-        st.subheader("Fluxo de Caixa (DFC)")
-        df_f = df.copy()
-        df_f['ENTRADA'] = df_f.apply(lambda x: x['valor'] if x['tipo'] == 'Débito' else 0, axis=1)
-        df_f['SAÍDA'] = df_f.apply(lambda x: x['valor'] if x['tipo'] == 'Crédito' else 0, axis=1)
-        df_f['SALDO_LIQUIDO'] = df_f['ENTRADA'] - df_f['SAÍDA']
+    elif opcao == "💸 Fluxo Real (DFC)":
+        st.subheader("💸 DFC - Fluxo de Caixa Real")
         
-        total_entradas = df_f['ENTRADA'].sum()
-        total_saidas = df_f['SAÍDA'].sum()
-        liquidez_absoluta = total_entradas - total_saidas
+        # Filtro: Apenas o que é financeiro (Diferente de N/A)
+        df_real = df[df['categoria_dfc'] != "N/A (Não Financeiro)"].copy()
         
-        st.markdown("### 🔍 Análise de Liquidez")
-        if liquidez_absoluta > 0:
-            st.success(f"**CAIXA COM LIQUIDEZ:** O saldo disponível (R$ {liquidez_absoluta:,.2f}) cobre todas as saídas registradas.")
-        elif liquidez_absoluta == 0:
-            st.warning("**CAIXA EM EQUILÍBRIO:** O caixa está operando no limite.")
-        else:
-            st.error(f"**ALERTA DE INSOLVÊNCIA:** O caixa está negativo em R$ {abs(liquidez_absoluta):,.2f}.")
+        if not df_real.empty:
+            df_real['ENTRADA'] = df_real.apply(lambda x: x['valor'] if x['tipo'] == 'Débito' else 0, axis=1)
+            df_real['SAÍDA'] = df_real.apply(lambda x: x['valor'] if x['tipo'] == 'Crédito' else 0, axis=1)
+            
+            saldo_real = df_real['ENTRADA'].sum() - df_real['SAÍDA'].sum()
+            
+            st.markdown("### 🔍 Liquidez de Caixa")
+            if saldo_real > 0:
+                st.success(f"**SOLVÊNCIA POSITIVA:** O caixa real possui R$ {saldo_real:,.2f} de liquidez.")
+            else:
+                st.error(f"**DÉFICIT DE CAIXA:** Faltam R$ {abs(saldo_real):,.2f} para cobrir as saídas reais.")
 
-        c1, c2, c3 = st.columns(3)
-        df_cat = df_f.groupby('categoria_dfc')[['ENTRADA', 'SAÍDA', 'SALDO_LIQUIDO']].sum()
-        c1.metric("Fluxo Operacional", f"R$ {df_cat.loc['Operacional', 'SALDO_LIQUIDO'] if 'Operacional' in df_cat.index else 0:,.2f}")
-        c2.metric("Total Entradas", f"R$ {total_entradas:,.2f}")
-        c3.metric("Total Saídas", f"R$ {total_saidas:,.2f}", delta_color="inverse")
-        st.dataframe(df_f[['descricao', 'categoria_dfc', 'ENTRADA', 'SAÍDA', 'justificativa']], use_container_width=True)
+            c1, c2, c3 = st.columns(3)
+            df_cat = df_real.groupby('categoria_dfc')[['ENTRADA', 'SAÍDA']].sum()
+            c1.metric("Fluxo Operacional", f"R$ {(df_cat.loc['Operacional', 'ENTRADA'] - df_cat.loc['Operacional', 'SAÍDA']) if 'Operacional' in df_cat.index else 0:,.2f}")
+            c2.metric("Total Entradas", f"R$ {df_real['ENTRADA'].sum():,.2f}")
+            c3.metric("Total Saídas", f"R$ {df_real['SAÍDA'].sum():,.2f}", delta_color="inverse")
+            
+            st.write("#### Movimentações de Dinheiro Real")
+            st.dataframe(df_real[['descricao', 'categoria_dfc', 'ENTRADA', 'SAÍDA', 'justificativa']], use_container_width=True)
+        else:
+            st.warning("Nenhum lançamento financeiro (real) registrado.")
 
     elif opcao == "⚙️ Gestão":
         for _, r in df.iterrows():
             with st.container(border=True):
-                c_inf, c_btn = st.columns([4, 1])
-                c_inf.write(f"**{r['descricao']}** | {r['natureza']} | {r['tipo']} | DFC: {r.get('categoria_dfc', 'N/A')}")
-                if c_btn.button("✏️", key=f"e_{r['id']}"): st.session_state.edit_id = r['id']; st.rerun()
-                if c_btn.button("🗑️", key=f"d_{r['id']}"): supabase.table("lancamentos").delete().eq("id", r['id']).execute(); st.rerun()
+                c_i, c_b = st.columns([4, 1])
+                c_i.write(f"**{r['descricao']}** | {r['natureza']} | DFC: {r.get('categoria_dfc', 'N/A')}")
+                if c_b.button("✏️", key=f"e_{r['id']}"): st.session_state.edit_id = r['id']; st.rerun()
+                if c_b.button("🗑️", key=f"d_{r['id']}"): supabase.table("lancamentos").delete().eq("id", r['id']).execute(); st.rerun()
 else:
     st.info("Sistema vazio.")
