@@ -12,6 +12,9 @@ def install_and_import(package):
         subprocess.check_call([sys.executable, "-m", "pip", "install", package])
         return __import__(package)
 
+# Instalando dependência para PDF
+install_and_import("fpdf")
+from fpdf import FPDF
 from supabase import create_client, Client
 
 # --- CONFIGURAÇÃO ---
@@ -30,6 +33,34 @@ if 'user' not in st.session_state: st.session_state.user = None
 if 'edit_id' not in st.session_state: st.session_state.edit_id = None
 if 'form_count' not in st.session_state: st.session_state.form_count = 0
 if 'menu_opcao' not in st.session_state: st.session_state.menu_opcao = "📊 Razonetes"
+
+# --- FUNÇÃO GERAR PDF ---
+def gerar_pdf_contabil(dados, titulo_relatorio):
+    pdf = FPDF()
+    pdf.add_page()
+    pdf.set_font("Arial", "B", 16)
+    pdf.cell(190, 10, txt="RELATÓRIO CONTÁBIL DIGITAL", ln=True, align="C")
+    pdf.set_font("Arial", "I", 10)
+    pdf.cell(190, 10, txt=f"Tipo: {titulo_relatorio}", ln=True, align="C")
+    pdf.ln(10)
+    
+    pdf.set_font("Arial", "B", 10)
+    # Cabeçalho da Tabela
+    pdf.cell(80, 8, "CONTA", border=1)
+    pdf.cell(35, 8, "DÉBITO", border=1)
+    pdf.cell(35, 8, "CRÉDITO", border=1)
+    pdf.cell(40, 8, "SALDO", border=1)
+    pdf.ln()
+    
+    pdf.set_font("Arial", "", 9)
+    for _, row in dados.iterrows():
+        pdf.cell(80, 7, str(row["CONTA"]), border=1)
+        pdf.cell(35, 7, f"{row['DÉBITO']:,.2f}", border=1)
+        pdf.cell(35, 7, f"{row['CRÉDITO']:,.2f}", border=1)
+        pdf.cell(40, 7, f"{row['SALDO']:,.2f}", border=1)
+        pdf.ln()
+        
+    return pdf.output(dest='S')
 
 # --- LOGIN ---
 if st.session_state.user is None:
@@ -122,25 +153,20 @@ if not df.empty:
                 cols = st.columns(2)
                 for i, conta in enumerate(contas):
                     with cols[i % 2]:
-                        # AQUI ESTÁ A CORREÇÃO: Usamos st.container para criar a ficha
                         with st.container():
                             st.markdown(f"<div class='razonete-container'><div class='razonete-header'>{conta}</div>", unsafe_allow_html=True)
-                            
                             sub_c1, sub_c2 = st.columns(2)
                             df_c = df_g[df_g['descricao'] == conta]
-                            
                             with sub_c1:
                                 st.markdown("<div class='label-box'>DÉBITOS (D)</div>", unsafe_allow_html=True)
                                 for _, r in df_c[df_c['tipo'] == 'Débito'].iterrows():
                                     st.markdown(f"<span style='color:green; font-size:12px;'>{r['valor']:,.2f}</span>", unsafe_allow_html=True)
                                     if r['justificativa']: st.caption(r['justificativa'])
-                            
                             with sub_c2:
                                 st.markdown("<div class='label-box' style='text-align:right'>CRÉDITOS (C)</div>", unsafe_allow_html=True)
                                 for _, r in df_c[df_c['tipo'] == 'Crédito'].iterrows():
                                     st.markdown(f"<div style='color:red; font-size:12px; text-align:right;'>{r['valor']:,.2f}</div>", unsafe_allow_html=True)
                                     if r['justificativa']: st.caption(f"<div style='text-align:right'>{r['justificativa']}</div>", unsafe_allow_html=True)
-                            
                             v_d = df_c[df_c['tipo'] == 'Débito']['valor'].sum()
                             v_c = df_c[df_c['tipo'] == 'Crédito']['valor'].sum()
                             saldo = v_d - v_c
@@ -155,7 +181,11 @@ if not df.empty:
             d = temp[temp['tipo'] == 'Débito']['valor'].sum()
             cr = temp[temp['tipo'] == 'Crédito']['valor'].sum()
             bal_data.append({"CONTA": c, "DÉBITO": d, "CRÉDITO": cr, "SALDO": d-cr})
-        st.table(pd.DataFrame(bal_data))
+        df_bal = pd.DataFrame(bal_data)
+        st.table(df_bal)
+        
+        pdf_bytes = gerar_pdf_contabil(df_bal, "BALANCETE DE VERIFICAÇÃO")
+        st.download_button(label="📥 Baixar Relatório PDF", data=pdf_bytes, file_name="balancete.pdf", mime="application/pdf")
 
     elif st.session_state.menu_opcao == "📈 DRE":
         st.subheader("DEMONSTRATIVO DE RESULTADO")
@@ -163,6 +193,16 @@ if not df.empty:
         des = df[df['natureza'] == 'Despesa']['valor'].sum()
         enc = df[df['natureza'] == 'Encargos Financeiros']['valor'].sum()
         st.code(f"(+) RECEITA BRUTA: {rec:,.2f}\n(-) DESPESAS:     {des:,.2f}\n(-) FINANC:       {enc:,.2f}\n---------------------------\n(=) RESULTADO:    {rec-des-enc:,.2f}")
+        
+        # Gerar PDF simplificado para DRE
+        dre_data = pd.DataFrame([
+            {"CONTA": "RECEITA BRUTA", "DÉBITO": 0, "CRÉDITO": rec, "SALDO": rec},
+            {"CONTA": "DESPESAS", "DÉBITO": des, "CRÉDITO": 0, "SALDO": -des},
+            {"CONTA": "FINANCEIRO", "DÉBITO": enc, "CRÉDITO": 0, "SALDO": -enc},
+            {"CONTA": "LUCRO/PREJUÍZO", "DÉBITO": 0, "CRÉDITO": 0, "SALDO": rec-des-enc}
+        ])
+        pdf_dre = gerar_pdf_contabil(dre_data, "DRE - DEMONSTRAÇÃO DE RESULTADO")
+        st.download_button(label="📥 Baixar DRE em PDF", data=pdf_dre, file_name="dre.pdf", mime="application/pdf")
 
     elif st.session_state.menu_opcao == "⚙️ Gestão":
         st.subheader("ADMINISTRAÇÃO DE LANÇAMENTOS")
