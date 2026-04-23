@@ -15,184 +15,134 @@ def install_and_import(package):
 from supabase import create_client, Client
 
 # --- CONFIGURAÇÃO ---
-st.set_page_config(page_title="Sistema Contábil Pro", layout="wide", initial_sidebar_state="expanded")
+st.set_page_config(page_title="Terminal de Consulta Contábil", layout="wide")
 
 try:
     url: str = st.secrets["SUPABASE_URL"]
     key: str = st.secrets["SUPABASE_KEY"]
     supabase: Client = create_client(url, key)
 except Exception:
-    st.error("Erro de conexão. Verifique as Secrets no Streamlit Cloud.")
+    st.error("Erro de conexão. Verifique as Secrets.")
     st.stop()
 
-# --- ESTADOS DO SISTEMA ---
-if 'user' not in st.session_state:
-    st.session_state.user = None
-if 'edit_id' not in st.session_state:
-    st.session_state.edit_id = None
-if 'form_count' not in st.session_state:
-    st.session_state.form_count = 0
-if 'menu_opcao' not in st.session_state:
-    st.session_state.menu_opcao = "📊 Razonetes"
+# --- ESTADOS ---
+if 'user' not in st.session_state: st.session_state.user = None
+if 'edit_id' not in st.session_state: st.session_state.edit_id = None
+if 'form_count' not in st.session_state: st.session_state.form_count = 0
+if 'menu_opcao' not in st.session_state: st.session_state.menu_opcao = "📊 Razonetes"
 
-# --- AUTENTICAÇÃO ---
-def gerenciar_acesso():
-    st.sidebar.markdown("<h2 style='text-align: center;'>🔐 Portal de Acesso</h2>", unsafe_allow_html=True)
-    menu = st.sidebar.radio("Navegação", ["Login", "Criar Conta"], label_visibility="collapsed")
-    st.sidebar.divider()
-    email = st.sidebar.text_input("E-mail").lower().strip()
-    senha = st.sidebar.text_input("Senha", type="password")
-    if menu == "Login":
-        if st.sidebar.button("Acessar Sistema", use_container_width=True):
-            try:
-                res = supabase.auth.sign_in_with_password({"email": email, "password": senha})
-                st.session_state.user = res.user
-                st.rerun()
-            except Exception: st.sidebar.error("Credenciais inválidas.")
-    else:
-        if st.sidebar.button("Registrar Conta", use_container_width=True):
-            try:
-                supabase.auth.sign_up({"email": email, "password": senha})
-                st.sidebar.success("Conta criada! Verifique seu e-mail.")
-            except Exception as e: st.sidebar.error(f"Erro: {e}")
-
+# --- LOGIN (SISTEMA FECHADO) ---
 if st.session_state.user is None:
-    gerenciar_acesso()
+    st.markdown("<h2 style='text-align: center;'>ERP CONTÁBIL - ACESSO RESTRITO</h2>", unsafe_allow_html=True)
+    with st.container():
+        c1, c2, c3 = st.columns([1,1,1])
+        with c2:
+            email = st.text_input("Usuário (E-mail)")
+            senha = st.text_input("Senha", type="password")
+            if st.button("Autenticar", use_container_width=True):
+                try:
+                    res = supabase.auth.sign_in_with_password({"email": email, "password": senha})
+                    st.session_state.user = res.user
+                    st.rerun()
+                except: st.error("Acesso negado.")
     st.stop()
 
 user_id = st.session_state.user.id
 
-# --- BARRA LATERAL (GESTÃO DO PERFIL E LANÇAMENTOS) ---
+# --- CARREGAR DADOS ---
+def carregar_dados():
+    try:
+        res = supabase.table("lancamentos").select("*").eq("user_id", user_id).execute()
+        return pd.DataFrame(res.data)
+    except: return pd.DataFrame()
+
+df = carregar_dados()
+
+# --- SIDEBAR: ÁREA DE INPUT ---
 with st.sidebar:
-    st.markdown(f"<div style='background-color: #f1f5f9; padding: 15px; border-radius: 10px; border: 1px solid #e2e8f0; margin-bottom: 20px;'>"
-                f"<small style='color: #64748b;'>Usuário Ativo</small><br><b>{st.session_state.user.email}</b></div>", unsafe_allow_html=True)
-    
-    if st.button("🚪 Encerrar Sessão", use_container_width=True):
+    st.title("📟 Terminal")
+    st.write(f"Operador: {st.session_state.user.email}")
+    if st.button("Encerrar Terminal"):
         st.session_state.user = None
         st.rerun()
-    
     st.divider()
     
-    def carregar_dados():
-        try:
-            res = supabase.table("lancamentos").select("*").eq("user_id", user_id).execute()
-            return pd.DataFrame(res.data)
-        except Exception: return pd.DataFrame()
-
-    df = carregar_dados()
-
-    # FORMULÁRIO DE ENTRADA
+    st.header("Entrada de Dados")
     if st.session_state.edit_id:
-        st.subheader("📝 Edição de Lançamento")
         item_edit = df[df['id'] == st.session_state.edit_id].iloc[0]
+        st.warning(f"Editando Registro ID: {st.session_state.edit_id}")
     else:
-        st.subheader("➕ Novo Lançamento")
         item_edit = {"descricao": "", "natureza": "Ativo", "tipo": "Débito", "valor": 0.0, "justificativa": ""}
 
-    with st.form(key=f"contabil_form_{st.session_state.form_count}", clear_on_submit=True):
-        contas_existentes = sorted(df['descricao'].unique().tolist()) if not df.empty else []
-        opcoes_conta = ["+ Adicionar Nova Conta"] + contas_existentes
+    with st.form(key=f"f_{st.session_state.form_count}"):
+        contas = sorted(df['descricao'].unique().tolist()) if not df.empty else []
+        conta_sel = st.selectbox("Conta", ["NOVA CONTA"] + contas)
+        desc = st.text_input("Nome da Conta").upper() if conta_sel == "NOVA CONTA" else conta_sel
+        nat = st.selectbox("Grupo Natureza", ["Ativo", "Passivo", "Patrimônio Líquido", "Receita", "Despesa", "Encargos Financeiros"], index=0 if not st.session_state.edit_id else ["Ativo", "Passivo", "Patrimônio Líquido", "Receita", "Despesa", "Encargos Financeiros"].index(item_edit['natureza']))
+        tipo = st.radio("Operação", ["Débito", "Crédito"], horizontal=True)
+        valor = st.number_input("Valor Nominal", min_value=0.0, value=float(item_edit['valor']))
+        just = st.text_area("Histórico Contábil", value=item_edit['justificativa'])
         
-        idx_conta = 0
-        if st.session_state.edit_id and item_edit['descricao'] in contas_existentes:
-            idx_conta = opcoes_conta.index(item_edit['descricao'])
-            
-        conta_sel = st.selectbox("Conta Contábil", opcoes_conta, index=idx_conta)
-        
-        if conta_sel == "+ Adicionar Nova Conta":
-            desc = st.text_input("Nome da Conta", placeholder="EX: CAIXA").upper().strip()
-        else:
-            desc = conta_sel
-
-        nat_list = ["Ativo", "Passivo", "Patrimônio Líquido", "Receita", "Despesa", "Encargos Financeiros"]
-        nat = st.selectbox("Grupo", nat_list, index=nat_list.index(item_edit['natureza']))
-        tipo = st.radio("Operação", ["Débito", "Crédito"], index=0 if item_edit['tipo'] == "Débito" else 1, horizontal=True)
-        valor = st.number_input("Valor (R$)", min_value=0.0, step=100.0, value=float(item_edit['valor']))
-        just = st.text_input("Histórico / Justificativa", value=item_edit['justificativa'])
-        
-        if st.form_submit_button("Efetuar Lançamento", use_container_width=True):
-            if not desc:
-                st.error("Nome da conta é obrigatório!")
+        if st.form_submit_button("PROCESSAR LANÇAMENTO"):
+            payload = {"user_id": user_id, "descricao": desc, "natureza": nat, "tipo": tipo, "valor": valor, "justificativa": just}
+            if st.session_state.edit_id:
+                supabase.table("lancamentos").update(payload).eq("id", st.session_state.edit_id).execute()
+                st.session_state.edit_id = None
             else:
-                payload = {"user_id": user_id, "descricao": desc, "natureza": nat, "tipo": tipo, "valor": valor, "justificativa": just}
-                try:
-                    if st.session_state.edit_id:
-                        supabase.table("lancamentos").update(payload).eq("id", st.session_state.edit_id).execute()
-                        st.session_state.edit_id = None
-                    else:
-                        supabase.table("lancamentos").insert(payload).execute()
-                    st.session_state.form_count += 1
-                    st.rerun()
-                except Exception as e: st.error(f"Falha ao salvar: {e}")
+                supabase.table("lancamentos").insert(payload).execute()
+            st.session_state.form_count += 1
+            st.rerun()
 
-# --- ESTILO CSS PROFISSIONAL ---
+# --- CSS: ESTILO SISTEMA LEGADO/MODERNO ---
 st.markdown("""
 <style>
-    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
+    body { background-color: #f0f2f6; }
+    .stApp { background-color: #f0f2f6; }
     
-    html, body, [class*="css"] { font-family: 'Inter', sans-serif; }
-    .stApp { background-color: #f8fafc; }
-
-    /* Estilização de Cabeçalhos */
-    .main-title { color: #0f172a; font-weight: 800; font-size: 2.2rem; margin-bottom: 0.2rem; }
-    .sub-title { color: #64748b; margin-bottom: 2rem; font-size: 1rem; }
-
-    /* Cards de Razonetes */
-    .conta-card { 
-        background: white; border-radius: 12px; border: 1px solid #e2e8f0; 
-        box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1); margin-bottom: 25px; overflow: hidden; 
-    }
-    .conta-titulo { 
-        background: #1e293b; color: white; padding: 12px; text-align: center; 
-        font-weight: 600; font-size: 0.85rem; letter-spacing: 0.5px;
-    }
-    .conta-corpo { display: flex; min-height: 100px; position: relative; }
-    .conta-corpo::after { 
-        content: ""; position: absolute; left: 50%; top: 0; bottom: 0; 
-        width: 1.5px; background-color: #e2e8f0; 
-    }
-    .lado-debito, .lado-credito { flex: 1; padding: 12px; }
-    
-    /* Itens de Lançamento */
-    .valor-item { font-size: 0.8rem; margin-bottom: 6px; line-height: 1.3; }
-    .valor-deb { color: #10b981; font-weight: 600; }
-    .valor-cre { color: #ef4444; font-weight: 600; text-align: right; }
-    .just-hint { font-size: 0.65rem; color: #94a3b8; display: block; font-weight: 400; font-style: normal; }
-    
-    /* Rodapé do Saldo */
-    .conta-rodape { 
-        padding: 10px; background: #f8fafc; border-top: 1.5px solid #1e293b; 
-        text-align: center; font-weight: 700; font-size: 0.85rem; 
-    }
-    
-    /* Grupos */
-    .grupo-header { 
-        background: #f1f5f9; color: #334155; padding: 8px 16px; border-radius: 8px; 
-        margin: 35px 0 15px 0; font-size: 0.9rem; font-weight: 700; 
-        border-left: 4px solid #1e293b; text-transform: uppercase;
+    /* Cabeçalho de Sistema */
+    .system-header {
+        background-color: #1a365d; color: white; padding: 10px 20px;
+        border-radius: 5px; margin-bottom: 20px; font-family: monospace;
     }
 
-    /* Botões de Navegação */
-    div[data-testid="stHorizontalBlock"] button {
-        border-radius: 8px !important; border: 1px solid #e2e8f0 !important;
-        background-color: white !important; font-weight: 500 !important;
+    /* Tabela de Razonete (Ficha) */
+    .ficha-conta {
+        background-color: white; border: 2px solid #1a365d; margin-bottom: 30px;
     }
-    div[data-testid="stHorizontalBlock"] button:hover {
-        border-color: #3b82f6 !important; color: #3b82f6 !important;
+    .ficha-header {
+        background-color: #1a365d; color: white; padding: 5px;
+        text-align: center; font-weight: bold; font-size: 1.1rem;
+    }
+    .grid-contas { display: flex; border-bottom: 2px solid #1a365d; }
+    .col-deb, .col-cre { flex: 1; padding: 10px; min-height: 80px; }
+    .col-deb { border-right: 2px solid #1a365d; background-color: #fcfdfc; }
+    .col-cre { background-color: #fdfcfc; }
+    
+    .label-col { font-size: 0.7rem; font-weight: bold; color: #555; text-transform: uppercase; margin-bottom: 5px; }
+    .entry { font-family: 'Courier New', monospace; font-size: 0.9rem; margin-bottom: 2px; }
+    .entry-val-d { color: green; }
+    .entry-val-c { color: red; text-align: right; }
+    
+    .ficha-total {
+        background-color: #e2e8f0; padding: 5px 15px;
+        text-align: right; font-family: monospace; font-weight: bold; font-size: 1rem;
+    }
+
+    /* Estilo de Menu Abas */
+    .stButton > button {
+        border-radius: 0px; border: 1px solid #1a365d; background-color: white;
     }
 </style>
 """, unsafe_allow_html=True)
 
-# --- CORPO PRINCIPAL ---
-st.markdown('<h1 class="main-title">📑 Sistema Contábil Digital</h1>', unsafe_allow_html=True)
-st.markdown('<p class="sub-title">Gestão financeira e controladoria em tempo real</p>', unsafe_allow_html=True)
+# --- UI PRINCIPAL ---
+st.markdown("<div class='system-header'>SISTEMA DE CONSULTA DE LANÇAMENTOS - MÓDULO CONTÁBIL v2.0</div>", unsafe_allow_html=True)
 
-# Menu Superior
-col_nav = st.columns(4)
-botoes = ["📊 Razonetes", "🧾 Balancete", "📈 DRE", "⚙️ Gestão"]
-for i, btn in enumerate(botoes):
-    if col_nav[i].button(btn, use_container_width=True):
-        st.session_state.menu_opcao = btn
+# Tabs de Navegação Estilo Sistema
+nav_cols = st.columns(4)
+menu_opcoes = ["📊 Razonetes", "🧾 Balancete", "📈 DRE", "⚙️ Gestão"]
+for i, m in enumerate(menu_opcoes):
+    if nav_cols[i].button(m, use_container_width=True): st.session_state.menu_opcao = m
 
 st.divider()
 
@@ -200,93 +150,77 @@ if not df.empty:
     opcao = st.session_state.menu_opcao
     
     if opcao == "📊 Razonetes":
-        grupos = ["Ativo", "Passivo", "Patrimônio Líquido", "Receita", "Despesa", "Encargos Financeiros"]
-        for grupo in grupos:
-            df_g = df[df['natureza'] == grupo]
-            if not df_g.empty:
-                st.markdown(f"<div class='grupo-header'>{grupo}</div>", unsafe_allow_html=True)
-                contas = sorted(df_g['descricao'].unique())
-                cols = st.columns(3)
+        for nat in ["Ativo", "Passivo", "Patrimônio Líquido", "Receita", "Despesa", "Encargos Financeiros"]:
+            df_n = df[df['natureza'] == nat]
+            if not df_n.empty:
+                st.markdown(f"### 📂 GRUPO: {nat.upper()}")
+                contas = sorted(df_n['descricao'].unique())
+                cols = st.columns(2) # 2 colunas para parecer fichas de papel
                 for i, conta in enumerate(contas):
-                    with cols[i % 3]:
-                        df_c = df_g[df_g['descricao'] == conta]
-                        v_deb = df_c[df_c['tipo'] == 'Débito']['valor'].sum()
-                        v_cre = df_c[df_c['tipo'] == 'Crédito']['valor'].sum()
-                        saldo = v_deb - v_cre
+                    with cols[i % 2]:
+                        df_c = df_n[df_n['descricao'] == conta]
+                        v_d = df_c[df_c['tipo'] == 'Débito']['valor'].sum()
+                        v_c = df_c[df_c['tipo'] == 'Crédito']['valor'].sum()
+                        saldo = v_d - v_c
                         
-                        deb_html = "".join([f"<div class='valor-item valor-deb'>{r['valor']:,.2f}<span class='just-hint'>{r['justificativa']}</span></div>" for _, r in df_c[df_c['tipo'] == 'Débito'].iterrows()])
-                        cre_html = "".join([f"<div class='valor-item valor-cre'>{r['valor']:,.2f}<span class='just-hint'>{r['justificativa']}</span></div>" for _, r in df_c[df_c['tipo'] == 'Crédito'].iterrows()])
-                        
-                        txt_saldo = f"SALDO DEVEDOR: R$ {saldo:,.2f}" if saldo > 0 else f"SALDO CREDOR: R$ {abs(saldo):,.2f}" if saldo < 0 else "CONTA ZERADA"
-                        cor_saldo = "#10b981" if saldo > 0 else "#ef4444" if saldo < 0 else "#64748b"
-                        
+                        # Construção da Ficha Contábil
                         st.markdown(f"""
-                            <div class="conta-card">
-                                <div class="conta-titulo">{conta}</div>
-                                <div class="conta-corpo">
-                                    <div class="lado-debito">{deb_html}</div>
-                                    <div class="lado-credito">{cre_html}</div>
+                        <div class="ficha-conta">
+                            <div class="ficha-header">{conta}</div>
+                            <div class="grid-contas">
+                                <div class="col-deb">
+                                    <div class="label-col">Débitos (D)</div>
+                                    {"".join([f"<div class='entry entry-val-d'>{r['valor']:,.2f} <small style='color:gray'>({r['justificativa']})</small></div>" for _,r in df_c[df_c['tipo']=='Débito'].iterrows()])}
                                 </div>
-                                <div class="conta-rodape" style="color: {cor_saldo};">{txt_saldo}</div>
+                                <div class="col-cre">
+                                    <div class="label-col" style="text-align:right">Créditos (C)</div>
+                                    {"".join([f"<div class='entry entry-val-c'>{r['valor']:,.2f} <small style='color:gray'>({r['justificativa']})</small></div>" for _,r in df_c[df_c['tipo']=='Crédito'].iterrows()])}
+                                </div>
                             </div>
+                            <div class="ficha-total">
+                                SALDO ATUAL: R$ {abs(saldo):,.2f} {'(DEVEDOR)' if saldo >=0 else '(CREDOR)'}
+                            </div>
+                        </div>
                         """, unsafe_allow_html=True)
 
     elif opcao == "🧾 Balancete":
-        st.subheader("Balancete de Verificação")
+        st.subheader("RELATÓRIO DE BALANCETE DE VERIFICAÇÃO")
         bal_data = []
         for conta in sorted(df['descricao'].unique()):
             df_c = df[df['descricao'] == conta]
-            d = df_c[df_c['tipo'] == 'Débito']['valor'].sum()
-            c = df_c[df_c['tipo'] == 'Crédito']['valor'].sum()
-            bal_data.append({"Conta": conta, "Natureza": df_c['natureza'].iloc[0], "Débito": d, "Crédito": c, "Saldo Devedor": d-c if d>c else 0, "Saldo Credor": c-d if c>d else 0})
-        
+            d, c = df_c[df_c['tipo'] == 'Débito']['valor'].sum(), df_c[df_c['tipo'] == 'Crédito']['valor'].sum()
+            bal_data.append({"CONTA": conta, "NATUREZA": df_c['natureza'].iloc[0], "DEVEDOR": d-c if d>c else 0, "CREDOR": c-d if c>d else 0})
         bal_df = pd.DataFrame(bal_data)
-        st.dataframe(bal_df.style.format({c: "R$ {:,.2f}" for c in ["Débito", "Crédito", "Saldo Devedor", "Saldo Credor"]}), use_container_width=True)
-        
-        t1, t2 = st.columns(2)
-        t1.metric("Total de Saldos Devedores", f"R$ {bal_df['Saldo Devedor'].sum():,.2f}")
-        t2.metric("Total de Saldos Credores", f"R$ {bal_df['Saldo Credor'].sum():,.2f}")
+        st.table(bal_df.style.format({"DEVEDOR": "{:,.2f}", "CREDOR": "{:,.2f}"}))
+        st.metric("TOTAL DEVEDOR", f"R$ {bal_df['DEVEDOR'].sum():,.2f}")
+        st.metric("TOTAL CREDOR", f"R$ {bal_df['CREDOR'].sum():,.2f}")
 
     elif opcao == "📈 DRE":
-        st.subheader("Demonstração do Resultado do Exercício")
-        rec_t = df[df['natureza'] == 'Receita']['valor'].sum()
-        des_t = df[df['natureza'] == 'Despesa']['valor'].sum()
-        enc_t = df[df['natureza'] == 'Encargos Financeiros']['valor'].sum()
+        st.subheader("DEMONSTRAÇÃO DE RESULTADO DO EXERCÍCIO")
+        rec = df[df['natureza'] == 'Receita']['valor'].sum()
+        des = df[df['natureza'] == 'Despesa']['valor'].sum()
+        enc = df[df['natureza'] == 'Encargos Financeiros']['valor'].sum()
         
-        c1, c2, c3 = st.columns(3)
-        c1.metric("Receita Bruta", f"R$ {rec_t:,.2f}")
-        c2.metric("EBITDA", f"R$ {rec_t - des_t:,.2f}", delta_color="normal")
-        c3.metric("Lucro Real", f"R$ {rec_t - des_t - enc_t:,.2f}")
-        
-        with st.expander("Ver Detalhamento da DRE"):
-            st.write("**Receitas:**")
-            st.json(df[df['natureza'] == 'Receita'].groupby('descricao')['valor'].sum().to_dict())
-            st.write("**Despesas Operacionais:**")
-            st.json(df[df['natureza'] == 'Despesa'].groupby('descricao')['valor'].sum().to_dict())
+        st.markdown(f"""
+        **(+) RECEITA OPERACIONAL BRUTA:** R$ {rec:,.2f}  
+        **(-) DESPESAS OPERACIONAIS:** R$ {des:,.2f}  
+        ---
+        **(=) EBITDA:** R$ {rec - des:,.2f}  
+        **(-) RESULTADO FINANCEIRO:** R$ {enc:,.2f}  
+        ---
+        **(=) LUCRO/PREJUÍZO LÍQUIDO:** R$ {rec - des - enc:,.2f}
+        """)
 
     elif opcao == "⚙️ Gestão":
-        st.subheader("Administração de Dados")
-        tab1, tab2 = st.tabs(["Listagem Detalhada", "Configurações"])
-        
-        with tab1:
-            for idx, row in df.iterrows():
-                with st.expander(f"📌 {row['descricao']} - R$ {row['valor']:,.2f} ({row['tipo']})"):
-                    st.write(f"**Grupo:** {row['natureza']} | **Data:** {row.get('created_at', 'N/A')}")
-                    st.write(f"**Justificativa:** {row['justificativa']}")
-                    c1, c2, _ = st.columns([1,1,4])
-                    if c1.button("✏️ Editar", key=f"ed_{row['id']}"):
-                        st.session_state.edit_id = row['id']
-                        st.rerun()
-                    if c2.button("🗑️ Excluir", key=f"del_{row['id']}"):
-                        supabase.table("lancamentos").delete().eq("id", row['id']).execute()
-                        st.rerun()
-        
-        with tab2:
-            st.warning("Atenção: As ações abaixo não podem ser desfeitas.")
-            if st.button("🗑️ Resetar Todo o Banco de Dados", use_container_width=True):
-                supabase.table("lancamentos").delete().eq("user_id", user_id).execute()
-                st.success("Dados resetados com sucesso.")
+        st.subheader("MANUTENÇÃO DE REGISTROS")
+        for idx, row in df.iterrows():
+            c1, c2, c3 = st.columns([4,1,1])
+            c1.write(f"[{row['id']}] {row['descricao']} | R$ {row['valor']:,.2f} | {row['tipo']}")
+            if c2.button("EDIT", key=f"e{row['id']}"):
+                st.session_state.edit_id = row['id']
                 st.rerun()
-
+            if c3.button("DEL", key=f"d{row['id']}"):
+                supabase.table("lancamentos").delete().eq("id", row['id']).execute()
+                st.rerun()
 else:
-    st.info("Nenhum lançamento registrado. Utilize o painel lateral para começar.")
+    st.info("Aguardando entrada de dados para gerar consultas.")
