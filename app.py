@@ -20,6 +20,7 @@ if 'user' not in st.session_state: st.session_state.user = None
 if 'edit_id' not in st.session_state: st.session_state.edit_id = None
 if 'form_count' not in st.session_state: st.session_state.form_count = 0
 if 'menu_opcao' not in st.session_state: st.session_state.menu_opcao = "📊 Razonetes"
+if 'confirm_reset' not in st.session_state: st.session_state.confirm_reset = False
 
 # --- AUTENTICAÇÃO ---
 def gerenciar_acesso():
@@ -124,17 +125,14 @@ st.markdown("""
 
 st.title("📑 Sistema Contábil Digital")
 
-# --- DASHBOARD DE MÉTRICAS (LÓGICA DE CAPITAL SOCIAL INCLUÍDA) ---
+# --- DASHBOARD DE MÉTRICAS ---
 if not df.empty:
     ac_deb = df[(df['natureza'] == 'Ativo') & (df['tipo'] == 'Débito')]['valor'].sum()
     ac_cre = df[(df['natureza'] == 'Ativo') & (df['tipo'] == 'Crédito')]['valor'].sum()
     ac = ac_deb - ac_cre
-    
     pc_cre = df[(df['natureza'] == 'Passivo') & (df['tipo'] == 'Crédito')]['valor'].sum()
     pc_deb = df[(df['natureza'] == 'Passivo') & (df['tipo'] == 'Débito')]['valor'].sum()
     pc = pc_cre - pc_deb
-    
-    # Entradas de Caixa (Vendas pagas + Capital Social Integralizado em dinheiro)
     entradas_caixa = df[(df['status'] == 'Pago') & (df['tipo'] == 'Débito') & (df['natureza'] == 'Ativo')]['valor'].sum()
     saidas_caixa = df[(df['status'] == 'Pago') & (df['tipo'] == 'Crédito') & (df['natureza'] == 'Ativo')]['valor'].sum()
     saldo_caixa = entradas_caixa - saidas_caixa
@@ -169,28 +167,20 @@ else:
                         df_c = df_grupo[df_grupo['descricao'] == conta]
                         v_deb_sum, v_cre_sum = df_c[df_c['tipo'] == 'Débito']['valor'].sum(), df_c[df_c['tipo'] == 'Crédito']['valor'].sum()
                         saldo = (v_deb_sum - v_cre_sum) if grupo in ["Ativo", "Despesa"] else (v_cre_sum - v_deb_sum)
-                        
                         deb_html = "".join([f"<div class='valor-item valor-deb'>D: {r['valor']:,.2f}<span class='just-hint'>{r['justificativa']}</span></div>" for _, r in df_c[df_c['tipo'] == 'Débito'].iterrows()])
                         cre_html = "".join([f"<div class='valor-item valor-cre'>C: {r['valor']:,.2f}<span class='just-hint'>{r['justificativa']}</span></div>" for _, r in df_c[df_c['tipo'] == 'Crédito'].iterrows()])
-                        
                         st.markdown(f"""<div class="conta-card"><div class="conta-titulo">{conta}</div>
                                 <div class="conta-corpo"><div class="lado-debito">{deb_html}</div><div class="lado-credito">{cre_html}</div></div>
                                 <div class="conta-rodape" style="color: {'#059669' if saldo >= 0 else '#dc2626'};">Saldo: R$ {saldo:,.2f}</div></div>""", unsafe_allow_html=True)
 
     elif st.session_state.menu_opcao == "💸 Fluxo de Caixa":
-        st.subheader("Demonstração do Fluxo de Caixa (Método Direto)")
+        st.subheader("Fluxo de Caixa (Método Direto)")
         df_pago = df[df['status'] == 'Pago'].copy()
-        
-        # Atividades de Financiamento (Capital Social Integralizado)
         financiamento = df_pago[df_pago['natureza'] == 'Patrimônio Líquido']['valor'].sum()
-        # Atividades Operacionais (Receitas - Despesas pagas)
         operacional = df_pago[df_pago['natureza'] == 'Receita']['valor'].sum() - df_pago[df_pago['natureza'] == 'Despesa']['valor'].sum()
-        
         c1, c2 = st.columns(2)
-        c1.metric("Ativ. Financiamento (Aportes)", f"R$ {financiamento:,.2f}")
-        c2.metric("Ativ. Operacionais (Líquido)", f"R$ {operacional:,.2f}")
-        
-        st.markdown("**Detalhamento de Entradas Efetivas:**")
+        c1.metric("Ativ. Financiamento", f"R$ {financiamento:,.2f}")
+        c2.metric("Ativ. Operacionais", f"R$ {operacional:,.2f}")
         st.dataframe(df_pago[['descricao', 'natureza', 'valor', 'justificativa']], use_container_width=True)
 
     elif st.session_state.menu_opcao == "🧾 Balancete":
@@ -199,19 +189,27 @@ else:
         for conta in sorted(df['descricao'].unique()):
             df_c = df[df['descricao'] == conta]
             d, c = df_c[df_c['tipo'] == 'Débito']['valor'].sum(), df_c[df_c['tipo'] == 'Crédito']['valor'].sum()
-            bal_data.append({"Conta": conta, "Natureza": df_c['natureza'].iloc[0], "D": d, "C": c, "Saldo": d-c if d>c else c-d})
+            bal_data.append({"Conta": conta, "D": d, "C": c, "Saldo": d-c if d>c else c-d})
         st.table(pd.DataFrame(bal_data))
 
     elif st.session_state.menu_opcao == "📈 DRE":
         st.subheader("DRE (Regime de Competência)")
         rec, des = df[df['natureza'] == 'Receita']['valor'].sum(), df[df['natureza'] == 'Despesa']['valor'].sum()
-        st.write(f"Receita Total: R$ {rec:,.2f}")
-        st.write(f"Despesa Total: R$ {des:,.2f}")
         st.success(f"Resultado Líquido: R$ {rec - des:,.2f}")
 
     elif st.session_state.menu_opcao == "⚙️ Gestão":
+        st.subheader("Gestão de Lançamentos")
+        if st.button("⚠️ Resetar Todos os Lançamentos", use_container_width=True):
+            if st.session_state.confirm_reset:
+                supabase.table("lancamentos").delete().eq("user_id", user_id).execute()
+                st.session_state.confirm_reset = False
+                st.rerun()
+            else:
+                st.session_state.confirm_reset = True
+                st.warning("Tem certeza? Clique novamente para confirmar a exclusão de tudo.")
+        st.divider()
         for _, row in df.iterrows():
             c1, c2, c3 = st.columns([4, 1, 1])
-            c1.write(f"{row['descricao']} | R$ {row['valor']:,.2f} ({row['status']})")
+            c1.write(f"**{row['descricao']}** | R$ {row['valor']:,.2f} ({row['status']})")
             if c2.button("✏️", key=f"ed_{row['id']}"): st.session_state.edit_id = row['id']; st.rerun()
             if c3.button("🗑️", key=f"del_{row['id']}"): supabase.table("lancamentos").delete().eq("id", row['id']).execute(); st.rerun()
