@@ -52,14 +52,11 @@ def carregar_dados():
     try:
         res = supabase.table("lancamentos").select("*").eq("user_id", user_id).execute()
         temp_df = pd.DataFrame(res.data)
-        # --- TRAVA DE SEGURANÇA (Evita o KeyError das suas imagens) ---
         if not temp_df.empty:
             if 'status' not in temp_df.columns:
                 temp_df['status'] = 'Pago'
         return temp_df
-    except Exception as e:
-        st.error(f"Erro ao carregar dados: {e}")
-        return pd.DataFrame()
+    except Exception: return pd.DataFrame()
 
 df = carregar_dados()
 
@@ -142,7 +139,6 @@ if not df.empty:
     pc_cre = df[(df['natureza'] == 'Passivo') & (df['tipo'] == 'Crédito')]['valor'].sum()
     pc_deb = df[(df['natureza'] == 'Passivo') & (df['tipo'] == 'Débito')]['valor'].sum()
     pc = pc_cre - pc_deb
-    
     entradas_caixa = df[(df['status'] == 'Pago') & (df['tipo'] == 'Débito') & (df['natureza'] == 'Ativo')]['valor'].sum()
     saidas_caixa = df[(df['status'] == 'Pago') & (df['tipo'] == 'Crédito') & (df['natureza'] == 'Ativo')]['valor'].sum()
     saldo_caixa = entradas_caixa - saidas_caixa
@@ -183,27 +179,36 @@ else:
                                 <div class="conta-corpo"><div class="lado-debito">{deb_html}</div><div class="lado-credito">{cre_html}</div></div>
                                 <div class="conta-rodape" style="color: {'#059669' if saldo >= 0 else '#dc2626'};">Saldo: R$ {saldo:,.2f}</div></div>""", unsafe_allow_html=True)
 
-    elif st.session_state.menu_opcao == "💸 Fluxo de Caixa":
-        st.subheader("Fluxo de Caixa (Apenas Pagos)")
-        df_pago = df[df['status'] == 'Pago'].copy()
-        if not df_pago.empty:
-            st.dataframe(df_pago[['descricao', 'natureza', 'valor', 'justificativa']], use_container_width=True)
-        else:
-            st.warning("Nenhum lançamento com status 'Pago' encontrado.")
-
     elif st.session_state.menu_opcao == "🧾 Balancete":
         st.subheader("Balancete de Verificação")
         bal_data = []
         for conta in sorted(df['descricao'].unique()):
             df_c = df[df['descricao'] == conta]
             d, c = df_c[df_c['tipo'] == 'Débito']['valor'].sum(), df_c[df_c['tipo'] == 'Crédito']['valor'].sum()
-            bal_data.append({"Conta": conta, "D": d, "C": c, "Saldo": d-c if d>c else c-d})
-        st.table(pd.DataFrame(bal_data))
+            bal_data.append({
+                "Conta": conta, 
+                "Débito (R$)": d, 
+                "Crédito (R$)": c, 
+                "Saldo Devedor": d-c if d > c else 0,
+                "Saldo Credor": c-d if c > d else 0
+            })
+        bal_df = pd.DataFrame(bal_data)
+        st.table(bal_df.style.format(precision=2, decimal=',', thousands='.'))
+        
+        t_dev, t_cre = bal_df["Saldo Devedor"].sum(), bal_df["Saldo Credor"].sum()
+        c1, c2 = st.columns(2)
+        c1.metric("Total Devedores", f"R$ {t_dev:,.2f}")
+        c2.metric("Total Credores", f"R$ {t_cre:,.2f}")
 
     elif st.session_state.menu_opcao == "📈 DRE":
-        st.subheader("DRE (Regime de Competência)")
+        st.subheader("Resultado do Exercício")
         rec, des = df[df['natureza'] == 'Receita']['valor'].sum(), df[df['natureza'] == 'Despesa']['valor'].sum()
         st.success(f"Resultado Líquido: R$ {rec - des:,.2f}")
+
+    elif st.session_state.menu_opcao == "💸 Fluxo de Caixa":
+        st.subheader("Fluxo de Caixa (Apenas Pagos)")
+        df_pago = df[df['status'] == 'Pago'].copy()
+        st.dataframe(df_pago[['descricao', 'natureza', 'valor', 'justificativa']], use_container_width=True)
 
     elif st.session_state.menu_opcao == "⚙️ Gestão":
         st.subheader("Gestão")
