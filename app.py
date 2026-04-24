@@ -52,10 +52,14 @@ def carregar_dados():
     try:
         res = supabase.table("lancamentos").select("*").eq("user_id", user_id).execute()
         temp_df = pd.DataFrame(res.data)
-        if not temp_df.empty and 'status' not in temp_df.columns:
-            temp_df['status'] = 'Pago'
+        # --- TRAVA DE SEGURANÇA (Evita o KeyError das suas imagens) ---
+        if not temp_df.empty:
+            if 'status' not in temp_df.columns:
+                temp_df['status'] = 'Pago'
         return temp_df
-    except Exception: return pd.DataFrame()
+    except Exception as e:
+        st.error(f"Erro ao carregar dados: {e}")
+        return pd.DataFrame()
 
 df = carregar_dados()
 
@@ -87,7 +91,6 @@ with st.sidebar:
         tipo = st.radio("Operação", ["Débito", "Crédito"], index=0 if item_edit['tipo'] == "Débito" else 1, horizontal=True)
         valor = st.number_input("Valor", min_value=0.0, value=float(item_edit['valor']))
         
-        # Opção "Nenhum" acrescentada conforme solicitado
         opcoes_status = ["Pago", "Pendente", "Nenhum"]
         status_atual = item_edit.get('status', 'Pago')
         idx_status = opcoes_status.index(status_atual) if status_atual in opcoes_status else 0
@@ -107,7 +110,7 @@ with st.sidebar:
                         supabase.table("lancamentos").insert(payload).execute()
                     st.session_state.form_count += 1
                     st.rerun()
-                except Exception as e: st.error(f"Erro: {e}")
+                except Exception as e: st.error(f"Erro ao salvar: {e}")
 
 # --- CSS ORIGINAL ---
 st.markdown("""
@@ -140,7 +143,6 @@ if not df.empty:
     pc_deb = df[(df['natureza'] == 'Passivo') & (df['tipo'] == 'Débito')]['valor'].sum()
     pc = pc_cre - pc_deb
     
-    # Apenas status 'Pago' entra no cálculo de saldo de caixa real
     entradas_caixa = df[(df['status'] == 'Pago') & (df['tipo'] == 'Débito') & (df['natureza'] == 'Ativo')]['valor'].sum()
     saidas_caixa = df[(df['status'] == 'Pago') & (df['tipo'] == 'Crédito') & (df['natureza'] == 'Ativo')]['valor'].sum()
     saldo_caixa = entradas_caixa - saidas_caixa
@@ -182,14 +184,12 @@ else:
                                 <div class="conta-rodape" style="color: {'#059669' if saldo >= 0 else '#dc2626'};">Saldo: R$ {saldo:,.2f}</div></div>""", unsafe_allow_html=True)
 
     elif st.session_state.menu_opcao == "💸 Fluxo de Caixa":
-        st.subheader("Fluxo de Caixa (Método Direto)")
+        st.subheader("Fluxo de Caixa (Apenas Pagos)")
         df_pago = df[df['status'] == 'Pago'].copy()
-        financiamento = df_pago[df_pago['natureza'] == 'Patrimônio Líquido']['valor'].sum()
-        operacional = df_pago[df_pago['natureza'] == 'Receita']['valor'].sum() - df_pago[df_pago['natureza'] == 'Despesa']['valor'].sum()
-        c1, c2 = st.columns(2)
-        c1.metric("Ativ. Financiamento", f"R$ {financiamento:,.2f}")
-        c2.metric("Ativ. Operacionais", f"R$ {operacional:,.2f}")
-        st.dataframe(df_pago[['descricao', 'natureza', 'valor', 'justificativa']], use_container_width=True)
+        if not df_pago.empty:
+            st.dataframe(df_pago[['descricao', 'natureza', 'valor', 'justificativa']], use_container_width=True)
+        else:
+            st.warning("Nenhum lançamento com status 'Pago' encontrado.")
 
     elif st.session_state.menu_opcao == "🧾 Balancete":
         st.subheader("Balancete de Verificação")
@@ -206,7 +206,7 @@ else:
         st.success(f"Resultado Líquido: R$ {rec - des:,.2f}")
 
     elif st.session_state.menu_opcao == "⚙️ Gestão":
-        st.subheader("Gestão de Lançamentos")
+        st.subheader("Gestão")
         if st.button("⚠️ Resetar Todos os Lançamentos", use_container_width=True):
             if st.session_state.confirm_reset:
                 supabase.table("lancamentos").delete().eq("user_id", user_id).execute()
@@ -214,7 +214,7 @@ else:
                 st.rerun()
             else:
                 st.session_state.confirm_reset = True
-                st.warning("Tem certeza? Clique novamente para confirmar a exclusão de tudo.")
+                st.warning("Clique novamente para confirmar a exclusão.")
         st.divider()
         for _, row in df.iterrows():
             c1, c2, c3 = st.columns([4, 1, 1])
