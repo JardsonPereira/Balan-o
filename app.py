@@ -86,7 +86,13 @@ with st.sidebar:
         nat = st.selectbox("Grupo", nat_list, index=nat_list.index(item_edit['natureza']))
         tipo = st.radio("Operação", ["Débito", "Crédito"], index=0 if item_edit['tipo'] == "Débito" else 1, horizontal=True)
         valor = st.number_input("Valor", min_value=0.0, value=float(item_edit['valor']))
-        status_pag = st.selectbox("Status Financeiro (Integralização)", ["Pago", "Pendente"], index=0 if item_edit.get('status') == "Pago" else 1)
+        
+        # Opção "Nenhum" acrescentada conforme solicitado
+        opcoes_status = ["Pago", "Pendente", "Nenhum"]
+        status_atual = item_edit.get('status', 'Pago')
+        idx_status = opcoes_status.index(status_atual) if status_atual in opcoes_status else 0
+        status_pag = st.selectbox("Status Financeiro", opcoes_status, index=idx_status)
+        
         just = st.text_area("Justificativa", value=item_edit['justificativa'])
         
         if st.form_submit_button("Confirmar Lançamento"):
@@ -133,6 +139,8 @@ if not df.empty:
     pc_cre = df[(df['natureza'] == 'Passivo') & (df['tipo'] == 'Crédito')]['valor'].sum()
     pc_deb = df[(df['natureza'] == 'Passivo') & (df['tipo'] == 'Débito')]['valor'].sum()
     pc = pc_cre - pc_deb
+    
+    # Apenas status 'Pago' entra no cálculo de saldo de caixa real
     entradas_caixa = df[(df['status'] == 'Pago') & (df['tipo'] == 'Débito') & (df['natureza'] == 'Ativo')]['valor'].sum()
     saidas_caixa = df[(df['status'] == 'Pago') & (df['tipo'] == 'Crédito') & (df['natureza'] == 'Ativo')]['valor'].sum()
     saldo_caixa = entradas_caixa - saidas_caixa
