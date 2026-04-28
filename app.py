@@ -124,6 +124,8 @@ st.markdown("""
     .just-hint { font-size: 0.65rem; color: #64748b; font-style: italic; display: block; font-weight: 400; }
     .conta-rodape { padding: 8px; background: #f8fafc; border-top: 1.5px solid #1e293b; text-align: center; font-weight: 700; font-size: 0.85rem; }
     .grupo-header { background: linear-gradient(90deg, #1e293b, #334155); color: white; padding: 10px 15px; border-radius: 8px; margin: 25px 0 10px 0; font-size: 0.95rem; font-weight: 600; }
+    .dre-linha { display: flex; justify-content: space-between; padding: 5px 0; border-bottom: 1px solid #e2e8f0; }
+    .dre-total { font-weight: 700; background-color: #e2e8f0; padding: 8px 5px; margin-top: 10px; }
 </style>
 """, unsafe_allow_html=True)
 
@@ -199,9 +201,41 @@ else:
         c2.metric("Total Credores", f"R$ {t_cre:,.2f}")
 
     elif st.session_state.menu_opcao == "📈 DRE":
-        st.subheader("Resultado do Exercício")
-        rec, des = df[df['natureza'] == 'Receita']['valor'].sum(), df[df['natureza'] == 'Despesa']['valor'].sum()
-        st.success(f"Resultado Líquido: R$ {rec - des:,.2f}")
+        st.subheader("📈 Demonstração do Resultado do Exercício (DRE)")
+        
+        # Agrupamento de valores
+        receitas_df = df[df['natureza'] == 'Receita']
+        despesas_df = df[df['natureza'] == 'Despesa']
+        encargos_df = df[df['natureza'] == 'Encargos Financeiros']
+        
+        # Funções para somar saldo (Receita é saldo Credor, Despesa é saldo Devedor)
+        total_receitas = receitas_df[receitas_df['tipo'] == 'Crédito']['valor'].sum() - receitas_df[receitas_df['tipo'] == 'Débito']['valor'].sum()
+        total_despesas = despesas_df[despesas_df['tipo'] == 'Débito']['valor'].sum() - despesas_df[despesas_df['tipo'] == 'Crédito']['valor'].sum()
+        total_encargos = encargos_df[encargos_df['tipo'] == 'Débito']['valor'].sum() - encargos_df[encargos_df['tipo'] == 'Crédito']['valor'].sum()
+        
+        ebitda = total_receitas - total_despesas
+        lucro_liquido = ebitda - total_encargos
+
+        with st.expander("Ver Detalhes das Contas", expanded=True):
+            st.markdown("### Receitas Operacionais")
+            for conta in receitas_df['descricao'].unique():
+                val = receitas_df[receitas_df['descricao'] == conta][receitas_df['tipo'] == 'Crédito']['valor'].sum() - receitas_df[receitas_df['descricao'] == conta][receitas_df['tipo'] == 'Débito']['valor'].sum()
+                st.markdown(f"<div class='dre-linha'><span>{conta}</span> <span>R$ {val:,.2f}</span></div>", unsafe_allow_html=True)
+            
+            st.markdown("### Despesas Operacionais")
+            for conta in despesas_df['descricao'].unique():
+                val = despesas_df[despesas_df['descricao'] == conta][despesas_df['tipo'] == 'Débito']['valor'].sum() - despesas_df[despesas_df['descricao'] == conta][despesas_df['tipo'] == 'Crédito']['valor'].sum()
+                st.markdown(f"<div class='dre-linha'><span>{conta}</span> <span>(R$ {val:,.2f})</span></div>", unsafe_allow_html=True)
+
+            st.markdown(f"<div class='dre-total dre-linha'><span>EBITDA / Lucro Operacional</span> <span>R$ {ebitda:,.2f}</span></div>", unsafe_allow_html=True)
+            
+            st.markdown("### Resultado Financeiro / Encargos")
+            for conta in encargos_df['descricao'].unique():
+                val = encargos_df[encargos_df['descricao'] == conta][encargos_df['tipo'] == 'Débito']['valor'].sum() - encargos_df[encargos_df['descricao'] == conta][encargos_df['tipo'] == 'Crédito']['valor'].sum()
+                st.markdown(f"<div class='dre-linha'><span>{conta}</span> <span>(R$ {val:,.2f})</span></div>", unsafe_allow_html=True)
+            
+            cor_lucro = "#059669" if lucro_liquido >= 0 else "#dc2626"
+            st.markdown(f"<div class='dre-total dre-linha' style='background-color: {cor_lucro}; color: white;'><span>LUCRO LÍQUIDO DO EXERCÍCIO</span> <span>R$ {lucro_liquido:,.2f}</span></div>", unsafe_allow_html=True)
 
     elif st.session_state.menu_opcao == "💸 Fluxo de Caixa":
         st.subheader("Fluxo de Caixa (Apenas Pagos)")
@@ -224,30 +258,23 @@ else:
         
         st.divider()
         
-        # LISTA DE LANÇAMENTOS COM DETALHES DE GRUPO E OPERAÇÃO
         for _, row in df.iterrows():
             with st.container():
                 col_info, col_edit, col_del = st.columns([5, 1, 1])
-                
-                # Definindo ícone de operação
                 op_icon = "🟢" if row['tipo'] == "Débito" else "🔴"
-                
                 with col_info:
                     st.markdown(f"""
                     **{row['descricao']}** <small>**Grupo:** {row['natureza']} | **Operação:** {op_icon} {row['tipo']} | **Status:** {row['status']}</small>  
                     **Valor: R$ {row['valor']:,.2f}**
                     """, unsafe_allow_html=True)
-                
                 with col_edit:
                     if st.button("✏️", key=f"ed_{row['id']}", use_container_width=True):
                         st.session_state.edit_id = row['id']
                         st.rerun()
-                
                 with col_del:
                     if st.button("🗑️", key=f"del_{row['id']}", use_container_width=True):
                         try:
                             supabase.table("lancamentos").delete().eq("id", row['id']).execute()
                             st.rerun()
                         except Exception as e: st.error("Erro ao deletar.")
-                
                 st.divider()
