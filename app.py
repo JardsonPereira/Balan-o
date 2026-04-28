@@ -1,7 +1,5 @@
 import streamlit as st
 import pandas as pd
-import subprocess
-import sys
 from supabase import create_client, Client
 
 # --- CONFIGURAÇÃO ---
@@ -109,7 +107,7 @@ with st.sidebar:
                     st.rerun()
                 except Exception as e: st.error(f"Erro ao salvar: {e}")
 
-# --- CSS ORIGINAL ---
+# --- CSS ---
 st.markdown("""
 <style>
     @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap');
@@ -211,18 +209,45 @@ else:
         st.dataframe(df_pago[['descricao', 'natureza', 'valor', 'justificativa']], use_container_width=True)
 
     elif st.session_state.menu_opcao == "⚙️ Gestão":
-        st.subheader("Gestão")
+        st.subheader("⚙️ Gestão de Lançamentos")
+        
         if st.button("⚠️ Resetar Todos os Lançamentos", use_container_width=True):
             if st.session_state.confirm_reset:
-                supabase.table("lancamentos").delete().eq("user_id", user_id).execute()
-                st.session_state.confirm_reset = False
-                st.rerun()
+                try:
+                    supabase.table("lancamentos").delete().eq("user_id", user_id).execute()
+                    st.session_state.confirm_reset = False
+                    st.rerun()
+                except Exception as e: st.error(f"Erro ao resetar: {e}")
             else:
                 st.session_state.confirm_reset = True
-                st.warning("Clique novamente para confirmar a exclusão.")
+                st.warning("Clique novamente para confirmar a exclusão de TODOS os dados.")
+        
         st.divider()
+        
+        # LISTA DE LANÇAMENTOS COM DETALHES DE GRUPO E OPERAÇÃO
         for _, row in df.iterrows():
-            c1, c2, c3 = st.columns([4, 1, 1])
-            c1.write(f"**{row['descricao']}** | R$ {row['valor']:,.2f} ({row['status']})")
-            if c2.button("✏️", key=f"ed_{row['id']}"): st.session_state.edit_id = row['id']; st.rerun()
-            if c3.button("🗑️", key=f"del_{row['id']}"): supabase.table("lancamentos").delete().eq("id", row['id']).execute(); st.rerun()
+            with st.container():
+                col_info, col_edit, col_del = st.columns([5, 1, 1])
+                
+                # Definindo ícone de operação
+                op_icon = "🟢" if row['tipo'] == "Débito" else "🔴"
+                
+                with col_info:
+                    st.markdown(f"""
+                    **{row['descricao']}** <small>**Grupo:** {row['natureza']} | **Operação:** {op_icon} {row['tipo']} | **Status:** {row['status']}</small>  
+                    **Valor: R$ {row['valor']:,.2f}**
+                    """, unsafe_allow_html=True)
+                
+                with col_edit:
+                    if st.button("✏️", key=f"ed_{row['id']}", use_container_width=True):
+                        st.session_state.edit_id = row['id']
+                        st.rerun()
+                
+                with col_del:
+                    if st.button("🗑️", key=f"del_{row['id']}", use_container_width=True):
+                        try:
+                            supabase.table("lancamentos").delete().eq("id", row['id']).execute()
+                            st.rerun()
+                        except Exception as e: st.error("Erro ao deletar.")
+                
+                st.divider()
