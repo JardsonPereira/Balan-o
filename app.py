@@ -52,7 +52,6 @@ def carregar_dados():
         res = supabase.table("lancamentos").select("*").eq("user_id", user_id).execute()
         temp_df = pd.DataFrame(res.data)
         if not temp_df.empty:
-            # CORREÇÃO DO ERRO: Verifica se a coluna existe, se não, cria temporariamente para não quebrar o app
             if 'data_lancamento' not in temp_df.columns:
                 temp_df['data_lancamento'] = datetime.now().date()
             else:
@@ -110,11 +109,9 @@ with st.sidebar:
                         supabase.table("lancamentos").insert(payload).execute()
                     st.session_state.form_count += 1
                     st.rerun()
-                except Exception as e: 
-                    st.error(f"Erro ao salvar: {e}")
-                    st.info("💡 Dica: Verifique se a coluna 'data_lancamento' existe na tabela do Supabase.")
+                except Exception as e: st.error(f"Erro ao salvar: {e}")
 
-# --- CSS (Mantido) ---
+# --- CSS ---
 st.markdown("""
 <style>
     @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap');
@@ -224,33 +221,66 @@ else:
             st.markdown(f"<div class='dre-total dre-linha' style='background-color: {cor_lucro}; color: white;'><span>LUCRO LÍQUIDO</span> <span>R$ {lucro_liquido:,.2f}</span></div>", unsafe_allow_html=True)
 
     elif st.session_state.menu_opcao == "💸 Fluxo de Caixa":
-        st.subheader("🌊 Demonstração do Fluxo de Caixa (Por Período)")
+        st.subheader("🌊 Demonstração do Fluxo de Caixa (Progressivo)")
+        
         col_f1, col_f2 = st.columns(2)
         with col_f1: 
-            min_data = df['data_lancamento'].min() if 'data_lancamento' in df.columns else datetime.now().date()
-            data_ini = st.date_input("De:", value=min_data)
+            data_ini = st.date_input("De:", value=datetime.now().date().replace(day=1))
         with col_f2: 
             data_fim = st.date_input("Até:", value=datetime.now().date())
-        
-        # CORREÇÃO KEYERROR NO FILTRO: Só filtra se a coluna existir no df
-        if 'data_lancamento' in df.columns:
-            mask = (df['data_lancamento'] >= data_ini) & (df['data_lancamento'] <= data_fim)
-            df_periodo = df.loc[mask]
-        else:
-            df_periodo = df
 
-        df_realizado = df_periodo[df_periodo['status'].isin(['Pago', 'Entrada', 'Investimento'])].copy()
-        if df_realizado.empty: st.warning("Sem movimentações realizadas no período.")
-        else:
-            op_in = df_realizado[(df_realizado['natureza'] == 'Receita') & (df_realizado['tipo'] == 'Crédito')]['valor'].sum()
-            op_out = df_realizado[(df_realizado['natureza'] == 'Despesa') & (df_realizado['tipo'] == 'Débito')]['valor'].sum()
-            st.markdown(f"""<div class="conta-card" style="background: #1e293b; color: white;"><div class="conta-titulo" style="background: #0f172a;">Variação Total no Período</div><div class="dre-linha" style="padding:15px"><span>Saldo Realizado</span> <span>R$ {op_in-op_out:,.2f}</span></div></div>""", unsafe_allow_html=True)
-        st.divider()
-        st.subheader("📅 Registros do Período")
-        st.dataframe(df_periodo[['data_lancamento', 'descricao', 'natureza', 'valor', 'status']], use_container_width=True)
+        # 1. CÁLCULO DO SALDO INICIAL (Tudo antes da data_ini que afetou o caixa)
+        df_caixa_total = df[df['status'].isin(['Pago', 'Entrada', 'Investimento'])].copy()
+        
+        def calcular_liquido(temp_df):
+            # Receitas (+) | Despesas (-) | Aportes (+) | Saídas de Capital (-)
+            v_in = temp_df[(temp_df['tipo'] == 'Crédito') & (temp_df['natureza'].isin(['Receita', 'Patrimônio Líquido']))]['valor'].sum()
+            v_out = temp_df[(temp_df['tipo'] == 'Débito') & (temp_df['natureza'].isin(['Despesa', 'Patrimônio Líquido']))]['valor'].sum()
+            # Ajuste para Ativos (Compra de Ativo diminui caixa)
+            inv_out = temp_df[(temp_df['natureza'] == 'Ativo') & (temp_df['tipo'] == 'Débito') & (~temp_df['descricao'].str.contains('CAIXA|BANCO', case=False))]['valor'].sum()
+            inv_in = temp_df[(temp_df['natureza'] == 'Ativo') & (temp_df['tipo'] == 'Crédito') & (~temp_df['descricao'].str.contains('CAIXA|BANCO', case=False))]['valor'].sum()
+            return (v_in - v_out) + (inv_in - inv_out)
+
+        saldo_inicial = calcular_liquido(df_caixa_total[df_caixa_total['data_lancamento'] < data_ini])
+        
+        # 2. FILTRAR PERÍODO ATUAL
+        df_periodo = df_caixa_total[(df_caixa_total['data_lancamento'] >= data_ini) & (df_caixa_total['data_lancamento'] <= data_fim)]
+        variacao_periodo = calcular_liquido(df_periodo)
+        saldo_final = saldo_inicial + variacao_periodo
+
+        # EXIBIÇÃO VISUAL
+        c1, c2, c3 = st.columns(3)
+        c1.metric("Saldo Inicial (Anterior)", f"R$ {saldo_inicial:,.2f}")
+        c2.metric("Variação no Período", f"R$ {variacao_periodo:,.2f}", delta=variacao_periodo)
+        c3.metric("Saldo Final (Carregado)", f"R$ {saldo_final:,.2f}")
+
+        st.markdown("### 📊 Detalhamento das Atividades")
+        # Detalhando por tipo para conferência
+        op_in = df_periodo[(df_periodo['natureza'] == 'Receita') & (df_periodo['tipo'] == 'Crédito')]['valor'].sum()
+        op_out = df_periodo[(df_periodo['natureza'] == 'Despesa') & (df_periodo['tipo'] == 'Débito')]['valor'].sum()
+        
+        st.markdown(f"""
+        <div class="conta-card">
+            <div class="conta-titulo">Movimentações de Caixa Efetuadas</div>
+            <div class="dre-linha"><span>(+) Entradas de Receita</span> <span>R$ {op_in:,.2f}</span></div>
+            <div class="dre-linha"><span>(-) Saídas de Despesas</span> <span>(R$ {op_out:,.2f})</span></div>
+            <div class="dre-total">Fluxo Líquido do Período: R$ {variacao_periodo:,.2f}</div>
+        </div>""", unsafe_allow_html=True)
+        
+        st.write("### Lançamentos que afetaram o Caixa no Período")
+        st.dataframe(df_periodo[['data_lancamento', 'descricao', 'natureza', 'valor', 'tipo']], use_container_width=True)
 
     elif st.session_state.menu_opcao == "⚙️ Gestão":
         st.subheader("⚙️ Gestão de Lançamentos")
+        if st.button("⚠️ Resetar Todos os Lançamentos", use_container_width=True):
+            if st.session_state.confirm_reset:
+                supabase.table("lancamentos").delete().eq("user_id", user_id).execute()
+                st.session_state.confirm_reset = False
+                st.rerun()
+            else:
+                st.session_state.confirm_reset = True
+                st.warning("Clique novamente para confirmar.")
+        st.divider()
         for _, row in df.iterrows():
             with st.container():
                 c1, c2, c3 = st.columns([5, 1, 1])
