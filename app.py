@@ -47,28 +47,31 @@ if st.session_state.user is None:
 
 user_id = st.session_state.user.id
 
-def carregar_dados():
+# Adicionado cache para performance, mas com limpeza automática no insert
+@st.cache_data(ttl=600)
+def carregar_dados(u_id):
     try:
-        res = supabase.table("lancamentos").select("*").eq("user_id", user_id).execute()
+        res = supabase.table("lancamentos").select("*").eq("user_id", u_id).execute()
         temp_df = pd.DataFrame(res.data)
         if not temp_df.empty:
             if 'data_lancamento' not in temp_df.columns:
                 temp_df['data_lancamento'] = datetime.now().date()
             else:
                 temp_df['data_lancamento'] = pd.to_datetime(temp_df['data_lancamento']).dt.date
-            
             if 'status' not in temp_df.columns:
                 temp_df['status'] = 'Pago'
         return temp_df
     except Exception: return pd.DataFrame()
 
-df = carregar_dados()
+# Chamada da função com o ID do usuário
+df = carregar_dados(user_id)
 
 # --- FORMULÁRIO LATERAL ---
 with st.sidebar:
     st.write(f"👤 **{st.session_state.user.email}**")
     if st.button("Sair"):
         st.session_state.user = None
+        st.cache_data.clear() # Limpa ao sair
         st.rerun()
     st.divider()
     
@@ -107,6 +110,9 @@ with st.sidebar:
                         st.session_state.edit_id = None
                     else:
                         supabase.table("lancamentos").insert(payload).execute()
+                    
+                    # RESOLUÇÃO DO ERRO: Limpa o cache para forçar a leitura dos novos dados
+                    st.cache_data.clear()
                     st.session_state.form_count += 1
                     st.rerun()
                 except Exception as e: st.error(f"Erro ao salvar: {e}")
@@ -229,33 +235,26 @@ else:
         with col_f2: 
             data_fim = st.date_input("Até:", value=datetime.now().date())
 
-        # 1. CÁLCULO DO SALDO INICIAL (Tudo antes da data_ini que afetou o caixa)
         df_caixa_total = df[df['status'].isin(['Pago', 'Entrada', 'Investimento'])].copy()
         
         def calcular_liquido(temp_df):
-            # Receitas (+) | Despesas (-) | Aportes (+) | Saídas de Capital (-)
             v_in = temp_df[(temp_df['tipo'] == 'Crédito') & (temp_df['natureza'].isin(['Receita', 'Patrimônio Líquido']))]['valor'].sum()
             v_out = temp_df[(temp_df['tipo'] == 'Débito') & (temp_df['natureza'].isin(['Despesa', 'Patrimônio Líquido']))]['valor'].sum()
-            # Ajuste para Ativos (Compra de Ativo diminui caixa)
             inv_out = temp_df[(temp_df['natureza'] == 'Ativo') & (temp_df['tipo'] == 'Débito') & (~temp_df['descricao'].str.contains('CAIXA|BANCO', case=False))]['valor'].sum()
             inv_in = temp_df[(temp_df['natureza'] == 'Ativo') & (temp_df['tipo'] == 'Crédito') & (~temp_df['descricao'].str.contains('CAIXA|BANCO', case=False))]['valor'].sum()
             return (v_in - v_out) + (inv_in - inv_out)
 
         saldo_inicial = calcular_liquido(df_caixa_total[df_caixa_total['data_lancamento'] < data_ini])
-        
-        # 2. FILTRAR PERÍODO ATUAL
         df_periodo = df_caixa_total[(df_caixa_total['data_lancamento'] >= data_ini) & (df_caixa_total['data_lancamento'] <= data_fim)]
         variacao_periodo = calcular_liquido(df_periodo)
         saldo_final = saldo_inicial + variacao_periodo
 
-        # EXIBIÇÃO VISUAL
         c1, c2, c3 = st.columns(3)
         c1.metric("Saldo Inicial (Anterior)", f"R$ {saldo_inicial:,.2f}")
         c2.metric("Variação no Período", f"R$ {variacao_periodo:,.2f}", delta=variacao_periodo)
         c3.metric("Saldo Final (Carregado)", f"R$ {saldo_final:,.2f}")
 
         st.markdown("### 📊 Detalhamento das Atividades")
-        # Detalhando por tipo para conferência
         op_in = df_periodo[(df_periodo['natureza'] == 'Receita') & (df_periodo['tipo'] == 'Crédito')]['valor'].sum()
         op_out = df_periodo[(df_periodo['natureza'] == 'Despesa') & (df_periodo['tipo'] == 'Débito')]['valor'].sum()
         
@@ -275,6 +274,7 @@ else:
         if st.button("⚠️ Resetar Todos os Lançamentos", use_container_width=True):
             if st.session_state.confirm_reset:
                 supabase.table("lancamentos").delete().eq("user_id", user_id).execute()
+                st.cache_data.clear()
                 st.session_state.confirm_reset = False
                 st.rerun()
             else:
@@ -286,5 +286,8 @@ else:
                 c1, c2, c3 = st.columns([5, 1, 1])
                 c1.markdown(f"**[{row.get('data_lancamento', 'Sem Data')}] {row['descricao']}** - R$ {row['valor']:,.2f} ({row['status']})")
                 if c2.button("✏️", key=f"ed_{row['id']}"): st.session_state.edit_id = row['id']; st.rerun()
-                if c3.button("🗑️", key=f"del_{row['id']}"): supabase.table("lancamentos").delete().eq("id", row['id']).execute(); st.rerun()
+                if c3.button("🗑️", key=f"del_{row['id']}"): 
+                    supabase.table("lancamentos").delete().eq("id", row['id']).execute()
+                    st.cache_data.clear()
+                    st.rerun()
                 st.divider()
