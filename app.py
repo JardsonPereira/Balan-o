@@ -139,6 +139,8 @@ if not df.empty:
     pc_cre = df[(df['natureza'] == 'Passivo') & (df['tipo'] == 'Crédito')]['valor'].sum()
     pc_deb = df[(df['natureza'] == 'Passivo') & (df['tipo'] == 'Débito')]['valor'].sum()
     pc = pc_cre - pc_deb
+    
+    # Saldo Real (Apenas status Pago no Ativo)
     entradas_caixa = df[(df['status'] == 'Pago') & (df['tipo'] == 'Débito') & (df['natureza'] == 'Ativo')]['valor'].sum()
     saidas_caixa = df[(df['status'] == 'Pago') & (df['tipo'] == 'Crédito') & (df['natureza'] == 'Ativo')]['valor'].sum()
     saldo_caixa = entradas_caixa - saidas_caixa
@@ -146,8 +148,8 @@ if not df.empty:
     m1, m2, m3, m4 = st.columns(4)
     m1.metric("Saldo em Caixa (Real)", f"R$ {saldo_caixa:,.2f}")
     m2.metric("Liquidez Corrente", f"{ac/pc:.2f}" if pc != 0 else "0.00")
-    m3.metric("Ativo Circulante", f"R$ {ac:,.2f}")
-    m4.metric("Passivo Circulante", f"R$ {pc:,.2f}")
+    m3.metric("Ativo Total", f"R$ {ac:,.2f}")
+    m4.metric("Passivo Total", f"R$ {pc:,.2f}")
 
 # --- NAVEGAÇÃO ---
 st.divider()
@@ -201,14 +203,11 @@ else:
         c2.metric("Total Credores", f"R$ {t_cre:,.2f}")
 
     elif st.session_state.menu_opcao == "📈 DRE":
-        st.subheader("📈 Demonstração do Resultado do Exercício (DRE)")
-        
-        # Agrupamento de valores
+        st.subheader("📈 Demonstração do Resultado do Exercício")
         receitas_df = df[df['natureza'] == 'Receita']
         despesas_df = df[df['natureza'] == 'Despesa']
         encargos_df = df[df['natureza'] == 'Encargos Financeiros']
         
-        # Funções para somar saldo (Receita é saldo Credor, Despesa é saldo Devedor)
         total_receitas = receitas_df[receitas_df['tipo'] == 'Crédito']['valor'].sum() - receitas_df[receitas_df['tipo'] == 'Débito']['valor'].sum()
         total_despesas = despesas_df[despesas_df['tipo'] == 'Débito']['valor'].sum() - despesas_df[despesas_df['tipo'] == 'Crédito']['valor'].sum()
         total_encargos = encargos_df[encargos_df['tipo'] == 'Débito']['valor'].sum() - encargos_df[encargos_df['tipo'] == 'Crédito']['valor'].sum()
@@ -216,7 +215,7 @@ else:
         ebitda = total_receitas - total_despesas
         lucro_liquido = ebitda - total_encargos
 
-        with st.expander("Ver Detalhes das Contas", expanded=True):
+        with st.expander("Ver Detalhes da DRE", expanded=True):
             st.markdown("### Receitas Operacionais")
             for conta in receitas_df['descricao'].unique():
                 val = receitas_df[receitas_df['descricao'] == conta][receitas_df['tipo'] == 'Crédito']['valor'].sum() - receitas_df[receitas_df['descricao'] == conta][receitas_df['tipo'] == 'Débito']['valor'].sum()
@@ -238,13 +237,73 @@ else:
             st.markdown(f"<div class='dre-total dre-linha' style='background-color: {cor_lucro}; color: white;'><span>LUCRO LÍQUIDO DO EXERCÍCIO</span> <span>R$ {lucro_liquido:,.2f}</span></div>", unsafe_allow_html=True)
 
     elif st.session_state.menu_opcao == "💸 Fluxo de Caixa":
-        st.subheader("Fluxo de Caixa (Apenas Pagos)")
-        df_pago = df[df['status'] == 'Pago'].copy()
-        st.dataframe(df_pago[['descricao', 'natureza', 'valor', 'justificativa']], use_container_width=True)
+        st.subheader("🌊 Demonstração do Fluxo de Caixa (Realizado)")
+
+        # 1. Filtro de Realizado (Apenas o que foi pago/recebido no banco)
+        df_realizado = df[df['status'] == 'Pago'].copy()
+        
+        if df_realizado.empty:
+            st.warning("Sem lançamentos confirmados como 'Pago' para gerar o fluxo.")
+        else:
+            # --- LOGICA DE CLASSIFICAÇÃO DFC ---
+            # Financiamento: PL e Empréstimos (Passivo)
+            fin_in = df_realizado[(df_realizado['natureza'] == 'Patrimônio Líquido') & (df_realizado['tipo'] == 'Crédito')]['valor'].sum()
+            fin_out = df_realizado[(df_realizado['natureza'] == 'Patrimônio Líquido') & (df_realizado['tipo'] == 'Débito')]['valor'].sum()
+            
+            # Operacional: Receitas e Despesas
+            op_in = df_realizado[(df_realizado['natureza'] == 'Receita') & (df_realizado['tipo'] == 'Crédito')]['valor'].sum()
+            op_out = df_realizado[(df_realizado['natureza'] == 'Despesa') & (df_realizado['tipo'] == 'Débito')]['valor'].sum()
+
+            # Investimento: Ativos Imobilizados (excluindo conta de caixa/banco)
+            inv_out = df_realizado[(df_realizado['natureza'] == 'Ativo') & (df_realizado['tipo'] == 'Débito') & (~df_realizado['descricao'].str.contains('CAIXA|BANCO', case=False))]['valor'].sum()
+            inv_in = df_realizado[(df_realizado['natureza'] == 'Ativo') & (df_realizado['tipo'] == 'Crédito') & (~df_realizado['descricao'].str.contains('CAIXA|BANCO', case=False))]['valor'].sum()
+
+            # --- EXIBIÇÃO ---
+            col1, col2 = st.columns(2)
+
+            with col1:
+                st.markdown(f"""
+                <div class="conta-card">
+                    <div class="conta-titulo">1. Atividades Operacionais</div>
+                    <div class="dre-linha"><span>(+) Recebimentos de Clientes</span> <span>R$ {op_in:,.2f}</span></div>
+                    <div class="dre-linha"><span>(-) Pagamento de Despesas</span> <span>(R$ {op_out:,.2f})</span></div>
+                    <div class="dre-total">Fluxo Operacional Líquido: R$ {op_in - op_out:,.2f}</div>
+                </div>
+                
+                <div class="conta-card">
+                    <div class="conta-titulo">2. Atividades de Investimento</div>
+                    <div class="dre-linha"><span>(+) Venda de Ativos</span> <span>R$ {inv_in:,.2f}</span></div>
+                    <div class="dre-linha"><span>(-) Compra de Ativos (Máquinas/Equip)</span> <span>(R$ {inv_out:,.2f})</span></div>
+                    <div class="dre-total">Fluxo de Investimento Líquido: R$ {inv_in - inv_out:,.2f}</div>
+                </div>
+                """, unsafe_allow_html=True)
+
+            with col2:
+                st.markdown(f"""
+                <div class="conta-card" style="border-left: 5px solid #059669;">
+                    <div class="conta-titulo">3. Atividades de Financiamento</div>
+                    <div class="dre-linha"><span>(+) Integralização de Capital Social</span> <span>R$ {fin_in:,.2f}</span></div>
+                    <div class="dre-linha"><span>(-) Distribuição de Lucros/Capital</span> <span>(R$ {fin_out:,.2f})</span></div>
+                    <div class="dre-total">Fluxo de Financiamento Líquido: R$ {fin_in - fin_out:,.2f}</div>
+                </div>
+
+                <div class="conta-card" style="background: #1e293b; color: white;">
+                    <div class="conta-titulo" style="background: #0f172a;">Resumo do Período</div>
+                    <div class="dre-linha"><span>Variação Total do Caixa</span> <span>R$ {(op_in-op_out)+(inv_in-inv_out)+(fin_in-fin_out):,.2f}</span></div>
+                </div>
+                """, unsafe_allow_html=True)
+
+        # --- SEÇÃO DE PENDENTES ---
+        st.divider()
+        st.subheader("📅 Previsão de Entradas Pendentes (Capital Subscrito)")
+        df_pendente = df[df['status'] == 'Pendente']
+        if not df_pendente.empty:
+            st.dataframe(df_pendente[['descricao', 'natureza', 'valor', 'justificativa']], use_container_width=True)
+        else:
+            st.info("Não há aportes de capital ou pagamentos pendentes.")
 
     elif st.session_state.menu_opcao == "⚙️ Gestão":
         st.subheader("⚙️ Gestão de Lançamentos")
-        
         if st.button("⚠️ Resetar Todos os Lançamentos", use_container_width=True):
             if st.session_state.confirm_reset:
                 try:
@@ -257,16 +316,12 @@ else:
                 st.warning("Clique novamente para confirmar a exclusão de TODOS os dados.")
         
         st.divider()
-        
         for _, row in df.iterrows():
             with st.container():
                 col_info, col_edit, col_del = st.columns([5, 1, 1])
                 op_icon = "🟢" if row['tipo'] == "Débito" else "🔴"
                 with col_info:
-                    st.markdown(f"""
-                    **{row['descricao']}** <small>**Grupo:** {row['natureza']} | **Operação:** {op_icon} {row['tipo']} | **Status:** {row['status']}</small>  
-                    **Valor: R$ {row['valor']:,.2f}**
-                    """, unsafe_allow_html=True)
+                    st.markdown(f"**{row['descricao']}** <small>**Grupo:** {row['natureza']} | **Operação:** {op_icon} {row['tipo']} | **Status:** {row['status']}</small><br>**Valor: R$ {row['valor']:,.2f}**", unsafe_allow_html=True)
                 with col_edit:
                     if st.button("✏️", key=f"ed_{row['id']}", use_container_width=True):
                         st.session_state.edit_id = row['id']
@@ -276,5 +331,5 @@ else:
                         try:
                             supabase.table("lancamentos").delete().eq("id", row['id']).execute()
                             st.rerun()
-                        except Exception as e: st.error("Erro ao deletar.")
+                        except Exception: st.error("Erro ao deletar.")
                 st.divider()
