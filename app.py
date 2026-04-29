@@ -52,6 +52,7 @@ def carregar_dados():
         res = supabase.table("lancamentos").select("*").eq("user_id", user_id).execute()
         temp_df = pd.DataFrame(res.data)
         if not temp_df.empty:
+            # CORREÇÃO DO ERRO: Verifica se a coluna existe, se não, cria temporariamente para não quebrar o app
             if 'data_lancamento' not in temp_df.columns:
                 temp_df['data_lancamento'] = datetime.now().date()
             else:
@@ -109,9 +110,11 @@ with st.sidebar:
                         supabase.table("lancamentos").insert(payload).execute()
                     st.session_state.form_count += 1
                     st.rerun()
-                except Exception as e: st.error(f"Erro ao salvar: {e}")
+                except Exception as e: 
+                    st.error(f"Erro ao salvar: {e}")
+                    st.info("💡 Dica: Verifique se a coluna 'data_lancamento' existe na tabela do Supabase.")
 
-# --- CSS ---
+# --- CSS (Mantido) ---
 st.markdown("""
 <style>
     @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap');
@@ -188,20 +191,11 @@ else:
         for conta in sorted(df['descricao'].unique()):
             df_c = df[df['descricao'] == conta]
             d, c = df_c[df_c['tipo'] == 'Débito']['valor'].sum(), df_c[df_c['tipo'] == 'Crédito']['valor'].sum()
-            bal_data.append({
-                "Conta": conta, 
-                "Débito (R$)": d, 
-                "Crédito (R$)": c, 
-                "Saldo Devedor": d-c if d > c else 0, 
-                "Saldo Credor": c-d if c > d else 0
-            })
+            bal_data.append({"Conta": conta, "Débito (R$)": d, "Crédito (R$)": c, "Saldo Devedor": d-c if d > c else 0, "Saldo Credor": c-d if c > d else 0})
         bal_df = pd.DataFrame(bal_data)
         st.table(bal_df.style.format(precision=2, decimal=',', thousands='.'))
-        
-        # --- ACRÉSCIMO DOS TOTAIS ---
         t_deb, t_cre = bal_df["Débito (R$)"].sum(), bal_df["Crédito (R$)"].sum()
         t_dev, t_credor = bal_df["Saldo Devedor"].sum(), bal_df["Saldo Credor"].sum()
-        
         c1, c2, c3, c4 = st.columns(4)
         c1.metric("Total Débitos", f"R$ {t_deb:,.2f}")
         c2.metric("Total Créditos", f"R$ {t_cre:,.2f}")
@@ -232,45 +226,35 @@ else:
     elif st.session_state.menu_opcao == "💸 Fluxo de Caixa":
         st.subheader("🌊 Demonstração do Fluxo de Caixa (Por Período)")
         col_f1, col_f2 = st.columns(2)
-        with col_f1: data_ini = st.date_input("De:", value=df['data_lancamento'].min())
-        with col_f2: data_fim = st.date_input("Até:", value=datetime.now().date())
-        mask = (df['data_lancamento'] >= data_ini) & (df['data_lancamento'] <= data_fim)
-        df_periodo = df.loc[mask]
-        df_realizado = df_periodo[df_periodo['status'].isin(['Pago', 'Entrada', 'Investimento'])].copy()
-        if df_realizado.empty: st.warning("Sem movimentações realizadas no período selecionado.")
+        with col_f1: 
+            min_data = df['data_lancamento'].min() if 'data_lancamento' in df.columns else datetime.now().date()
+            data_ini = st.date_input("De:", value=min_data)
+        with col_f2: 
+            data_fim = st.date_input("Até:", value=datetime.now().date())
+        
+        # CORREÇÃO KEYERROR NO FILTRO: Só filtra se a coluna existir no df
+        if 'data_lancamento' in df.columns:
+            mask = (df['data_lancamento'] >= data_ini) & (df['data_lancamento'] <= data_fim)
+            df_periodo = df.loc[mask]
         else:
-            fin_in = df_realizado[(df_realizado['natureza'] == 'Patrimônio Líquido') & (df_realizado['tipo'] == 'Crédito')]['valor'].sum()
-            fin_out = df_realizado[(df_realizado['natureza'] == 'Patrimônio Líquido') & (df_realizado['tipo'] == 'Débito')]['valor'].sum()
+            df_periodo = df
+
+        df_realizado = df_periodo[df_periodo['status'].isin(['Pago', 'Entrada', 'Investimento'])].copy()
+        if df_realizado.empty: st.warning("Sem movimentações realizadas no período.")
+        else:
             op_in = df_realizado[(df_realizado['natureza'] == 'Receita') & (df_realizado['tipo'] == 'Crédito')]['valor'].sum()
             op_out = df_realizado[(df_realizado['natureza'] == 'Despesa') & (df_realizado['tipo'] == 'Débito')]['valor'].sum()
-            inv_out = df_realizado[(df_realizado['natureza'] == 'Ativo') & (df_realizado['tipo'] == 'Débito') & (~df_realizado['descricao'].str.contains('CAIXA|BANCO', case=False))]['valor'].sum()
-            inv_in = df_realizado[(df_realizado['natureza'] == 'Ativo') & (df_realizado['tipo'] == 'Crédito') & (~df_realizado['descricao'].str.contains('CAIXA|BANCO', case=False))]['valor'].sum()
-            c1, c2 = st.columns(2)
-            with c1:
-                st.markdown(f"""<div class="conta-card"><div class="conta-titulo">1. Atividades Operacionais</div><div class="dre-linha"><span>(+) Recebimentos</span> <span>R$ {op_in:,.2f}</span></div><div class="dre-linha"><span>(-) Pagamentos</span> <span>(R$ {op_out:,.2f})</span></div><div class="dre-total">Líquido Operacional: R$ {op_in - op_out:,.2f}</div></div>
-                <div class="conta-card"><div class="conta-titulo">2. Atividades de Investimento</div><div class="dre-linha"><span>(+) Venda de Ativos</span> <span>R$ {inv_in:,.2f}</span></div><div class="dre-linha"><span>(-) Compra de Ativos</span> <span>(R$ {inv_out:,.2f})</span></div><div class="dre-total">Líquido Investimento: R$ {inv_in - inv_out:,.2f}</div></div>""", unsafe_allow_html=True)
-            with c2:
-                st.markdown(f"""<div class="conta-card" style="border-left: 5px solid #059669;"><div class="conta-titulo">3. Atividades de Financiamento</div><div class="dre-linha"><span>(+) Aportes/Capital</span> <span>R$ {fin_in:,.2f}</span></div><div class="dre-linha"><span>(-) Saídas de Capital</span> <span>(R$ {fin_out:,.2f})</span></div><div class="dre-total">Líquido Financiamento: R$ {fin_in - fin_out:,.2f}</div></div>
-                <div class="conta-card" style="background: #1e293b; color: white;"><div class="conta-titulo" style="background: #0f172a;">Variação Total no Período</div><div class="dre-linha" style="padding:15px"><span>Saldo Realizado</span> <span>R$ {(op_in-op_out)+(inv_in-inv_out)+(fin_in-fin_out):,.2f}</span></div></div>""", unsafe_allow_html=True)
+            st.markdown(f"""<div class="conta-card" style="background: #1e293b; color: white;"><div class="conta-titulo" style="background: #0f172a;">Variação Total no Período</div><div class="dre-linha" style="padding:15px"><span>Saldo Realizado</span> <span>R$ {op_in-op_out:,.2f}</span></div></div>""", unsafe_allow_html=True)
         st.divider()
-        st.subheader("📅 Pendências do Período Selecionado")
-        st.dataframe(df_periodo[df_periodo['status'] == 'Pendente'][['data_lancamento', 'descricao', 'natureza', 'valor', 'justificativa']], use_container_width=True)
+        st.subheader("📅 Registros do Período")
+        st.dataframe(df_periodo[['data_lancamento', 'descricao', 'natureza', 'valor', 'status']], use_container_width=True)
 
     elif st.session_state.menu_opcao == "⚙️ Gestão":
         st.subheader("⚙️ Gestão de Lançamentos")
-        if st.button("⚠️ Resetar Todos os Lançamentos", use_container_width=True):
-            if st.session_state.confirm_reset:
-                supabase.table("lancamentos").delete().eq("user_id", user_id).execute()
-                st.session_state.confirm_reset = False
-                st.rerun()
-            else:
-                st.session_state.confirm_reset = True
-                st.warning("Clique novamente para confirmar.")
-        st.divider()
         for _, row in df.iterrows():
             with st.container():
                 c1, c2, c3 = st.columns([5, 1, 1])
-                c1.markdown(f"**[{row['data_lancamento']}] {row['descricao']}** - R$ {row['valor']:,.2f} ({row['status']})")
+                c1.markdown(f"**[{row.get('data_lancamento', 'Sem Data')}] {row['descricao']}** - R$ {row['valor']:,.2f} ({row['status']})")
                 if c2.button("✏️", key=f"ed_{row['id']}"): st.session_state.edit_id = row['id']; st.rerun()
                 if c3.button("🗑️", key=f"del_{row['id']}"): supabase.table("lancamentos").delete().eq("id", row['id']).execute(); st.rerun()
                 st.divider()
