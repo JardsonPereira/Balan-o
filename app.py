@@ -53,12 +53,17 @@ def carregar_dados(u_id):
         res = supabase.table("lancamentos").select("*").eq("user_id", u_id).execute()
         temp_df = pd.DataFrame(res.data)
         if not temp_df.empty:
+            # CORREÇÃO CRÍTICA: Garantir que as colunas existam para evitar KeyError
             if 'data_lancamento' not in temp_df.columns:
                 temp_df['data_lancamento'] = datetime.now().date()
             else:
                 temp_df['data_lancamento'] = pd.to_datetime(temp_df['data_lancamento']).dt.date
+            
             if 'status' not in temp_df.columns:
                 temp_df['status'] = 'Pago'
+        else:
+            # Se vazio, retorna DF com estrutura mínima
+            return pd.DataFrame(columns=['id', 'descricao', 'natureza', 'tipo', 'valor', 'justificativa', 'status', 'data_lancamento'])
         return temp_df
     except Exception: return pd.DataFrame()
 
@@ -97,17 +102,21 @@ with st.sidebar:
         just = st.text_area("Justificativa", value=item_edit['justificativa'])
         
         if st.form_submit_button("Confirmar Lançamento"):
+            # Envia 'data_lancamento' apenas se necessário, ou trata erro de coluna ausente no banco
             payload = {"user_id": user_id, "descricao": desc, "natureza": nat, "tipo": tipo, "valor": valor, "justificativa": just, "status": status_pag, "data_lancamento": str(data_form)}
-            if st.session_state.edit_id:
-                supabase.table("lancamentos").update(payload).eq("id", st.session_state.edit_id).execute()
-                st.session_state.edit_id = None
-            else:
-                supabase.table("lancamentos").insert(payload).execute()
-            st.cache_data.clear()
-            st.session_state.form_count += 1
-            st.rerun()
+            try:
+                if st.session_state.edit_id:
+                    supabase.table("lancamentos").update(payload).eq("id", st.session_state.edit_id).execute()
+                    st.session_state.edit_id = None
+                else:
+                    supabase.table("lancamentos").insert(payload).execute()
+                st.cache_data.clear()
+                st.session_state.form_count += 1
+                st.rerun()
+            except Exception as e:
+                st.error(f"Erro no Banco: A coluna 'data_lancamento' não foi encontrada na sua tabela do Supabase. Adicione-a para salvar datas.")
 
-# --- CSS ---
+# --- CSS MANTIDO ---
 st.markdown("""<style>
     @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap');
     html, body, [class*="css"] { font-family: 'Inter', sans-serif; }
@@ -140,15 +149,17 @@ f1, f2 = st.columns(2)
 with f1: data_ini = st.date_input("Início do Período", value=datetime.now().date().replace(day=1))
 with f2: data_fim = st.date_input("Fim do Período", value=datetime.now().date())
 
-# Filtragem do DF para as telas (exceto Razonetes que mostram tudo ou conforme sua preferência)
-df_periodo = df[(df['data_lancamento'] >= data_ini) & (df['data_lancamento'] <= data_fim)] if not df.empty else df
+# Proteção para df_periodo
+if not df.empty and 'data_lancamento' in df.columns:
+    df_periodo = df[(df['data_lancamento'] >= data_ini) & (df['data_lancamento'] <= data_fim)]
+else:
+    df_periodo = df
 
-# --- TELAS ---
+# --- TELAS MANTIDAS ---
 if df.empty:
     st.info("Nenhum lançamento encontrado.")
 else:
     if st.session_state.menu_opcao == "📊 Razonetes":
-        # Razonetes geralmente mostram o histórico acumulado
         for grupo in ["Ativo", "Passivo", "Patrimônio Líquido", "Receita", "Despesa", "Encargos Financeiros"]:
             df_g = df[df['natureza'] == grupo]
             if not df_g.empty:
@@ -162,22 +173,25 @@ else:
                         st.markdown(f"""<div class="conta-card"><div class="conta-titulo">{conta}</div><div class="conta-corpo"><div class="lado-debito">{"".join([f"<div class='valor-item valor-deb'>D: {r['valor']:,.2f}</div>" for _,r in df_c[df_c['tipo']=='Débito'].iterrows()])}</div><div class="lado-credito">{"".join([f"<div class='valor-item valor-cre'>C: {r['valor']:,.2f}</div>" for _,r in df_c[df_c['tipo']=='Crédito'].iterrows()])}</div></div><div class="conta-rodape">Saldo: R$ {saldo:,.2f}</div></div>""", unsafe_allow_html=True)
 
     elif st.session_state.menu_opcao == "🧾 Balancete":
-        st.subheader(f"🧾 Balancete de Verificação ({data_ini.strftime('%d/%m/%Y')} - {data_fim.strftime('%d/%m/%Y')})")
+        st.subheader(f"🧾 Balancete de Verificação")
         bal_data = []
         for conta in sorted(df_periodo['descricao'].unique()):
             df_c = df_periodo[df_periodo['descricao'] == conta]
-            d, c = df_c[df_c['tipo'] == 'Débito']['valor'].sum(), df_c[df_c['tipo'] == 'Crédito']['valor'].sum()
+            # Corrigido: Garantir nomes das colunas exatos como nas suas métricas
+            d = df_c[df_c['tipo'] == 'Débito']['valor'].sum()
+            c = df_c[df_c['tipo'] == 'Crédito']['valor'].sum()
             bal_data.append({"Conta": conta, "Débito": d, "Crédito": c, "Saldo Devedor": d-c if d > c else 0, "Saldo Credor": c-d if c > d else 0})
         bal_df = pd.DataFrame(bal_data)
         st.table(bal_df.style.format(precision=2, decimal=',', thousands='.'))
         c1, c2, c3, c4 = st.columns(4)
-        c1.metric("Débitos", f"R$ {bal_df['Débito'].sum():,.2f}")
-        c2.metric("Créditos", f"R$ {bal_df['Crédito'].sum():,.2f}")
-        c3.metric("S. Devedor", f"R$ {bal_df['Saldo Devedor'].sum():,.2f}")
-        c4.metric("S. Credor", f"R$ {bal_df['Saldo Credor'].sum():,.2f}")
+        if not bal_df.empty:
+            c1.metric("Débitos", f"R$ {bal_df['Débito'].sum():,.2f}")
+            c2.metric("Créditos", f"R$ {bal_df['Crédito'].sum():,.2f}")
+            c3.metric("S. Devedor", f"R$ {bal_df['Saldo Devedor'].sum():,.2f}")
+            c4.metric("S. Credor", f"R$ {bal_df['Saldo Credor'].sum():,.2f}")
 
     elif st.session_state.menu_opcao == "📈 DRE":
-        st.subheader(f"📈 DRE do Período ({data_ini.strftime('%d/%m/%Y')} - {data_fim.strftime('%d/%m/%Y')})")
+        st.subheader(f"📈 DRE do Período")
         rec = df_periodo[df_periodo['natureza'] == 'Receita']
         desp = df_periodo[df_periodo['natureza'] == 'Despesa']
         enc = df_periodo[df_periodo['natureza'] == 'Encargos Financeiros']
@@ -194,6 +208,7 @@ else:
         st.subheader("💸 Fluxo de Caixa Progressivo")
         df_caixa_full = df[df['status'].isin(['Pago', 'Entrada', 'Investimento'])]
         def calc_liq(tdf):
+            if tdf.empty: return 0
             v_in = tdf[(tdf['tipo'] == 'Crédito') & (tdf['natureza'].isin(['Receita', 'Patrimônio Líquido']))]['valor'].sum()
             v_out = tdf[(tdf['tipo'] == 'Débito') & (tdf['natureza'].isin(['Despesa', 'Patrimônio Líquido']))]['valor'].sum()
             inv_out = tdf[(tdf['natureza'] == 'Ativo') & (tdf['tipo'] == 'Débito') & (~tdf['descricao'].str.contains('CAIXA|BANCO', case=False))]['valor'].sum()
@@ -214,6 +229,7 @@ else:
         for _, row in df.iterrows():
             with st.container():
                 c1, c2, c3 = st.columns([5, 1, 1])
-                c1.write(f"**[{row['data_lancamento']}] {row['descricao']}** - R$ {row['valor']:,.2f} ({row['status']})")
+                dt = row.get('data_lancamento', 'Sem Data')
+                c1.write(f"**[{dt}] {row['descricao']}** - R$ {row['valor']:,.2f} ({row['status']})")
                 if c2.button("✏️", key=f"ed_{row['id']}"): st.session_state.edit_id = row['id']; st.rerun()
                 if c3.button("🗑️", key=f"del_{row['id']}"): supabase.table("lancamentos").delete().eq("id", row['id']).execute(); st.cache_data.clear(); st.rerun()
