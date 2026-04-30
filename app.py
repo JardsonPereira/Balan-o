@@ -151,10 +151,8 @@ else:
                     df_c = df_g[df_g['descricao'] == conta]
                     v_d, v_c = df_c[df_c['tipo'] == 'Débito']['valor'].sum(), df_c[df_c['tipo'] == 'Crédito']['valor'].sum()
                     saldo = (v_d - v_c) if grupo in ["Ativo", "Despesa"] else (v_c - v_d)
-                    
                     deb_html = "".join([f"<div class='valor-item valor-deb'>D: {r['valor']:,.2f}<span class='just-hint'>{r['justificativa']}</span></div>" for _,r in df_c[df_c['tipo']=='Débito'].iterrows()])
                     cre_html = "".join([f"<div class='valor-item valor-cre'>C: {r['valor']:,.2f}<span class='just-hint'>{r['justificativa']}</span></div>" for _,r in df_c[df_c['tipo']=='Crédito'].iterrows()])
-
                     with cols[i % 3]:
                         st.markdown(f"""<div class="conta-card"><div class="conta-titulo">{conta}</div><div class="conta-corpo"><div class="lado-debito">{deb_html}</div><div class="lado-credito">{cre_html}</div></div><div class="conta-rodape">Saldo: R$ {saldo:,.2f}</div></div>""", unsafe_allow_html=True)
 
@@ -178,62 +176,59 @@ else:
         rec = df_periodo[df_periodo['natureza'] == 'Receita']
         desp = df_periodo[df_periodo['natureza'] == 'Despesa']
         enc = df_periodo[df_periodo['natureza'] == 'Encargos Financeiros']
-        
         t_rec = rec[rec['tipo'] == 'Crédito']['valor'].sum() - rec[rec['tipo'] == 'Débito']['valor'].sum()
         t_desp = desp[desp['tipo'] == 'Débito']['valor'].sum() - desp[desp['tipo'] == 'Crédito']['valor'].sum()
         t_enc = enc[enc['tipo'] == 'Débito']['valor'].sum() - enc[enc['tipo'] == 'Crédito']['valor'].sum()
-        
         ebitda = t_rec - t_desp
         lucro_real = ebitda - t_enc
-        
-        with st.expander("📄 Ver Detalhamento da Demonstração de Resultado", expanded=True):
+        with st.expander("📄 Ver Detalhamento", expanded=True):
             st.markdown("### 🟢 Receitas Operacionais")
             for c in sorted(rec['descricao'].unique()):
                 v = rec[rec['descricao']==c][rec['tipo']=='Crédito']['valor'].sum() - rec[rec['descricao']==c][rec['tipo']=='Débito']['valor'].sum()
                 st.markdown(f"<div class='dre-linha'><span>{c}</span> <span>R$ {v:,.2f}</span></div>", unsafe_allow_html=True)
-            
             st.markdown("### 🔴 Despesas Operacionais")
             for c in sorted(desp['descricao'].unique()):
                 v = desp[desp['descricao']==c][desp['tipo']=='Débito']['valor'].sum() - desp[desp['descricao']==c][desp['tipo']=='Crédito']['valor'].sum()
                 st.markdown(f"<div class='dre-linha'><span>{c}</span> <span>(R$ {v:,.2f})</span></div>", unsafe_allow_html=True)
-            
-            st.markdown(f"<div class='dre-total dre-linha'><span>EBITDA (Resultado Operacional)</span> <span>R$ {ebitda:,.2f}</span></div>", unsafe_allow_html=True)
-            
-            st.markdown("### 🏦 Encargos Financeiros / Impostos")
+            st.markdown(f"<div class='dre-total dre-linha'><span>EBITDA</span> <span>R$ {ebitda:,.2f}</span></div>", unsafe_allow_html=True)
+            st.markdown("### 🏦 Encargos Financeiros")
             for c in sorted(enc['descricao'].unique()):
                 v = enc[enc['descricao']==c][enc['tipo']=='Débito']['valor'].sum() - enc[enc['descricao']==c][enc['tipo']=='Crédito']['valor'].sum()
                 st.markdown(f"<div class='dre-linha'><span>{c}</span> <span>(R$ {v:,.2f})</span></div>", unsafe_allow_html=True)
-            
             cor_lucro = "#059669" if lucro_real >= 0 else "#dc2626"
             st.markdown(f"<div class='dre-total dre-linha' style='background:{cor_lucro}; color:white;'><span>LUCRO REAL LÍQUIDO</span> <span>R$ {lucro_real:,.2f}</span></div>", unsafe_allow_html=True)
 
     elif st.session_state.menu_opcao == "💸 Fluxo de Caixa":
-        st.subheader("🌊 Demonstração do Fluxo de Caixa (Líquido Contábil)")
-        df_caixa_real = df[df['status'] != 'Pendente'].copy()
-        
-        def calc_fluxo(tdf):
+        st.subheader("🌊 Demonstração do Fluxo de Caixa (Corrigida)")
+        df_caixa_total = df[df['status'] != 'Pendente'].copy()
+        def calc_atividades(tdf):
             op_in = tdf[(tdf['natureza'] == 'Receita') & (tdf['tipo'] == 'Crédito')]['valor'].sum()
             op_out = tdf[(tdf['natureza'] == 'Despesa') & (tdf['tipo'] == 'Débito')]['valor'].sum()
-            estoque = tdf[(tdf['natureza'] == 'Ativo') & (tdf['descricao'].str.contains('ESTOQUE', case=False))]
-            e_baixa = estoque[estoque['tipo'] == 'Crédito']['valor'].sum()
-            e_compra = estoque[estoque['tipo'] == 'Débito']['valor'].sum()
+            estoque_out = tdf[(tdf['natureza'] == 'Ativo') & (tdf['tipo'] == 'Crédito') & (tdf['descricao'].str.contains('ESTOQUE', case=False))]['valor'].sum()
+            estoque_in = tdf[(tdf['natureza'] == 'Ativo') & (tdf['tipo'] == 'Débito') & (tdf['descricao'].str.contains('ESTOQUE', case=False))]['valor'].sum()
             fin_in = tdf[(tdf['natureza'] == 'Patrimônio Líquido') & (tdf['tipo'] == 'Crédito')]['valor'].sum()
             fin_out = tdf[(tdf['natureza'] == 'Passivo') & (tdf['tipo'] == 'Débito')]['valor'].sum()
-            imob = tdf[(tdf['natureza'] == 'Ativo') & (~tdf['descricao'].str.contains('CAIXA|BANCO|ESTOQUE', case=False))]
-            inv_in = imob[imob['tipo'] == 'Crédito']['valor'].sum()
-            inv_out = imob[imob['tipo'] == 'Débito']['valor'].sum()
-            return (op_in - op_out + e_baixa - e_compra), fin_in, fin_out, inv_in, inv_out
-
-        oi, fi, fo, ii, io = calc_fluxo(df_caixa_real[df_caixa_real['data_lancamento'] < data_ini])
-        s_ini = oi + (fi - fo) + (ii - io)
-        df_per_c = df_caixa_real[(df_caixa_real['data_lancamento'] >= data_ini) & (df_caixa_real['data_lancamento'] <= data_fim)]
-        op_p, fi_p, fo_p, ii_p, io_p = calc_fluxo(df_per_c)
-        var_per = op_p + (fi_p - fo_p) + (ii_p - io_p)
-
+            inv_in = tdf[(tdf['natureza'] == 'Ativo') & (tdf['tipo'] == 'Crédito') & (~tdf['descricao'].str.contains('CAIXA|BANCO|ESTOQUE', case=False))]['valor'].sum()
+            total_compras_ativo = tdf[(tdf['natureza'] == 'Ativo') & (tdf['tipo'] == 'Débito') & (~tdf['descricao'].str.contains('CAIXA|BANCO|ESTOQUE', case=False))]['valor'].sum()
+            divida_pendente = df[(df['natureza'] == 'Passivo') & (df['status'] == 'Pendente') & (df['tipo'] == 'Crédito')]['valor'].sum()
+            inv_out = max(0, total_compras_ativo - divida_pendente)
+            return (op_in + estoque_out), (op_out + estoque_in), fin_in, fin_out, inv_in, inv_out
+        oi, oo, fi, fo, ii, io = calc_atividades(df_caixa_total[df_caixa_total['data_lancamento'] < data_ini])
+        s_ini = (oi - oo) + (fi - fo) + (ii - io)
+        df_per = df_caixa_total[(df_caixa_total['data_lancamento'] >= data_ini) & (df_caixa_total['data_lancamento'] <= data_fim)]
+        op_in, op_out, fin_in, fin_out, inv_in, inv_out = calc_atividades(df_per)
+        var_per = (op_in - op_out) + (fin_in - fin_out) + (inv_in - inv_out)
         c1, c2, c3 = st.columns(3)
         c1.metric("Saldo Inicial", f"R$ {s_ini:,.2f}")
         c2.metric("Variação Líquida", f"R$ {var_per:,.2f}", delta=f"{var_per:,.2f}")
-        c3.metric("Saldo Disponível (Caixa/Banco)", f"R$ {s_ini + var_per:,.2f}")
+        c3.metric("Saldo Final Conciliado", f"R$ {s_ini + var_per:,.2f}")
+        col1, col2 = st.columns(2)
+        with col1:
+            st.markdown(f"""<div class="conta-card"><div class="conta-titulo">1. Atividades Operacionais</div><div class="dre-linha"><span>(+) Recebimentos</span> <span>R$ {op_in:,.2f}</span></div><div class="dre-linha"><span>(-) Pagamentos/Estoque</span> <span>(R$ {op_out:,.2f})</span></div><div class="dre-total">Líquido Operacional: R$ {op_in - op_out:,.2f}</div></div>
+            <div class="conta-card"><div class="conta-titulo">2. Atividades de Investimento</div><div class="dre-linha"><span>(+) Venda de Ativos</span> <span>R$ {inv_in:,.2f}</span></div><div class="dre-linha"><span>(-) Compra de Ativos (Saída Real)</span> <span>(R$ {inv_out:,.2f})</span></div><div class="dre-total">Líquido Investimento: R$ {inv_in - inv_out:,.2f}</div></div>""", unsafe_allow_html=True)
+        with col2:
+            st.markdown(f"""<div class="conta-card" style="border-left: 5px solid #059669;"><div class="conta-titulo">3. Atividades de Financiamento</div><div class="dre-linha"><span>(+) Aportes/Capital</span> <span>R$ {fin_in:,.2f}</span></div><div class="dre-linha"><span>(-) Amortização Dívidas</span> <span>(R$ {fin_out:,.2f})</span></div><div class="dre-total">Líquido Financiamento: R$ {fin_in - fin_out:,.2f}</div></div>
+            <div class="conta-card" style="background: #1e293b; color: white;"><div class="conta-titulo" style="background: #0f172a;">Resumo do Período</div><div class="dre-linha" style="padding:10px"><span>Saldo Final Carregado</span> <span>R$ {s_ini + var_per:,.2f}</span></div></div>""", unsafe_allow_html=True)
 
     elif st.session_state.menu_opcao == "⚙️ Gestão":
         st.subheader("⚙️ Gestão de Lançamentos")
