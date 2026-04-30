@@ -205,31 +205,31 @@ else:
         df_caixa_total = df[df['status'].isin(['Pago', 'Investimento', 'Entrada', 'Realizado'])].copy()
         
         def calc_fluxo_avancado(tdf):
-            # 1. OPERACIONAL (Causa: Receitas e Despesas)
+            # 1. OPERACIONAL (Receitas e Despesas)
             op_in = tdf[(tdf['natureza'] == 'Receita') & (tdf['tipo'] == 'Crédito')]['valor'].sum()
             op_out = tdf[(tdf['natureza'] == 'Despesa') & (tdf['tipo'] == 'Débito')]['valor'].sum()
             
-            # 2. FINANCIAMENTO (Causa: PL e Passivo)
+            # 2. FINANCIAMENTO (PL e Passivo)
             fin_in = tdf[(tdf['natureza'] == 'Patrimônio Líquido') & (tdf['tipo'] == 'Crédito')]['valor'].sum()
             fin_out = tdf[(tdf['natureza'] == 'Passivo') & (tdf['tipo'] == 'Débito')]['valor'].sum()
             
-            # 3. ATIVOS (Visualização apenas)
-            # Conforme sua instrução: Entradas no Ativo (Débito) não influenciam o saldo do caixa.
-            # Portanto, variacao_ativo para saldo será zero.
+            # 3. ATIVOS (Lógica: Apenas Créditos influenciam o saldo positivamente)
             contas_ativo = tdf[tdf['natureza'] == 'Ativo']
-            ativos_deb = contas_ativo[contas_ativo['tipo'] == 'Débito']['valor'].sum()
+            # Entradas de disponibilidade via baixa de ativos (Crédito no Ativo)
             ativos_cre = contas_ativo[contas_ativo['tipo'] == 'Crédito']['valor'].sum()
+            # Informativo: Débitos no Ativo (não influenciam o saldo nesta lógica)
+            ativos_deb = contas_ativo[contas_ativo['tipo'] == 'Débito']['valor'].sum()
             
-            return op_in, op_out, fin_in, fin_out, ativos_deb, ativos_cre
+            return op_in, op_out, fin_in, fin_out, ativos_cre, ativos_deb
 
-        # Cálculos de Período
-        oi0, oo0, fi0, fo0, ad0, ac0 = calc_fluxo_avancado(df_caixa_total[df_caixa_total['data_lancamento'] < data_ini])
-        s_ini = (oi0 - oo0) + (fi0 - fo0) # Saldo ignorando Ativo
+        # Cálculo do Período
+        oi0, oo0, fi0, fo0, ac0, ad0 = calc_fluxo_avancado(df_caixa_total[df_caixa_total['data_lancamento'] < data_ini])
+        s_ini = (oi0 + ac0 + fi0) - (oo0 + fo0)
         
         df_per = df_caixa_total[(df_caixa_total['data_lancamento'] >= data_ini) & (df_caixa_total['data_lancamento'] <= data_fim)]
-        op_in, op_out, fin_in, fin_out, ativos_deb, ativos_cre = calc_fluxo_avancado(df_per)
+        op_in, op_out, fin_in, fin_out, ativos_cre, ativos_deb = calc_fluxo_avancado(df_per)
         
-        var_per = (op_in - op_out) + (fin_in - fin_out) # Variação ignorando Ativo
+        var_per = (op_in + ativos_cre + fin_in) - (op_out + fin_out)
 
         c1, c2, c3 = st.columns(3)
         c1.metric("Saldo Inicial", f"R$ {s_ini:,.2f}")
@@ -244,10 +244,10 @@ else:
             <div class="dre-linha"><span>(-) Despesas</span> <span>(R$ {op_out:,.2f})</span></div>
             <div class="dre-total">Líquido Operacional: R$ {op_in - op_out:,.2f}</div></div>
             
-            <div class="conta-card"><div class="conta-titulo">2. Movimentação de Ativos (Informativo)</div>
-            <div class="dre-linha"><span>Aumento de Ativo (Débito)</span> <span>R$ {ativos_deb:,.2f}</span></div>
-            <div class="dre-linha"><span>Baixa de Ativo (Crédito)</span> <span>R$ {ativos_cre:,.2f}</span></div>
-            <div class="conta-rodape" style="font-size:0.7rem; color:gray;">*Débitos no Ativo não alteram o saldo de caixa nesta lógica.</div></div>
+            <div class="conta-card"><div class="conta-titulo">2. Movimentação de Ativos</div>
+            <div class="dre-linha"><span>(+) Créditos no Ativo (Entradas)</span> <span>R$ {ativos_cre:,.2f}</span></div>
+            <div class="dre-linha" style="color:gray; font-style:italic;"><span>(Informativo) Débitos no Ativo</span> <span>R$ {ativos_deb:,.2f}</span></div>
+            <div class="conta-rodape" style="font-size:0.7rem; color:gray;">*Apenas os créditos no ativo influenciam o saldo final.</div></div>
             """, unsafe_allow_html=True)
         with col2:
             st.markdown(f"""
@@ -257,7 +257,7 @@ else:
             <div class="dre-total">Líquido Financiamento: R$ {fin_in - fin_out:,.2f}</div></div>
             
             <div class="conta-card" style="background: #1e293b; color: white;"><div class="conta-titulo" style="background: #0f172a;">Resumo Disponibilidade</div>
-            <div class="dre-linha" style="padding:10px"><span>Saldo em Caixa/Bancos</span> <span>R$ {s_ini + var_per:,.2f}</span></div></div>
+            <div class="dre-linha" style="padding:10px"><span>Saldo Final</span> <span>R$ {s_ini + var_per:,.2f}</span></div></div>
             """, unsafe_allow_html=True)
 
         st.divider()
