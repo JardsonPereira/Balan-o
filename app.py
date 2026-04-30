@@ -89,7 +89,6 @@ with st.sidebar:
         tipo = st.radio("Operação", ["Débito", "Crédito"], index=0 if item_edit['tipo'] == "Débito" else 1, horizontal=True)
         valor = st.number_input("Valor", min_value=0.0, value=float(item_edit['valor']))
         
-        # --- OPÇÃO ADICIONADA: Transferência Interna ---
         opcoes_status = ["Pago", "Entrada", "Pendente", "Investimento", "Transferência Interna (Não afeta Caixa)"]
         idx_status = opcoes_status.index(item_edit.get('status', 'Pago')) if item_edit.get('status') in opcoes_status else 0
         status_pag = st.selectbox("Status Financeiro", opcoes_status, index=idx_status)
@@ -214,8 +213,10 @@ else:
         saldo_final_real = get_saldo_giro(df)
         saldo_inicial_real = get_saldo_giro(df[df['data_lancamento'] < data_ini])
         
-        # Filtra registros que AFETAM o caixa (Exclui a nova opção de transferência)
-        df_fluxo = df[df['status'] != "Transferência Interna (Não afeta Caixa)"]
+        # --- ATUALIZAÇÃO: APENAS STATUS DE LIQUIDEZ AFETAM O CAIXA ---
+        status_liquidos = ["Pago", "Entrada", "Investimento"]
+        df_fluxo = df[df['status'].isin(status_liquidos)]
+        
         df_per = df_fluxo[(df_fluxo['data_lancamento'] >= data_ini) & (df_fluxo['data_lancamento'] <= data_fim)]
         
         ent_op = df_per[(df_per['natureza'] == 'Receita') & (df_per['tipo'] == 'Crédito')]['valor'].sum()
@@ -224,7 +225,6 @@ else:
         sai_op = df_per[(df_per['natureza'] == 'Despesa') & (df_per['tipo'] == 'Débito')]['valor'].sum()
         sai_fin = df_per[(df_per['natureza'] == 'Passivo') & (df_per['tipo'] == 'Débito')]['valor'].sum()
         
-        # Créditos no ativo que AFETAM o caixa (Não são transferências)
         sai_ativo = df_per[(df_per['natureza'] == 'Ativo') & (df_per['tipo'] == 'Crédito') & (~df_per['descricao'].str.contains('CAIXA|BANCO', case=False))]['valor'].sum()
         
         var_periodo = (ent_op + ent_fin) - (sai_op + sai_fin + sai_ativo)
