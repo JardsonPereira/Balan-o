@@ -165,15 +165,19 @@ else:
         st.subheader("🌊 Fluxo de Caixa (Conciliação de Giro)")
         status_liquidos = ["Pago", "Entrada", "Investimento"]
         
+        # --- LÓGICA DE GIRO (Equação: Receita/PL influenciam saldo, Crédito no Ativo tira do saldo) ---
         def get_giro_na_data(target_df, data_lim):
             df_hist = target_df[(target_df['data_lancamento'] <= data_lim) & (target_df['status'].isin(status_liquidos))]
-            v_giro = df_hist[(df_hist['natureza'].isin(['Ativo', 'Patrimônio Líquido'])) & (df_hist['descricao'].str.contains('CAIXA|BANCO|CAPITAL', case=False))]
             saldo = 0.0
-            for _, r in v_giro.iterrows():
-                if r['natureza'] == 'Ativo':
-                    saldo += r['valor'] if r['tipo'] == 'Débito' else -r['valor']
-                else: 
-                    saldo += r['valor'] if r['tipo'] == 'Crédito' else -r['valor']
+            for _, r in df_hist.iterrows():
+                # ENTRADAS (Apenas Receita e PL influenciam o fluxo de entrada)
+                if r['natureza'] in ['Receita', 'Patrimônio Líquido'] and r['tipo'] == 'Crédito':
+                    saldo += r['valor']
+                # SAÍDAS (Qualquer crédito em Ativo - como Banco - ou débito em Despesa/Passivo tira do fluxo)
+                elif r['natureza'] == 'Ativo' and r['tipo'] == 'Crédito':
+                    saldo -= r['valor']
+                elif r['natureza'] in ['Despesa', 'Passivo', 'Encargos Financeiros'] and r['tipo'] == 'Débito':
+                    saldo -= r['valor']
             return saldo
 
         saldo_final_real = get_giro_na_data(df, data_fim)
@@ -183,6 +187,7 @@ else:
         df_per = df[(df['status'].isin(status_liquidos)) & (df['data_lancamento'] >= data_ini) & (df['data_lancamento'] <= data_fim)]
         ent_op = df_per[df_per['natureza'] == 'Receita'][df_per['tipo'] == 'Crédito']['valor'].sum()
         ent_pl = df_per[df_per['natureza'] == 'Patrimônio Líquido'][df_per['tipo'] == 'Crédito']['valor'].sum()
+        
         sai_op = df_per[df_per['natureza'] == 'Despesa'][df_per['tipo'] == 'Débito']['valor'].sum()
         sai_div = df_per[df_per['natureza'] == 'Passivo'][df_per['tipo'] == 'Débito']['valor'].sum()
         sai_atv = df_per[(df_per['natureza'] == 'Ativo') & (df_per['tipo'] == 'Crédito') & (~df_per['descricao'].str.contains('CAIXA|BANCO', case=False))]['valor'].sum()
@@ -204,22 +209,17 @@ else:
         if len(contas_dispo) > 0:
             cols = st.columns(len(contas_dispo))
             for idx, c_nome in enumerate(sorted(contas_dispo)):
-                df_c = df[(df['descricao'] == c_nome) & (df['status'].isin(status_liquidos)) & (df['data_lancamento'] <= data_fim)]
+                # Filtra apenas pelo saldo final da conta na data fim
+                df_c = df[(df['descricao'] == c_nome) & (df['data_lancamento'] <= data_fim)]
                 if not df_c.empty:
                     nat_conta = df_c['natureza'].iloc[0]
                     if nat_conta == 'Ativo':
-                        total_entradas = df_c[df_c['tipo'] == 'Débito']['valor'].sum()
-                        total_saidas = df_c[df_c['tipo'] == 'Crédito']['valor'].sum()
-                        saldo_atual = total_entradas - total_saidas
-                        label_in = "Total Débitos (Entradas)"
+                        saldo_atual = df_c[df_c['tipo'] == 'Débito']['valor'].sum() - df_c[df_c['tipo'] == 'Crédito']['valor'].sum()
                     else:
-                        total_entradas = df_c[df_c['tipo'] == 'Crédito']['valor'].sum()
-                        total_saidas = df_c[df_c['tipo'] == 'Débito']['valor'].sum()
-                        saldo_atual = total_entradas - total_saidas
-                        label_in = "Total Créditos (Aportes)"
+                        saldo_atual = df_c[df_c['tipo'] == 'Crédito']['valor'].sum() - df_c[df_c['tipo'] == 'Débito']['valor'].sum()
                     
                     with cols[idx % len(contas_dispo)]:
-                        st.markdown(f"""<div class="conta-card"><div class="conta-titulo">{c_nome}</div><div style="padding: 10px; font-size: 0.85rem;"><div class="dre-linha"><span>{label_in}:</span> <span class="valor-deb">R$ {total_entradas:,.2f}</span></div><div class="dre-linha"><span>Total Saídas:</span> <span class="valor-cre">R$ {total_saidas:,.2f}</span></div></div><div class="conta-rodape">Saldo: R$ {saldo_atual:,.2f}</div></div>""", unsafe_allow_html=True)
+                        st.markdown(f"""<div class="conta-card"><div class="conta-titulo">{c_nome}</div><div style="padding: 20px; text-align:center;"><h3 style="margin:0;">R$ {saldo_atual:,.2f}</h3></div><div class="conta-rodape">Saldo em {data_fim.strftime('%d/%m/%Y')}</div></div>""", unsafe_allow_html=True)
 
     elif st.session_state.menu_opcao == "📈 DRE":
         st.subheader("📈 DRE Detalhada")
