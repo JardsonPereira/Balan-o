@@ -186,19 +186,28 @@ else:
 
     elif st.session_state.menu_opcao == "💸 Fluxo de Caixa":
         st.subheader("🌊 Demonstração do Fluxo de Caixa (Corrigida)")
-        # REGRA: Pendente não afeta o fluxo
-        df_caixa_full = df[df['status'].isin(['Pago', 'Entrada', 'Investimento'])].copy()
+        
+        # REGRA CRÍTICA: Status "Pendente" não pode afetar o fluxo, independente da natureza.
+        df_caixa_full = df[df['status'] != 'Pendente'].copy()
         
         def calc_atividades(tdf):
+            # 1. Operacional (Só entra se não estiver pendente)
             op_in = tdf[(tdf['natureza'] == 'Receita') & (tdf['tipo'] == 'Crédito')]['valor'].sum()
             op_out = tdf[(tdf['natureza'] == 'Despesa') & (tdf['tipo'] == 'Débito')]['valor'].sum()
+            
+            # 2. Financiamento (Aportes de PL e Amortização de Dívidas PAGAS)
             fin_in = tdf[(tdf['natureza'] == 'Patrimônio Líquido') & (tdf['tipo'] == 'Crédito')]['valor'].sum()
+            # fin_out: No passivo, só sai do caixa se o débito foi marcado como Pago (não pendente)
             fin_out = tdf[(tdf['natureza'] == 'Passivo') & (tdf['tipo'] == 'Débito')]['valor'].sum()
+            
+            # 3. Investimento
             inv_in = tdf[(tdf['natureza'] == 'Ativo') & (tdf['tipo'] == 'Crédito') & (~tdf['descricao'].str.contains('CAIXA|BANCO', case=False))]['valor'].sum()
-            # Lógica Financiamento vs Investimento
+            
             total_compras_ativo = tdf[(tdf['natureza'] == 'Ativo') & (tdf['tipo'] == 'Débito') & (~tdf['descricao'].str.contains('CAIXA|BANCO', case=False))]['valor'].sum()
+            # valor_financiado: O valor da dívida assumida (C) não sai do caixa, portanto anula o efeito da compra (D)
             valor_financiado = tdf[(tdf['natureza'] == 'Passivo') & (tdf['tipo'] == 'Crédito')]['valor'].sum()
             inv_out = max(0, total_compras_ativo - valor_financiado)
+            
             return op_in, op_out, fin_in, fin_out, inv_in, inv_out
 
         oi, oo, fi, fo, ii, io = calc_atividades(df_caixa_full[df_caixa_full['data_lancamento'] < data_ini])
