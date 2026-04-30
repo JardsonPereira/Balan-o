@@ -201,6 +201,7 @@ else:
     elif st.session_state.menu_opcao == "💸 Fluxo de Caixa":
         st.subheader("🌊 Demonstração do Fluxo de Caixa (Corrigida)")
         df_caixa_total = df[df['status'] != 'Pendente'].copy()
+        
         def calc_atividades(tdf):
             op_in = tdf[(tdf['natureza'] == 'Receita') & (tdf['tipo'] == 'Crédito')]['valor'].sum()
             op_out = tdf[(tdf['natureza'] == 'Despesa') & (tdf['tipo'] == 'Débito')]['valor'].sum()
@@ -213,15 +214,18 @@ else:
             divida_pendente = df[(df['natureza'] == 'Passivo') & (df['status'] == 'Pendente') & (df['tipo'] == 'Crédito')]['valor'].sum()
             inv_out = max(0, total_compras_ativo - divida_pendente)
             return (op_in + estoque_out), (op_out + estoque_in), fin_in, fin_out, inv_in, inv_out
+
         oi, oo, fi, fo, ii, io = calc_atividades(df_caixa_total[df_caixa_total['data_lancamento'] < data_ini])
         s_ini = (oi - oo) + (fi - fo) + (ii - io)
         df_per = df_caixa_total[(df_caixa_total['data_lancamento'] >= data_ini) & (df_caixa_total['data_lancamento'] <= data_fim)]
         op_in, op_out, fin_in, fin_out, inv_in, inv_out = calc_atividades(df_per)
         var_per = (op_in - op_out) + (fin_in - fin_out) + (inv_in - inv_out)
+
         c1, c2, c3 = st.columns(3)
         c1.metric("Saldo Inicial", f"R$ {s_ini:,.2f}")
         c2.metric("Variação Líquida", f"R$ {var_per:,.2f}", delta=f"{var_per:,.2f}")
         c3.metric("Saldo Final Conciliado", f"R$ {s_ini + var_per:,.2f}")
+        
         col1, col2 = st.columns(2)
         with col1:
             st.markdown(f"""<div class="conta-card"><div class="conta-titulo">1. Atividades Operacionais</div><div class="dre-linha"><span>(+) Recebimentos</span> <span>R$ {op_in:,.2f}</span></div><div class="dre-linha"><span>(-) Pagamentos/Estoque</span> <span>(R$ {op_out:,.2f})</span></div><div class="dre-total">Líquido Operacional: R$ {op_in - op_out:,.2f}</div></div>
@@ -229,6 +233,28 @@ else:
         with col2:
             st.markdown(f"""<div class="conta-card" style="border-left: 5px solid #059669;"><div class="conta-titulo">3. Atividades de Financiamento</div><div class="dre-linha"><span>(+) Aportes/Capital</span> <span>R$ {fin_in:,.2f}</span></div><div class="dre-linha"><span>(-) Amortização Dívidas</span> <span>(R$ {fin_out:,.2f})</span></div><div class="dre-total">Líquido Financiamento: R$ {fin_in - fin_out:,.2f}</div></div>
             <div class="conta-card" style="background: #1e293b; color: white;"><div class="conta-titulo" style="background: #0f172a;">Resumo do Período</div><div class="dre-linha" style="padding:10px"><span>Saldo Final Carregado</span> <span>R$ {s_ini + var_per:,.2f}</span></div></div>""", unsafe_allow_html=True)
+
+        st.divider()
+        st.subheader("📑 Detalhamento das Movimentações de Caixa")
+        tab1, tab2, tab3 = st.tabs(["🛒 Operacional", "🏗️ Investimento", "💰 Financiamento"])
+        
+        with tab1:
+            df_op = df_per[(df_per['natureza'].isin(['Receita', 'Despesa'])) | (df_per['descricao'].str.contains('ESTOQUE', case=False))]
+            if not df_op.empty:
+                st.dataframe(df_op[['data_lancamento', 'descricao', 'natureza', 'tipo', 'valor', 'justificativa']], use_container_width=True)
+            else: st.info("Sem movimentações operacionais no período.")
+
+        with tab2:
+            df_inv = df_per[(df_per['natureza'] == 'Ativo') & (~df_per['descricao'].str.contains('CAIXA|BANCO|ESTOQUE', case=False))]
+            if not df_inv.empty:
+                st.dataframe(df_inv[['data_lancamento', 'descricao', 'natureza', 'tipo', 'valor', 'justificativa']], use_container_width=True)
+            else: st.info("Sem movimentações de investimento no período.")
+
+        with tab3:
+            df_fin = df_per[(df_per['natureza'] == 'Patrimônio Líquido') | ((df_per['natureza'] == 'Passivo') & (df_per['tipo'] == 'Débito'))]
+            if not df_fin.empty:
+                st.dataframe(df_fin[['data_lancamento', 'descricao', 'natureza', 'tipo', 'valor', 'justificativa']], use_container_width=True)
+            else: st.info("Sem movimentações de financiamento no período.")
 
     elif st.session_state.menu_opcao == "⚙️ Gestão":
         st.subheader("⚙️ Gestão de Lançamentos")
