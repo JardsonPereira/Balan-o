@@ -55,6 +55,8 @@ def carregar_dados(u_id):
             temp_df['data_lancamento'] = pd.to_datetime(temp_df['data_lancamento']).dt.date
             if 'status' not in temp_df.columns: temp_df['status'] = 'Pago'
             if 'justificativa' not in temp_df.columns: temp_df['justificativa'] = ''
+            if 'created_at' in temp_df.columns:
+                temp_df['created_at'] = pd.to_datetime(temp_df['created_at'])
         return temp_df
     except Exception: return pd.DataFrame()
 
@@ -169,10 +171,8 @@ else:
             df_hist = target_df[(target_df['data_lancamento'] <= data_lim) & (target_df['status'].isin(status_liquidos))]
             saldo = 0.0
             for _, r in df_hist.iterrows():
-                # ENTRADAS
                 if r['natureza'] in ['Receita', 'Patrimônio Líquido'] and r['tipo'] == 'Crédito':
                     saldo += r['valor']
-                # SAÍDAS
                 elif r['tipo'] == 'Crédito' and r['natureza'] not in ['Receita', 'Patrimônio Líquido']:
                     saldo -= r['valor']
                 elif r['natureza'] in ['Despesa', 'Passivo', 'Encargos Financeiros'] and r['tipo'] == 'Débito':
@@ -247,9 +247,25 @@ else:
 
     elif st.session_state.menu_opcao == "⚙️ Gestão":
         st.subheader("⚙️ Gestão de Lançamentos")
-        for _, row in df.iterrows():
+        
+        # Opção de ordenação
+        ordem_sel = st.selectbox("Ordenar por data de criação:", ["Mais recentes primeiro", "Mais antigos primeiro"])
+        ascending_bool = True if ordem_sel == "Mais antigos primeiro" else False
+        
+        # Ordenar o DataFrame original (ou o filtrado por período, dependendo da sua preferência)
+        # Aqui ordenamos por created_at se existir, senão pela data de lançamento
+        col_sort = 'created_at' if 'created_at' in df.columns else 'data_lancamento'
+        df_sorted = df.sort_values(by=col_sort, ascending=ascending_bool)
+        
+        for _, row in df_sorted.iterrows():
             with st.container():
                 c1, c2, c3 = st.columns([5, 1, 1])
-                c1.markdown(f"**[{row['data_lancamento']}] {row['descricao']}** - R$ {row['valor']:,.2f}")
-                if c2.button("✏️", key=f"ed_{row['id']}"): st.session_state.edit_id = row['id']; st.rerun()
-                if c3.button("🗑️", key=f"del_{row['id']}"): supabase.table("lancamentos").delete().eq("id", row['id']).execute(); st.cache_data.clear(); st.rerun()
+                just_txt = f" | {row['justificativa']}" if row['justificativa'] else ""
+                c1.markdown(f"**[{row['data_lancamento']}] {row['descricao']}** - R$ {row['valor']:,.2f} ({row['tipo']}){just_txt}")
+                if c2.button("✏️", key=f"ed_{row['id']}"): 
+                    st.session_state.edit_id = row['id']
+                    st.rerun()
+                if c3.button("🗑️", key=f"del_{row['id']}"): 
+                    supabase.table("lancamentos").delete().eq("id", row['id']).execute()
+                    st.cache_data.clear()
+                    st.rerun()
