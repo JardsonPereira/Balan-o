@@ -202,40 +202,48 @@ else:
             st.markdown(f"<div class='dre-total dre-linha' style='background:{cor_lucro}; color:white;'><span>LUCRO REAL LÍQUIDO</span> <span>R$ {lucro_real:,.2f}</span></div>", unsafe_allow_html=True)
 
     elif st.session_state.menu_opcao == "💸 Fluxo de Caixa":
-        st.subheader("🌊 Demonstração do Fluxo de Caixa Operacional")
+        st.subheader("🌊 Demonstração do Fluxo de Caixa (Conciliação de Giro)")
         
         status_liquidos = ["Pago", "Entrada", "Investimento"]
-
-        # --- LÓGICA DO DASHBOARD (Apenas Receitas e Saídas Reais) ---
-        def get_saldo_operacional_na_data(target_df, data_lim):
+        
+        # --- LÓGICA DE GIRO (Equação: Inicial + Variação = Final) ---
+        def get_giro_na_data(target_df, data_lim):
             df_hist = target_df[(target_df['data_lancamento'] <= data_lim) & (target_df['status'].isin(status_liquidos))]
-            ent_op = df_hist[df_hist['natureza'] == 'Receita'][df_hist['tipo'] == 'Crédito']['valor'].sum()
-            sai_op = df_hist[df_hist['natureza'] == 'Despesa'][df_hist['tipo'] == 'Débito']['valor'].sum()
-            sai_fin = df_hist[df_hist['natureza'] == 'Passivo'][df_hist['tipo'] == 'Débito']['valor'].sum()
-            return ent_op - (sai_op + sai_fin)
+            # Monitora Ativo (Caixa/Banco) e PL (Capital Social)
+            v_giro = df_hist[(df_hist['natureza'].isin(['Ativo', 'Patrimônio Líquido'])) & (df_hist['descricao'].str.contains('CAIXA|BANCO|CAPITAL', case=False))]
+            saldo = 0.0
+            for _, r in v_giro.iterrows():
+                if r['natureza'] == 'Ativo':
+                    saldo += r['valor'] if r['tipo'] == 'Débito' else -r['valor']
+                else: # Patrimônio Líquido (Capital Social)
+                    saldo += r['valor'] if r['tipo'] == 'Crédito' else -r['valor']
+            return saldo
 
-        saldo_final_dash = get_saldo_operacional_na_data(df, data_fim)
+        saldo_final_calc = get_giro_na_data(df, data_fim)
         dia_anterior = data_ini - timedelta(days=1)
-        saldo_inicial_dash = get_saldo_operacional_na_data(df, dia_anterior)
-        var_periodo = saldo_final_dash - saldo_inicial_dash
+        saldo_inicial_calc = get_giro_na_data(df, dia_anterior)
+        var_periodo_calc = saldo_final_calc - saldo_inicial_calc
 
-        # Detalhamento do Período
+        # --- DETALHAMENTO DAS ENTRADAS/SAÍDAS DO PERÍODO ---
         df_per = df[(df['status'].isin(status_liquidos)) & (df['data_lancamento'] >= data_ini) & (df['data_lancamento'] <= data_fim)]
-        ent_periodo = df_per[df_per['natureza'] == 'Receita'][df_per['tipo'] == 'Crédito']['valor'].sum()
-        sai_periodo_despesa = df_per[df_per['natureza'] == 'Despesa'][df_per['tipo'] == 'Débito']['valor'].sum()
-        sai_periodo_divida = df_per[df_per['natureza'] == 'Passivo'][df_per['tipo'] == 'Débito']['valor'].sum()
-        total_saidas_periodo = sai_periodo_despesa + sai_periodo_divida
+        
+        ent_op = df_per[(df_per['natureza'] == 'Receita') & (df_per['tipo'] == 'Crédito')]['valor'].sum()
+        ent_fin = df_per[(df_per['natureza'] == 'Patrimônio Líquido') & (df_per['tipo'] == 'Crédito')]['valor'].sum()
+        
+        sai_op = df_per[(df_per['natureza'] == 'Despesa') & (df_per['tipo'] == 'Débito')]['valor'].sum()
+        sai_fin = df_per[(df_per['natureza'] == 'Passivo') & (df_per['tipo'] == 'Débito')]['valor'].sum()
+        sai_ativo = df_per[(df_per['natureza'] == 'Ativo') & (df_per['tipo'] == 'Crédito') & (~df_per['descricao'].str.contains('CAIXA|BANCO', case=False))]['valor'].sum()
 
         c1, c2, c3 = st.columns(3)
-        c1.metric("Saldo Inicial Operacional", f"R$ {saldo_inicial_dash:,.2f}")
-        c2.metric("Variação (Receita - Despesa)", f"R$ {var_periodo:,.2f}", delta=f"{var_periodo:,.2f}")
-        c3.metric("Saldo Final Operacional", f"R$ {saldo_final_dash:,.2f}")
+        c1.metric("Saldo Inicial (Giro)", f"R$ {saldo_inicial_calc:,.2f}")
+        c2.metric("Variação do Período", f"R$ {var_periodo_calc:,.2f}", delta=f"{var_periodo_calc:,.2f}")
+        c3.metric("Saldo Final (Capital de Giro)", f"R$ {saldo_final_calc:,.2f}")
         
         col1, col2 = st.columns(2)
         with col1:
-            st.markdown(f"""<div class="conta-card"><div class="conta-titulo">📥 Entradas Operacionais</div><div class="dre-linha"><span>(+) Receitas do Período</span> <span>R$ {ent_periodo:,.2f}</span></div><div class="dre-total">Total: R$ {ent_periodo:,.2f}</div></div>""", unsafe_allow_html=True)
+            st.markdown(f"""<div class="conta-card"><div class="conta-titulo">📥 Entradas Reais (Período)</div><div class="dre-linha"><span>(+) Receitas Operacionais</span> <span>R$ {ent_op:,.2f}</span></div><div class="dre-linha"><span>(+) Aportes de Capital Social (PL)</span> <span>R$ {ent_fin:,.2f}</span></div><div class="dre-total">Total Entradas: R$ {ent_op + ent_fin:,.2f}</div></div>""", unsafe_allow_html=True)
         with col2:
-            st.markdown(f"""<div class="conta-card" style="border-left: 5px solid #dc2626;"><div class="conta-titulo">out Saídas Reais</div><div class="dre-linha"><span>(-) Despesas Operacionais</span> <span>(R$ {sai_periodo_despesa:,.2f})</span></div><div class="dre-linha"><span>(-) Pagamento de Dívidas</span> <span>(R$ {sai_periodo_divida:,.2f})</span></div><div class="dre-total">Total Saídas: (R$ {total_saidas_periodo:,.2f})</div></div>""", unsafe_allow_html=True)
+            st.markdown(f"""<div class="conta-card" style="border-left: 5px solid #dc2626;"><div class="conta-titulo">out Saídas Reais (Período)</div><div class="dre-linha"><span>(-) Despesas Operacionais</span> <span>(R$ {sai_op:,.2f})</span></div><div class="dre-linha"><span>(-) Pagamento de Dívidas</span> <span>(R$ {sai_fin:,.2f})</span></div><div class="dre-linha"><span>(-) Baixas de Ativo Fixo</span> <span>(R$ {sai_ativo:,.2f})</span></div><div class="dre-total">Total Saídas: (R$ {sai_op + sai_fin + sai_ativo:,.2f})</div></div>""", unsafe_allow_html=True)
 
     elif st.session_state.menu_opcao == "⚙️ Gestão":
         st.subheader("⚙️ Gestão de Lançamentos")
