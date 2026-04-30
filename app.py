@@ -214,7 +214,7 @@ else:
             for _, r in v_giro.iterrows():
                 if r['natureza'] == 'Ativo':
                     saldo += r['valor'] if r['tipo'] == 'Débito' else -r['valor']
-                else: # Patrimônio Líquido (Capital Social)
+                else: 
                     saldo += r['valor'] if r['tipo'] == 'Crédito' else -r['valor']
             return saldo
 
@@ -223,7 +223,7 @@ else:
         saldo_inicial_calc = get_giro_na_data(df, dia_anterior)
         var_periodo_calc = saldo_final_calc - saldo_inicial_calc
 
-        # --- DETALHAMENTO DAS ENTRADAS/SAÍDAS DO PERÍODO ---
+        # --- DETALHAMENTO DO PERÍODO ---
         df_per = df[(df['status'].isin(status_liquidos)) & (df['data_lancamento'] >= data_ini) & (df['data_lancamento'] <= data_fim)]
         
         ent_op = df_per[(df_per['natureza'] == 'Receita') & (df_per['tipo'] == 'Crédito')]['valor'].sum()
@@ -231,7 +231,8 @@ else:
         
         sai_op = df_per[(df_per['natureza'] == 'Despesa') & (df_per['tipo'] == 'Débito')]['valor'].sum()
         sai_fin = df_per[(df_per['natureza'] == 'Passivo') & (df_per['tipo'] == 'Débito')]['valor'].sum()
-        # Aqui contabiliza o crédito no Ativo (ex: pagamento de móveis saindo do banco) como Saída Real
+        
+        # Créditos no Ativo (Pagamento de Móveis / Saída de Caixa para Ativo Imobilizado)
         sai_ativo = df_per[(df_per['natureza'] == 'Ativo') & (df_per['tipo'] == 'Crédito') & (~df_per['descricao'].str.contains('CAIXA|BANCO', case=False))]['valor'].sum()
 
         c1, c2, c3 = st.columns(3)
