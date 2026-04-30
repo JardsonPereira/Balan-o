@@ -69,6 +69,12 @@ with st.sidebar:
         st.rerun()
     st.divider()
     
+    # Botão para forçar a criação de um novo lançamento (limpa o edit_id)
+    if st.session_state.edit_id:
+        if st.button("⬅️ Cancelar Edição / Novo"):
+            st.session_state.edit_id = None
+            st.rerun()
+
     if st.session_state.edit_id and not df.empty:
         st.header("📝 Editar Lançamento")
         item_edit = df[df['id'] == st.session_state.edit_id].iloc[0]
@@ -76,74 +82,86 @@ with st.sidebar:
         st.header("➕ Novo Lançamento")
         item_edit = {"descricao": "", "natureza": "Ativo", "tipo": "Débito", "valor": 0.0, "justificativa": "", "status": "Pago", "data_lancamento": datetime.now().date()}
 
-    with st.form(key=f"contabil_form_{st.session_state.form_count}"):
+    with st.form(key=f"form_contabil_{st.session_state.form_count}"):
+        # 1. Seleção de Conta
         contas_existentes = sorted(df['descricao'].unique().tolist()) if not df.empty else []
-        opcoes_conta = ["+ Adicionar Nova Conta"] + contas_existentes
+        opcoes = ["+ Adicionar Nova Conta"] + contas_existentes
         
-        idx_ini = 0
+        idx_default = 0
         if st.session_state.edit_id and item_edit['descricao'] in contas_existentes:
-            idx_ini = opcoes_conta.index(item_edit['descricao'])
-            
-        conta_sel = st.selectbox("Conta", opcoes_conta, index=idx_ini)
+            idx_default = opcoes.index(item_edit['descricao'])
         
-        # Correção da lógica de nova conta para não "travar"
-        if conta_sel == "+ Adicionar Nova Conta":
-            desc = st.text_input("Nome da Nova Conta", value="").upper().strip()
+        conta_selecionada = st.selectbox("Selecione a Conta", opcoes, index=idx_default)
+        
+        # 2. Nome da Conta (se for nova)
+        if conta_selecionada == "+ Adicionar Nova Conta":
+            nome_final = st.text_input("Nome da Nova Conta", value="").upper().strip()
         else:
-            desc = conta_sel
-        
-        data_f = st.date_input("Data", value=item_edit.get('data_lancamento', datetime.now().date()))
-        nat_list = ["Ativo", "Passivo", "Patrimônio Líquido", "Receita", "Despesa", "Encargos Financeiros"]
-        nat = st.selectbox("Grupo", nat_list, index=nat_list.index(item_edit['natureza']))
+            nome_final = conta_selecionada
+
+        # 3. Campos restantes
+        dt_lanc = st.date_input("Data", value=item_edit['data_lancamento'])
+        nat_opcoes = ["Ativo", "Passivo", "Patrimônio Líquido", "Receita", "Despesa", "Encargos Financeiros"]
+        natureza = st.selectbox("Grupo", nat_opcoes, index=nat_opcoes.index(item_edit['natureza']))
         tipo = st.radio("Operação", ["Débito", "Crédito"], index=0 if item_edit['tipo'] == "Débito" else 1, horizontal=True)
         valor = st.number_input("Valor", min_value=0.0, value=float(item_edit['valor']))
         
-        status_pag = st.selectbox("Status Financeiro", ["Pago", "Entrada", "Pendente", "Investimento", "Transferência Interna"], index=0)
-        just = st.text_area("Justificativa", value=item_edit['justificativa'])
+        status_opcoes = ["Pago", "Entrada", "Pendente", "Investimento", "Transferência Interna"]
+        status_sel = st.selectbox("Status", status_opcoes, index=status_opcoes.index(item_edit['status']) if item_edit['status'] in status_opcoes else 0)
+        justificativa = st.text_area("Justificativa", value=item_edit['justificativa'])
+
+        submit = st.form_submit_button("Salvar Lançamento")
         
-        if st.form_submit_button("Confirmar Lançamento"):
-            if desc == "" or desc == "+ ADICIONAR NOVA CONTA":
-                st.error("Por favor, digite o nome da conta.")
+        if submit:
+            if not nome_final or nome_final == "+ ADICIONAR NOVA CONTA":
+                st.error("Informe um nome válido para a conta.")
             else:
-                payload = {"user_id": user_id, "descricao": desc, "natureza": nat, "tipo": tipo, "valor": valor, "justificativa": just, "status": status_pag, "data_lancamento": str(data_f)}
+                payload = {
+                    "user_id": user_id, 
+                    "descricao": nome_final, 
+                    "natureza": natureza, 
+                    "tipo": tipo, 
+                    "valor": valor, 
+                    "justificativa": justificativa, 
+                    "status": status_sel, 
+                    "data_lancamento": str(dt_lanc)
+                }
+                
                 if st.session_state.edit_id:
                     supabase.table("lancamentos").update(payload).eq("id", st.session_state.edit_id).execute()
                     st.session_state.edit_id = None
                 else:
                     supabase.table("lancamentos").insert(payload).execute()
+                
                 st.cache_data.clear()
-                st.session_state.form_count += 1
+                st.session_state.form_count += 1 # Muda a chave do formulário para resetar campos
                 st.rerun()
 
 # --- CSS ---
 st.markdown("""<style>
-    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap');
-    html, body, [class*="css"] { font-family: 'Inter', sans-serif; }
-    .stApp { background-color: #f8fafc; }
-    .conta-card { background: white; border-radius: 12px; box-shadow: 0 4px 12px rgba(0,0,0,0.05); margin-bottom: 20px; overflow: hidden; border: 1px solid #e2e8f0; }
-    .conta-titulo { background: #1e293b; color: white; padding: 10px; text-align: center; font-weight: 700; text-transform: uppercase; font-size: 0.85rem; border-bottom: 2px solid #334155; }
+    .conta-card { background: white; border-radius: 12px; box-shadow: 0 4px 12px rgba(0,0,0,0.05); margin-bottom: 20px; border: 1px solid #e2e8f0; }
+    .conta-titulo { background: #1e293b; color: white; padding: 10px; text-align: center; font-weight: 700; text-transform: uppercase; border-radius: 12px 12px 0 0; }
     .conta-corpo { display: flex; min-height: 80px; position: relative; }
     .conta-corpo::after { content: ""; position: absolute; left: 50%; top: 0; bottom: 0; width: 1.5px; background-color: #cbd5e1; }
-    .lado-debito, .lado-credito { flex: 1; padding: 10px; }
-    .valor-item { font-size: 0.8rem; margin-bottom: 4px; line-height: 1.2; }
+    .lado-debito, .lado-credito { flex: 1; padding: 10px; font-size: 0.8rem; }
     .valor-deb { color: #059669; font-weight: 600; }
     .valor-cre { color: #dc2626; font-weight: 600; text-align: right; }
-    .just-hint { font-size: 0.7rem; color: #64748b; font-style: italic; display: block; margin-top: 2px; }
-    .conta-rodape { padding: 8px; background: #f8fafc; border-top: 1.5px solid #1e293b; text-align: center; font-weight: 700; font-size: 0.85rem; }
+    .just-hint { font-size: 0.7rem; color: #64748b; font-style: italic; display: block; }
+    .conta-rodape { padding: 8px; background: #f8fafc; border-top: 1px solid #e2e8f0; text-align: center; font-weight: 700; border-radius: 0 0 12px 12px; }
 </style>""", unsafe_allow_html=True)
 
 st.title("📑 Sistema Contábil Digital")
 
 # --- NAVEGAÇÃO ---
 col_nav = st.columns(5)
-opcoes = ["📊 Razonetes", "🧾 Balancete", "📈 DRE", "💸 Fluxo de Caixa", "⚙️ Gestão"]
-for i, op in enumerate(opcoes):
+opcoes_menu = ["📊 Razonetes", "🧾 Balancete", "📈 DRE", "💸 Fluxo de Caixa", "⚙️ Gestão"]
+for i, op in enumerate(opcoes_menu):
     if col_nav[i].button(op, use_container_width=True): st.session_state.menu_opcao = op
 
 st.divider()
 f1, f2 = st.columns(2)
-with f1: data_ini = st.date_input("Início do Período", value=datetime.now().date().replace(day=1))
-with f2: data_fim = st.date_input("Fim do Período", value=datetime.now().date())
+with f1: data_ini = st.date_input("Início", value=datetime.now().date().replace(day=1))
+with f2: data_fim = st.date_input("Fim", value=datetime.now().date())
 
 df_periodo = df[(df['data_lancamento'] >= data_ini) & (df['data_lancamento'] <= data_fim)] if not df.empty else df
 
@@ -151,21 +169,31 @@ if df.empty:
     st.info("Nenhum lançamento encontrado.")
 else:
     if st.session_state.menu_opcao == "📊 Razonetes":
-        for grupo in ["Ativo", "Passivo", "Patrimônio Líquido", "Receita", "Despesa", "Encargos Financeiros"]:
+        for grupo in ["Ativo", "Passivo", "Patrimônio Líquido", "Receita", "Despesa"]:
             df_g = df[df['natureza'] == grupo]
             if not df_g.empty:
-                st.markdown(f"### {grupo}")
+                st.subheader(f"📂 {grupo}")
                 cols = st.columns(3)
                 for i, conta in enumerate(sorted(df_g['descricao'].unique())):
                     df_c = df_g[df_g['descricao'] == conta]
-                    v_d, v_c = df_c[df_c['tipo'] == 'Débito']['valor'].sum(), df_c[df_c['tipo'] == 'Crédito']['valor'].sum()
+                    v_d = df_c[df_c['tipo'] == 'Débito']['valor'].sum()
+                    v_c = df_c[df_c['tipo'] == 'Crédito']['valor'].sum()
                     saldo = (v_d - v_c) if grupo in ["Ativo", "Despesa"] else (v_c - v_d)
                     
-                    deb_html = "".join([f"<div class='valor-item valor-deb'>D: {r['valor']:,.2f}<span class='just-hint'>{r['justificativa']}</span></div>" for _,r in df_c[df_c['tipo']=='Débito'].iterrows()])
-                    cre_html = "".join([f"<div class='valor-item valor-cre'>C: {r['valor']:,.2f}<span class='just-hint'>{r['justificativa']}</span></div>" for _,r in df_c[df_c['tipo']=='Crédito'].iterrows()])
+                    deb_html = "".join([f"<div class='valor-deb'>D: {r['valor']:,.2f} <span class='just-hint'>{r['justificativa']}</span></div>" for _,r in df_c[df_c['tipo']=='Débito'].iterrows()])
+                    cre_html = "".join([f"<div class='valor-cre'>C: {r['valor']:,.2f} <span class='just-hint'>{r['justificativa']}</span></div>" for _,r in df_c[df_c['tipo']=='Crédito'].iterrows()])
                     
                     with cols[i % 3]:
-                        st.markdown(f"""<div class="conta-card"><div class="conta-titulo">{conta}</div><div class="conta-corpo"><div class="lado-debito">{deb_html}</div><div class="lado-credito">{cre_html}</div></div><div class="conta-rodape">Saldo: R$ {saldo:,.2f}</div></div>""", unsafe_allow_html=True)
+                        st.markdown(f"""
+                        <div class="conta-card">
+                            <div class="conta-titulo">{conta}</div>
+                            <div class="conta-corpo">
+                                <div class="lado-debito">{deb_html}</div>
+                                <div class="lado-credito">{cre_html}</div>
+                            </div>
+                            <div class="conta-rodape">Saldo: R$ {saldo:,.2f}</div>
+                        </div>
+                        """, unsafe_allow_html=True)
 
     elif st.session_state.menu_opcao == "💸 Fluxo de Caixa":
         st.subheader("🌊 Fluxo de Caixa")
@@ -196,22 +224,21 @@ else:
         c3.metric("Saldo Final", f"R$ {sf:,.2f}")
         
         col1, col2 = st.columns(2)
-        with col1: st.markdown(f"""<div class="conta-card"><div class="conta-titulo">📥 Entradas</div><div style="padding:10px;">(+) Rec. Operacionais: R$ {ent_op:,.2f}<br>(+) Aportes (PL): R$ {ent_pl:,.2f}</div></div>""", unsafe_allow_html=True)
-        with col2: st.markdown(f"""<div class="conta-card" style="border-left:5px solid #dc2626;"><div class="conta-titulo">out Saídas</div><div style="padding:10px;">(-) Despesas: R$ {sai_op:,.2f}<br>(-) Dívidas: R$ {sai_div:,.2f}<br>(-) Móveis/Ativo: R$ {sai_atv:,.2f}</div></div>""", unsafe_allow_html=True)
-
-    elif st.session_state.menu_opcao == "📈 DRE":
-        st.subheader("📈 DRE")
-        rec = df_periodo[df_periodo['natureza'] == 'Receita']
-        desp = df_periodo[df_periodo['natureza'] == 'Despesa']
-        t_rec = rec[rec['tipo'] == 'Crédito']['valor'].sum() - rec[rec['tipo'] == 'Débito']['valor'].sum()
-        t_desp = desp[desp['tipo'] == 'Débito']['valor'].sum() - desp[desp['tipo'] == 'Crédito']['valor'].sum()
-        st.metric("Lucro Líquido", f"R$ {t_rec - t_desp:,.2f}")
+        with col1:
+            st.info(f"📥 Entradas: R$ {ent_op + ent_pl:,.2f}\n(Rec: {ent_op:,.2f} | PL: {ent_pl:,.2f})")
+        with col2:
+            st.warning(f"out Saídas: R$ {sai_op + sai_div + sai_atv:,.2f}\n(Desp: {sai_op:,.2f} | Dív: {sai_div:,.2f} | Ativo: {sai_atv:,.2f})")
 
     elif st.session_state.menu_opcao == "⚙️ Gestão":
         st.subheader("⚙️ Gestão")
         for _, row in df.iterrows():
             with st.container():
                 c1, c2, c3 = st.columns([5, 1, 1])
-                c1.markdown(f"**[{row['data_lancamento']}] {row['descricao']}** - R$ {row['valor']:,.2f}")
-                if c2.button("✏️", key=f"ed_{row['id']}"): st.session_state.edit_id = row['id']; st.rerun()
-                if c3.button("🗑️", key=f"del_{row['id']}"): supabase.table("lancamentos").delete().eq("id", row['id']).execute(); st.cache_data.clear(); st.rerun()
+                c1.write(f"**[{row['data_lancamento']}] {row['descricao']}** - R$ {row['valor']:,.2f}")
+                if c2.button("✏️", key=f"edit_btn_{row['id']}"): 
+                    st.session_state.edit_id = row['id']
+                    st.rerun()
+                if c3.button("🗑️", key=f"del_btn_{row['id']}"): 
+                    supabase.table("lancamentos").delete().eq("id", row['id']).execute()
+                    st.cache_data.clear()
+                    st.rerun()
