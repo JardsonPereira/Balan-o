@@ -213,23 +213,23 @@ else:
             fin_in = tdf[(tdf['natureza'] == 'Patrimônio Líquido') & (tdf['tipo'] == 'Crédito')]['valor'].sum()
             fin_out = tdf[(tdf['natureza'] == 'Passivo') & (tdf['tipo'] == 'Débito')]['valor'].sum()
             
-            # 3. ATIVOS (Lógica: Apenas Créditos influenciam o saldo positivamente)
+            # 3. ATIVOS (Lógica: Crédito no Ativo = Saída de Caixa)
             contas_ativo = tdf[tdf['natureza'] == 'Ativo']
-            # Entradas de disponibilidade via baixa de ativos (Crédito no Ativo)
+            # Saídas de disponibilidade (Crédito no Ativo)
             ativos_cre = contas_ativo[contas_ativo['tipo'] == 'Crédito']['valor'].sum()
-            # Informativo: Débitos no Ativo (não influenciam o saldo nesta lógica)
+            # Informativo: Débitos no Ativo (Ignorados no saldo de entrada)
             ativos_deb = contas_ativo[contas_ativo['tipo'] == 'Débito']['valor'].sum()
             
             return op_in, op_out, fin_in, fin_out, ativos_cre, ativos_deb
 
         # Cálculo do Período
         oi0, oo0, fi0, fo0, ac0, ad0 = calc_fluxo_avancado(df_caixa_total[df_caixa_total['data_lancamento'] < data_ini])
-        s_ini = (oi0 + ac0 + fi0) - (oo0 + fo0)
+        s_ini = (oi0 + fi0) - (oo0 + fo0 + ac0)
         
         df_per = df_caixa_total[(df_caixa_total['data_lancamento'] >= data_ini) & (df_caixa_total['data_lancamento'] <= data_fim)]
         op_in, op_out, fin_in, fin_out, ativos_cre, ativos_deb = calc_fluxo_avancado(df_per)
         
-        var_per = (op_in + ativos_cre + fin_in) - (op_out + fin_out)
+        var_per = (op_in + fin_in) - (op_out + fin_out + ativos_cre)
 
         c1, c2, c3 = st.columns(3)
         c1.metric("Saldo Inicial", f"R$ {s_ini:,.2f}")
@@ -245,9 +245,9 @@ else:
             <div class="dre-total">Líquido Operacional: R$ {op_in - op_out:,.2f}</div></div>
             
             <div class="conta-card"><div class="conta-titulo">2. Movimentação de Ativos</div>
-            <div class="dre-linha"><span>(+) Créditos no Ativo (Entradas)</span> <span>R$ {ativos_cre:,.2f}</span></div>
+            <div class="dre-linha"><span>(-) Créditos no Ativo (Saídas)</span> <span>(R$ {ativos_cre:,.2f})</span></div>
             <div class="dre-linha" style="color:gray; font-style:italic;"><span>(Informativo) Débitos no Ativo</span> <span>R$ {ativos_deb:,.2f}</span></div>
-            <div class="conta-rodape" style="font-size:0.7rem; color:gray;">*Apenas os créditos no ativo influenciam o saldo final.</div></div>
+            <div class="conta-rodape" style="font-size:0.7rem; color:gray;">*Créditos no Ativo representam saída de recursos (Banco/Caixa).</div></div>
             """, unsafe_allow_html=True)
         with col2:
             st.markdown(f"""
