@@ -206,7 +206,7 @@ else:
         
         status_liquidos = ["Pago", "Entrada", "Investimento"]
 
-        # --- LÓGICA DO DASHBOARD (Receitas e Saídas Reais) ---
+        # --- LÓGICA DO DASHBOARD (Apenas Receitas e Despesas Afetam o Saldo Final aqui) ---
         def get_saldo_operacional_na_data(target_df, data_lim):
             df_hist = target_df[(target_df['data_lancamento'] <= data_lim) & (target_df['status'].isin(status_liquidos))]
             ent_op = df_hist[df_hist['natureza'] == 'Receita'][df_hist['tipo'] == 'Crédito']['valor'].sum()
@@ -222,11 +222,7 @@ else:
         # Detalhamento do Período
         df_per = df[(df['status'].isin(status_liquidos)) & (df['data_lancamento'] >= data_ini) & (df['data_lancamento'] <= data_fim)]
         ent_periodo = df_per[df_per['natureza'] == 'Receita'][df_per['tipo'] == 'Crédito']['valor'].sum()
-        
-        # --- ATUALIZAÇÃO: DESPESAS E PASSIVOS COMO SAÍDAS REAIS ---
-        sai_periodo_despesa = df_per[df_per['natureza'] == 'Despesa'][df_per['tipo'] == 'Débito']['valor'].sum()
-        sai_periodo_divida = df_per[df_per['natureza'] == 'Passivo'][df_per['tipo'] == 'Débito']['valor'].sum()
-        total_saidas_periodo = sai_periodo_despesa + sai_periodo_divida
+        sai_periodo = df_per[df_per['natureza'].isin(['Despesa', 'Passivo'])][df_per['tipo'] == 'Débito']['valor'].sum()
 
         c1, c2, c3 = st.columns(3)
         c1.metric("Saldo Inicial Operacional", f"R$ {saldo_inicial_dash:,.2f}")
@@ -237,9 +233,10 @@ else:
         with col1:
             st.markdown(f"""<div class="conta-card"><div class="conta-titulo">📥 Entradas Operacionais</div><div class="dre-linha"><span>(+) Receitas do Período</span> <span>R$ {ent_periodo:,.2f}</span></div><div class="dre-total">Total: R$ {ent_periodo:,.2f}</div></div>""", unsafe_allow_html=True)
         with col2:
-            st.markdown(f"""<div class="conta-card" style="border-left: 5px solid #dc2626;"><div class="conta-titulo">out Saídas Reais</div><div class="dre-linha"><span>(-) Despesas Operacionais</span> <span>(R$ {sai_periodo_despesa:,.2f})</span></div><div class="dre-linha"><span>(-) Pagamento de Dívidas</span> <span>(R$ {sai_periodo_divida:,.2f})</span></div><div class="dre-total">Total Saídas: (R$ {total_saidas_periodo:,.2f})</div></div>""", unsafe_allow_html=True)
+            st.markdown(f"""<div class="conta-card" style="border-left: 5px solid #dc2626;"><div class="conta-titulo">out Saídas Operacionais</div><div class="dre-linha"><span>(-) Despesas/Pagamentos</span> <span>(R$ {sai_periodo:,.2f})</span></div><div class="dre-total">Total: (R$ {sai_periodo:,.2f})</div></div>""", unsafe_allow_html=True)
 
         st.divider()
+        # --- LÓGICA DO DETALHAMENTO (Aqui aparecem os saldos REAIS das contas incluindo Capital Social) ---
         st.subheader("📑 Saldo Real das Disponibilidades (Incluindo Aportes)")
         contas_dispo = df[(df['natureza'].isin(['Ativo', 'Patrimônio Líquido'])) & (df['descricao'].str.contains('CAIXA|BANCO|CAPITAL', case=False))]['descricao'].unique()
         
@@ -253,8 +250,8 @@ else:
                         total_d = df_c[df_c['tipo'] == 'Débito']['valor'].sum()
                         total_c = df_c[df_c['tipo'] == 'Crédito']['valor'].sum()
                         saldo_real_conta = total_d - total_c
-                    else: # PL
-                        total_d = df_c[df_c['tipo'] == 'Crédito']['valor'].sum()
+                    else: # Capital Social / PL
+                        total_d = df_c[df_c['tipo'] == 'Crédito']['valor'].sum() # Lado positivo do PL é crédito
                         total_c = df_c[df_c['tipo'] == 'Débito']['valor'].sum()
                         saldo_real_conta = total_d - total_c
                     
