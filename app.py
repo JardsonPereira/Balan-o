@@ -153,7 +153,7 @@ else:
                 for i, conta in enumerate(sorted(df_g['descricao'].unique())):
                     df_c = df_g[df_g['descricao'] == conta]
                     v_d, v_c = df_c[df_c['tipo'] == 'Débito']['valor'].sum(), df_c[df_c['tipo'] == 'Crédito']['valor'].sum()
-                    saldo = (v_d - v_c) if grupo in ["Ativo", "Despesa"] else (v_c - v_d)
+                    saldo = (v_d - v_c) if grupo in ["Ativo", "Despesa", "Encargos Financeiros"] else (v_c - v_d)
                     
                     deb_html = "".join([f"<div class='valor-item valor-deb'>D: {r['valor']:,.2f}<span class='just-hint'>{r['justificativa']}</span></div>" for _,r in df_c[df_c['tipo']=='Débito'].iterrows()])
                     cre_html = "".join([f"<div class='valor-item valor-cre'>C: {r['valor']:,.2f}<span class='just-hint'>{r['justificativa']}</span></div>" for _,r in df_c[df_c['tipo']=='Crédito'].iterrows()])
@@ -169,10 +169,10 @@ else:
             df_hist = target_df[(target_df['data_lancamento'] <= data_lim) & (target_df['status'].isin(status_liquidos))]
             saldo = 0.0
             for _, r in df_hist.iterrows():
-                # ENTRADAS REAIS (Receitas e Aportes de PL)
+                # ENTRADAS
                 if r['natureza'] in ['Receita', 'Patrimônio Líquido'] and r['tipo'] == 'Crédito':
                     saldo += r['valor']
-                # SAÍDAS REAIS (Créditos no Ativo, Débitos em Despesa, Débitos no Passivo/Pagamentos)
+                # SAÍDAS
                 elif r['tipo'] == 'Crédito' and r['natureza'] not in ['Receita', 'Patrimônio Líquido']:
                     saldo -= r['valor']
                 elif r['natureza'] in ['Despesa', 'Passivo', 'Encargos Financeiros'] and r['tipo'] == 'Débito':
@@ -189,10 +189,10 @@ else:
         ent_total = ent_op + ent_pl
 
         sai_op = df_per[df_per['natureza'] == 'Despesa'][df_per['tipo'] == 'Débito']['valor'].sum()
-        # Inclusão de Débitos no Passivo como Saída Real (Pagamento de Dívidas)
         sai_passivo = df_per[df_per['natureza'] == 'Passivo'][df_per['tipo'] == 'Débito']['valor'].sum()
+        sai_encargos = df_per[df_per['natureza'] == 'Encargos Financeiros'][df_per['tipo'] == 'Débito']['valor'].sum()
         sai_atv_cred = df_per[(df_per['natureza'] == 'Ativo') & (df_per['tipo'] == 'Crédito')]['valor'].sum()
-        sai_total = sai_op + sai_passivo + sai_atv_cred
+        sai_total = sai_op + sai_passivo + sai_encargos + sai_atv_cred
 
         # --- INFORMATIVO DE LIQUIDEZ ---
         proporcao = (ent_total / sai_total) if sai_total > 0 else (ent_total if ent_total > 0 else 0)
@@ -220,7 +220,7 @@ else:
         with col1:
             st.markdown(f"""<div class="conta-card"><div class="conta-titulo">📥 Entradas Reais</div><div class="dre-linha"><span>(+) Receitas Operacionais</span> <span>R$ {ent_op:,.2f}</span></div><div class="dre-linha"><span>(+) Aportes de Capital (PL)</span> <span>R$ {ent_pl:,.2f}</span></div><div class="dre-total">Total: R$ {ent_total:,.2f}</div></div>""", unsafe_allow_html=True)
         with col2:
-            st.markdown(f"""<div class="conta-card" style="border-left: 5px solid #dc2626;"><div class="conta-titulo">out Saídas Reais</div><div class="dre-linha"><span>(-) Despesas Operacionais</span> <span>(R$ {sai_op:,.2f})</span></div><div class="dre-linha"><span>(-) Pagamento de Dívidas (Passivo)</span> <span>(R$ {sai_passivo:,.2f})</span></div><div class="dre-linha"><span>(-) Saídas em Crédito (Ativos)</span> <span>(R$ {sai_atv_cred:,.2f})</span></div><div class="dre-total">Total: (R$ {sai_total:,.2f})</div></div>""", unsafe_allow_html=True)
+            st.markdown(f"""<div class="conta-card" style="border-left: 5px solid #dc2626;"><div class="conta-titulo">out Saídas Reais</div><div class="dre-linha"><span>(-) Despesas Operacionais</span> <span>(R$ {sai_op:,.2f})</span></div><div class="dre-linha"><span>(-) Pagamento de Dívidas (Passivo)</span> <span>(R$ {sai_passivo:,.2f})</span></div><div class="dre-linha"><span>(-) Encargos Financeiros</span> <span>(R$ {sai_encargos:,.2f})</span></div><div class="dre-linha"><span>(-) Saídas em Crédito (Ativos)</span> <span>(R$ {sai_atv_cred:,.2f})</span></div><div class="dre-total">Total: (R$ {sai_total:,.2f})</div></div>""", unsafe_allow_html=True)
 
         st.divider()
         st.subheader("📑 Saldos de Disponibilidades")
@@ -239,9 +239,11 @@ else:
         st.subheader("📈 DRE Detalhada")
         rec = df_periodo[df_periodo['natureza'] == 'Receita']
         desp = df_periodo[df_periodo['natureza'] == 'Despesa']
+        enc = df_periodo[df_periodo['natureza'] == 'Encargos Financeiros']
         t_rec = rec[rec['tipo'] == 'Crédito']['valor'].sum() - rec[rec['tipo'] == 'Débito']['valor'].sum()
         t_desp = desp[desp['tipo'] == 'Débito']['valor'].sum() - desp[desp['tipo'] == 'Crédito']['valor'].sum()
-        st.metric("Lucro Líquido", f"R$ {t_rec - t_desp:,.2f}")
+        t_enc = enc[enc['tipo'] == 'Débito']['valor'].sum() - enc[enc['tipo'] == 'Crédito']['valor'].sum()
+        st.metric("Lucro Líquido", f"R$ {t_rec - t_desp - t_enc:,.2f}")
 
     elif st.session_state.menu_opcao == "⚙️ Gestão":
         st.subheader("⚙️ Gestão de Lançamentos")
