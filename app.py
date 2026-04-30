@@ -1,5 +1,4 @@
 import streamlit as st
-import pd
 import pandas as pd
 from supabase import create_client, Client
 from datetime import datetime
@@ -211,40 +210,29 @@ else:
             op_out = tdf[(tdf['natureza'] == 'Despesa') & (tdf['tipo'] == 'Débito')]['valor'].sum()
             
             # 2. FINANCIAMENTO (Causa: PL e Passivo)
-            # Aporte de Sócios (Crédito no PL) ou Pagamento de Dívida (Débito no Passivo)
             fin_in = tdf[(tdf['natureza'] == 'Patrimônio Líquido') & (tdf['tipo'] == 'Crédito')]['valor'].sum()
             fin_out = tdf[(tdf['natureza'] == 'Passivo') & (tdf['tipo'] == 'Débito')]['valor'].sum()
             
             # 3. INVESTIMENTO / ATIVOS (Variação Líquida)
-            # A lógica de permutação: Débito e Crédito dentro do Ativo se anulam (ex: transferência banco/caixa)
             contas_ativo = tdf[tdf['natureza'] == 'Ativo']
-            
-            # Saídas para o Ativo (Débito) e Entradas vindas do Ativo (Crédito)
-            # Ignoramos Créditos no Estoque (CMV) se a despesa correspondente já foi lançada
             ativos_deb = contas_ativo[contas_ativo['tipo'] == 'Débito']['valor'].sum()
-            
-            # Filtrar créditos no ativo que não sejam CMV contábil puro (conforme sua lógica de gestão)
             ativos_cre = contas_ativo[contas_ativo['tipo'] == 'Crédito']['valor'].sum()
             
             # Variação: Se Débito > Crédito, houve saída real de caixa para o ativo.
             variacao_liquida_ativo = ativos_deb - ativos_cre
-            
             inv_in = max(0, -variacao_liquida_ativo)
             inv_out = max(0, variacao_liquida_ativo)
             
             return op_in, op_out, fin_in, fin_out, inv_in, inv_out
 
-        # Cálculo do Saldo Inicial Acumulado
+        # Cálculos de Período
         oi0, oo0, fi0, fo0, ii0, io0 = calc_fluxo_avancado(df_caixa_total[df_caixa_total['data_lancamento'] < data_ini])
         s_ini = (oi0 - oo0) + (fi0 - fo0) + (ii0 - io0)
         
-        # Movimentação do Período Selecionado
         df_per = df_caixa_total[(df_caixa_total['data_lancamento'] >= data_ini) & (df_caixa_total['data_lancamento'] <= data_fim)]
         op_in, op_out, fin_in, fin_out, inv_in, inv_out = calc_fluxo_avancado(df_per)
-        
         var_per = (op_in - op_out) + (fin_in - fin_out) + (inv_in - inv_out)
 
-        # Dashboard Visual
         c1, c2, c3 = st.columns(3)
         c1.metric("Saldo Inicial", f"R$ {s_ini:,.2f}")
         c2.metric("Variação Líquida", f"R$ {var_per:,.2f}", delta=f"{var_per:,.2f}")
