@@ -203,23 +203,23 @@ else:
         df_caixa_total = df[df['status'].isin(['Pago', 'Investimento', 'Entrada'])].copy()
         
         def calc_atividades(tdf):
-            # 🛒 OPERACIONAL: Receitas, Despesas e Capital de Giro (Caixa/Banco)
-            op_in_geral = tdf[(tdf['natureza'] == 'Receita') & (tdf['tipo'] == 'Crédito')]['valor'].sum()
-            # Capital de Giro: Débitos em CAIXA/BANCO (Entradas de disponibilidade)
-            giro_in = tdf[(tdf['natureza'] == 'Ativo') & (tdf['tipo'] == 'Débito') & (tdf['descricao'].str.contains('CAIXA|BANCO', case=False))]['valor'].sum()
-            op_in = op_in_geral + giro_in
+            # 🛒 OPERACIONAL: Receitas e Despesas (Ignora CMV contábil do Ativo)
+            op_in = tdf[(tdf['natureza'] == 'Receita') & (tdf['tipo'] == 'Crédito')]['valor'].sum()
+            op_out = tdf[(tdf['natureza'] == 'Despesa') & (tdf['tipo'] == 'Débito')]['valor'].sum()
             
-            op_out_geral = tdf[(tdf['natureza'] == 'Despesa') & (tdf['tipo'] == 'Débito')]['valor'].sum()
-            # Capital de Giro: Créditos em CAIXA/BANCO (Saídas de disponibilidade)
-            giro_out = tdf[(tdf['natureza'] == 'Ativo') & (tdf['tipo'] == 'Crédito') & (tdf['descricao'].str.contains('CAIXA|BANCO', case=False))]['valor'].sum()
-            op_out = op_out_geral + giro_out
+            # --- LÓGICA DE ATIVO (LÍQUIDA) ---
+            # Aqui calculamos a variação real do ativo para não somar transferências internas.
+            # Débito e Crédito dentro do Ativo se anulam. 
+            ativos_deb = tdf[(tdf['natureza'] == 'Ativo') & (tdf['tipo'] == 'Débito')]['valor'].sum()
+            ativos_cre = tdf[(tdf['natureza'] == 'Ativo') & (tdf['tipo'] == 'Crédito')]['valor'].sum()
             
-            # 🏗️ INVESTIMENTO: ENTRADA DE ESTOQUE (Débito no Ativo) e bens fixos
-            inv_in = tdf[(tdf['natureza'] == 'Ativo') & (tdf['tipo'] == 'Crédito') & (~tdf['descricao'].str.contains('CAIXA|BANCO|ESTOQUE', case=False))]['valor'].sum()
-            # Débito no Ativo (Compra de bens + Entrada de Estoque). Ignora contas de capital de giro.
-            total_compras_ativo = tdf[(tdf['natureza'] == 'Ativo') & (tdf['tipo'] == 'Débito') & (~tdf['descricao'].str.contains('CAIXA|BANCO', case=False))]['valor'].sum()
-            divida_pendente = df[(df['natureza'] == 'Passivo') & (df['status'] == 'Pendente') & (df['tipo'] == 'Crédito')]['valor'].sum()
-            inv_out = max(0, total_compras_ativo - divida_pendente)
+            # Variação líquida do Ativo (Investimento/Giro)
+            # Se Débito > Crédito, houve saída de caixa (compra de estoque/bens).
+            # Se Crédito > Débito, houve entrada (venda de ativos).
+            variacao_ativo = ativos_deb - ativos_cre
+            
+            inv_in = max(0, -variacao_ativo) # Se negativo, entrou dinheiro
+            inv_out = max(0, variacao_ativo) # Se positivo, saiu dinheiro
             
             # 💰 FINANCIAMENTO
             fin_in = tdf[(tdf['natureza'] == 'Patrimônio Líquido') & (tdf['tipo'] == 'Crédito')]['valor'].sum()
@@ -227,7 +227,7 @@ else:
             
             return op_in, op_out, fin_in, fin_out, inv_in, inv_out
 
-        # Cálculos
+        # Cálculos de Período
         oi, oo, fi, fo, ii, io = calc_atividades(df_caixa_total[df_caixa_total['data_lancamento'] < data_ini])
         s_ini = (oi - oo) + (fi - fo) + (ii - io)
         df_per = df_caixa_total[(df_caixa_total['data_lancamento'] >= data_ini) & (df_caixa_total['data_lancamento'] <= data_fim)]
@@ -241,36 +241,28 @@ else:
         
         col1, col2 = st.columns(2)
         with col1:
-            st.markdown(f"""<div class="conta-card"><div class="conta-titulo">1. Atividades Operacionais (Inc. Capital Giro)</div><div class="dre-linha"><span>(+) Rec. / Entradas Disponibilidade</span> <span>R$ {op_in:,.2f}</span></div><div class="dre-linha"><span>(-) Pagamentos / Saídas Disponibilidade</span> <span>(R$ {op_out:,.2f})</span></div><div class="dre-total">Líquido Operacional: R$ {op_in - op_out:,.2f}</div></div>
-            <div class="conta-card"><div class="conta-titulo">2. Atividades de Investimento (Entrada Estoque)</div><div class="dre-linha"><span>(+) Venda de Ativos</span> <span>R$ {inv_in:,.2f}</span></div><div class="dre-linha"><span>(-) Compra de Ativos/Estoque</span> <span>(R$ {inv_out:,.2f})</span></div><div class="dre-total">Líquido Investimento: R$ {inv_in - inv_out:,.2f}</div></div>""", unsafe_allow_html=True)
+            st.markdown(f"""<div class="conta-card"><div class="conta-titulo">1. Atividades Operacionais</div><div class="dre-linha"><span>(+) Recebimentos</span> <span>R$ {op_in:,.2f}</span></div><div class="dre-linha"><span>(-) Pagamentos</span> <span>(R$ {op_out:,.2f})</span></div><div class="dre-total">Líquido Operacional: R$ {op_in - op_out:,.2f}</div></div>
+            <div class="conta-card"><div class="conta-titulo">2. Atividades de Investimento / Ativos (Líquido)</div><div class="dre-linha"><span>(+) Entradas (Venda/Baixa)</span> <span>R$ {inv_in:,.2f}</span></div><div class="dre-linha"><span>(-) Saídas (Compra/Estoque)</span> <span>(R$ {inv_out:,.2f})</span></div><div class="dre-total">Líquido Ativos: R$ {inv_in - inv_out:,.2f}</div></div>""", unsafe_allow_html=True)
         with col2:
             st.markdown(f"""<div class="conta-card" style="border-left: 5px solid #059669;"><div class="conta-titulo">3. Atividades de Financiamento</div><div class="dre-linha"><span>(+) Aportes/Capital</span> <span>R$ {fin_in:,.2f}</span></div><div class="dre-linha"><span>(-) Amortização Dívidas</span> <span>(R$ {fin_out:,.2f})</span></div><div class="dre-total">Líquido Financiamento: R$ {fin_in - fin_out:,.2f}</div></div>
             <div class="conta-card" style="background: #1e293b; color: white;"><div class="conta-titulo" style="background: #0f172a;">Resumo do Período</div><div class="dre-linha" style="padding:10px"><span>Saldo Final Carregado</span> <span>R$ {s_ini + var_per:,.2f}</span></div></div>""", unsafe_allow_html=True)
 
         st.divider()
         st.subheader("📑 Detalhamento das Movimentações de Caixa")
-        tab1, tab2, tab3 = st.tabs(["🛒 Operacional", "🏗️ Investimento", "💰 Financiamento"])
+        tab1, tab2, tab3 = st.tabs(["🛒 Operacional", "🏗️ Investimento / Ativos", "💰 Financiamento"])
         
         with tab1:
-            # Operacional: Receitas, Despesas e Capital de Giro
-            df_op = df_per[
-                (df_per['natureza'].isin(['Receita', 'Despesa'])) | 
-                ((df_per['natureza'] == 'Ativo') & (df_per['descricao'].str.contains('CAIXA|BANCO', case=False)))
-            ]
+            df_op = df_per[df_per['natureza'].isin(['Receita', 'Despesa'])]
             if not df_op.empty:
                 st.dataframe(df_op[['data_lancamento', 'descricao', 'natureza', 'tipo', 'valor', 'justificativa']], use_container_width=True)
             else: st.info("Sem movimentações operacionais no período.")
 
         with tab2:
-            # Investimento: Ativos (Exceto caixa/banco). Ignora créditos em estoque (CMV contábil).
-            df_inv = df_per[
-                (df_per['natureza'] == 'Ativo') & 
-                (~df_per['descricao'].str.contains('CAIXA|BANCO', case=False)) &
-                (~((df_per['tipo'] == 'Crédito') & (df_per['descricao'].str.contains('ESTOQUE', case=False))))
-            ]
+            # Lista todas as movimentações de ativo para transparência
+            df_inv = df_per[df_per['natureza'] == 'Ativo']
             if not df_inv.empty:
                 st.dataframe(df_inv[['data_lancamento', 'descricao', 'natureza', 'tipo', 'valor', 'justificativa']], use_container_width=True)
-            else: st.info("Sem movimentações de investimento no período.")
+            else: st.info("Sem movimentações de ativos no período.")
 
         with tab3:
             df_fin = df_per[(df_per['natureza'] == 'Patrimônio Líquido') | ((df_per['natureza'] == 'Passivo') & (df_per['tipo'] == 'Débito'))]
