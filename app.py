@@ -158,9 +158,22 @@ else:
         for conta in sorted(df_periodo['descricao'].unique()):
             df_c = df_periodo[df_periodo['descricao'] == conta]
             d, c = df_c[df_c['tipo'] == 'Débito']['valor'].sum(), df_c[df_c['tipo'] == 'Crédito']['valor'].sum()
-            bal_data.append({"Conta": conta, "Débito": d, "Crédito": c, "Saldo Devedor": d-c if d > c else 0, "Saldo Credor": c-d if c > d else 0})
+            bal_data.append({
+                "Conta": conta, 
+                "Débito": d, 
+                "Crédito": c, 
+                "Saldo Devedor": d-c if d > c else 0, 
+                "Saldo Credor": c-d if c > d else 0
+            })
         bal_df = pd.DataFrame(bal_data)
         st.table(bal_df.style.format(precision=2, decimal=',', thousands='.'))
+        
+        # Restaurando os cards de resultados do balancete
+        c1, c2, c3, c4 = st.columns(4)
+        c1.metric("Total Débitos", f"R$ {bal_df['Débito'].sum():,.2f}")
+        c2.metric("Total Créditos", f"R$ {bal_df['Crédito'].sum():,.2f}")
+        c3.metric("Total Saldo Devedor", f"R$ {bal_df['Saldo Devedor'].sum():,.2f}")
+        c4.metric("Total Saldo Credor", f"R$ {bal_df['Saldo Credor'].sum():,.2f}")
 
     elif st.session_state.menu_opcao == "📈 DRE":
         st.subheader("📈 DRE do Período")
@@ -170,8 +183,21 @@ else:
         t_rec = rec[rec['tipo'] == 'Crédito']['valor'].sum() - rec[rec['tipo'] == 'Débito']['valor'].sum()
         t_desp = desp[desp['tipo'] == 'Débito']['valor'].sum() - desp[desp['tipo'] == 'Crédito']['valor'].sum()
         t_enc = enc[enc['tipo'] == 'Débito']['valor'].sum() - enc[enc['tipo'] == 'Crédito']['valor'].sum()
-        lucro = t_rec - t_desp - t_enc
-        st.markdown(f"<div class='dre-total dre-linha' style='background:{'#059669' if lucro>=0 else '#dc2626'}; color:white;'><span>LUCRO LÍQUIDO</span> <span>R$ {lucro:,.2f}</span></div>", unsafe_allow_html=True)
+        
+        ebitda = t_rec - t_desp
+        lucro = ebitda - t_enc
+        
+        with st.expander("Ver Detalhes da DRE", expanded=True):
+            st.markdown("### Receitas Operacionais")
+            for c in rec['descricao'].unique():
+                v = rec[rec['descricao']==c][rec['tipo']=='Crédito']['valor'].sum() - rec[rec['descricao']==c][rec['tipo']=='Débito']['valor'].sum()
+                st.markdown(f"<div class='dre-linha'><span>{c}</span> <span>R$ {v:,.2f}</span></div>", unsafe_allow_html=True)
+            st.markdown("### Despesas Operacionais")
+            for c in desp['descricao'].unique():
+                v = desp[desp['descricao']==c][desp['tipo']=='Débito']['valor'].sum() - desp[desp['descricao']==c][desp['tipo']=='Crédito']['valor'].sum()
+                st.markdown(f"<div class='dre-linha'><span>{c}</span> <span>(R$ {v:,.2f})</span></div>", unsafe_allow_html=True)
+            st.markdown(f"<div class='dre-total dre-linha'><span>EBITDA</span> <span>R$ {ebitda:,.2f}</span></div>", unsafe_allow_html=True)
+            st.markdown(f"<div class='dre-total dre-linha' style='background:{'#059669' if lucro>=0 else '#dc2626'}; color:white;'><span>LUCRO LÍQUIDO</span> <span>R$ {lucro:,.2f}</span></div>", unsafe_allow_html=True)
 
     elif st.session_state.menu_opcao == "💸 Fluxo de Caixa":
         st.subheader("🌊 Demonstração do Fluxo de Caixa (Corrigida)")
@@ -179,15 +205,10 @@ else:
         df_caixa_full = df[df['status'].isin(['Pago', 'Entrada', 'Investimento'])].copy()
         
         def calc_atividades(tdf):
-            # 1. Operacional
             op_in = tdf[(tdf['natureza'] == 'Receita') & (tdf['tipo'] == 'Crédito')]['valor'].sum()
             op_out = tdf[(tdf['natureza'] == 'Despesa') & (tdf['tipo'] == 'Débito')]['valor'].sum()
-            
-            # 2. Financiamento (Aportes de PL e Pagamentos de Dívidas no Passivo)
             fin_in = tdf[(tdf['natureza'] == 'Patrimônio Líquido') & (tdf['tipo'] == 'Crédito')]['valor'].sum()
             fin_out = tdf[(tdf['natureza'] == 'Passivo') & (tdf['tipo'] == 'Débito')]['valor'].sum()
-            
-            # 3. Investimento (Lógica para anular o que foi financiado e mostrar apenas desembolso real)
             inv_in = tdf[(tdf['natureza'] == 'Ativo') & (tdf['tipo'] == 'Crédito') & (~tdf['descricao'].str.contains('CAIXA|BANCO', case=False))]['valor'].sum()
             
             total_compras_ativo = tdf[(tdf['natureza'] == 'Ativo') & (tdf['tipo'] == 'Débito') & (~tdf['descricao'].str.contains('CAIXA|BANCO', case=False))]['valor'].sum()
