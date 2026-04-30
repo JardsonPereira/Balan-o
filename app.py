@@ -1,4 +1,5 @@
 import streamlit as st
+import pd
 import pandas as pd
 from supabase import create_client, Client
 from datetime import datetime
@@ -199,41 +200,51 @@ else:
             st.markdown(f"<div class='dre-total dre-linha' style='background:{cor_lucro}; color:white;'><span>LUCRO REAL LÍQUIDO</span> <span>R$ {lucro_real:,.2f}</span></div>", unsafe_allow_html=True)
 
     elif st.session_state.menu_opcao == "💸 Fluxo de Caixa":
-        st.subheader("🌊 Demonstração do Fluxo de Caixa")
-        df_caixa_total = df[df['status'].isin(['Pago', 'Investimento', 'Entrada'])].copy()
+        st.subheader("🌊 Demonstração do Fluxo de Caixa (Lógica Contábil)")
         
-        def calc_atividades(tdf):
-            # 🛒 OPERACIONAL: Receitas e Despesas (Ignora CMV contábil do Ativo)
+        # Filtro de registros liquidados
+        df_caixa_total = df[df['status'].isin(['Pago', 'Investimento', 'Entrada', 'Realizado'])].copy()
+        
+        def calc_fluxo_avancado(tdf):
+            # 1. OPERACIONAL (Causa: Receitas e Despesas)
             op_in = tdf[(tdf['natureza'] == 'Receita') & (tdf['tipo'] == 'Crédito')]['valor'].sum()
             op_out = tdf[(tdf['natureza'] == 'Despesa') & (tdf['tipo'] == 'Débito')]['valor'].sum()
             
-            # --- LÓGICA DE ATIVO (LÍQUIDA) ---
-            # Aqui calculamos a variação real do ativo para não somar transferências internas.
-            # Débito e Crédito dentro do Ativo se anulam. 
-            ativos_deb = tdf[(tdf['natureza'] == 'Ativo') & (tdf['tipo'] == 'Débito')]['valor'].sum()
-            ativos_cre = tdf[(tdf['natureza'] == 'Ativo') & (tdf['tipo'] == 'Crédito')]['valor'].sum()
-            
-            # Variação líquida do Ativo (Investimento/Giro)
-            # Se Débito > Crédito, houve saída de caixa (compra de estoque/bens).
-            # Se Crédito > Débito, houve entrada (venda de ativos).
-            variacao_ativo = ativos_deb - ativos_cre
-            
-            inv_in = max(0, -variacao_ativo) # Se negativo, entrou dinheiro
-            inv_out = max(0, variacao_ativo) # Se positivo, saiu dinheiro
-            
-            # 💰 FINANCIAMENTO
+            # 2. FINANCIAMENTO (Causa: PL e Passivo)
+            # Aporte de Sócios (Crédito no PL) ou Pagamento de Dívida (Débito no Passivo)
             fin_in = tdf[(tdf['natureza'] == 'Patrimônio Líquido') & (tdf['tipo'] == 'Crédito')]['valor'].sum()
             fin_out = tdf[(tdf['natureza'] == 'Passivo') & (tdf['tipo'] == 'Débito')]['valor'].sum()
             
+            # 3. INVESTIMENTO / ATIVOS (Variação Líquida)
+            # A lógica de permutação: Débito e Crédito dentro do Ativo se anulam (ex: transferência banco/caixa)
+            contas_ativo = tdf[tdf['natureza'] == 'Ativo']
+            
+            # Saídas para o Ativo (Débito) e Entradas vindas do Ativo (Crédito)
+            # Ignoramos Créditos no Estoque (CMV) se a despesa correspondente já foi lançada
+            ativos_deb = contas_ativo[contas_ativo['tipo'] == 'Débito']['valor'].sum()
+            
+            # Filtrar créditos no ativo que não sejam CMV contábil puro (conforme sua lógica de gestão)
+            ativos_cre = contas_ativo[contas_ativo['tipo'] == 'Crédito']['valor'].sum()
+            
+            # Variação: Se Débito > Crédito, houve saída real de caixa para o ativo.
+            variacao_liquida_ativo = ativos_deb - ativos_cre
+            
+            inv_in = max(0, -variacao_liquida_ativo)
+            inv_out = max(0, variacao_liquida_ativo)
+            
             return op_in, op_out, fin_in, fin_out, inv_in, inv_out
 
-        # Cálculos de Período
-        oi, oo, fi, fo, ii, io = calc_atividades(df_caixa_total[df_caixa_total['data_lancamento'] < data_ini])
-        s_ini = (oi - oo) + (fi - fo) + (ii - io)
+        # Cálculo do Saldo Inicial Acumulado
+        oi0, oo0, fi0, fo0, ii0, io0 = calc_fluxo_avancado(df_caixa_total[df_caixa_total['data_lancamento'] < data_ini])
+        s_ini = (oi0 - oo0) + (fi0 - fo0) + (ii0 - io0)
+        
+        # Movimentação do Período Selecionado
         df_per = df_caixa_total[(df_caixa_total['data_lancamento'] >= data_ini) & (df_caixa_total['data_lancamento'] <= data_fim)]
-        op_in, op_out, fin_in, fin_out, inv_in, inv_out = calc_atividades(df_per)
+        op_in, op_out, fin_in, fin_out, inv_in, inv_out = calc_fluxo_avancado(df_per)
+        
         var_per = (op_in - op_out) + (fin_in - fin_out) + (inv_in - inv_out)
 
+        # Dashboard Visual
         c1, c2, c3 = st.columns(3)
         c1.metric("Saldo Inicial", f"R$ {s_ini:,.2f}")
         c2.metric("Variação Líquida", f"R$ {var_per:,.2f}", delta=f"{var_per:,.2f}")
@@ -241,34 +252,38 @@ else:
         
         col1, col2 = st.columns(2)
         with col1:
-            st.markdown(f"""<div class="conta-card"><div class="conta-titulo">1. Atividades Operacionais</div><div class="dre-linha"><span>(+) Recebimentos</span> <span>R$ {op_in:,.2f}</span></div><div class="dre-linha"><span>(-) Pagamentos</span> <span>(R$ {op_out:,.2f})</span></div><div class="dre-total">Líquido Operacional: R$ {op_in - op_out:,.2f}</div></div>
-            <div class="conta-card"><div class="conta-titulo">2. Atividades de Investimento / Ativos (Líquido)</div><div class="dre-linha"><span>(+) Entradas (Venda/Baixa)</span> <span>R$ {inv_in:,.2f}</span></div><div class="dre-linha"><span>(-) Saídas (Compra/Estoque)</span> <span>(R$ {inv_out:,.2f})</span></div><div class="dre-total">Líquido Ativos: R$ {inv_in - inv_out:,.2f}</div></div>""", unsafe_allow_html=True)
+            st.markdown(f"""
+            <div class="conta-card"><div class="conta-titulo">1. Atividades Operacionais</div>
+            <div class="dre-linha"><span>(+) Receitas (Entradas Reais)</span> <span>R$ {op_in:,.2f}</span></div>
+            <div class="dre-linha"><span>(-) Despesas (Saídas Reais)</span> <span>(R$ {op_out:,.2f})</span></div>
+            <div class="dre-total">Líquido Operacional: R$ {op_in - op_out:,.2f}</div></div>
+            
+            <div class="conta-card"><div class="conta-titulo">2. Atividades de Investimento / Ativos</div>
+            <div class="dre-linha"><span>(+) Baixas/Vendas de Ativos</span> <span>R$ {inv_in:,.2f}</span></div>
+            <div class="dre-linha"><span>(-) Compras/Aumento de Ativos</span> <span>(R$ {inv_out:,.2f})</span></div>
+            <div class="dre-total">Líquido Ativos: R$ {inv_in - inv_out:,.2f}</div></div>
+            """, unsafe_allow_html=True)
         with col2:
-            st.markdown(f"""<div class="conta-card" style="border-left: 5px solid #059669;"><div class="conta-titulo">3. Atividades de Financiamento</div><div class="dre-linha"><span>(+) Aportes/Capital</span> <span>R$ {fin_in:,.2f}</span></div><div class="dre-linha"><span>(-) Amortização Dívidas</span> <span>(R$ {fin_out:,.2f})</span></div><div class="dre-total">Líquido Financiamento: R$ {fin_in - fin_out:,.2f}</div></div>
-            <div class="conta-card" style="background: #1e293b; color: white;"><div class="conta-titulo" style="background: #0f172a;">Resumo do Período</div><div class="dre-linha" style="padding:10px"><span>Saldo Final Carregado</span> <span>R$ {s_ini + var_per:,.2f}</span></div></div>""", unsafe_allow_html=True)
+            st.markdown(f"""
+            <div class="conta-card" style="border-left: 5px solid #059669;"><div class="conta-titulo">3. Atividades de Financiamento</div>
+            <div class="dre-linha"><span>(+) Aportes de Capital (PL)</span> <span>R$ {fin_in:,.2f}</span></div>
+            <div class="dre-linha"><span>(-) Pagamento de Dívidas (Passivo)</span> <span>(R$ {fin_out:,.2f})</span></div>
+            <div class="dre-total">Líquido Financiamento: R$ {fin_in - fin_out:,.2f}</div></div>
+            
+            <div class="conta-card" style="background: #1e293b; color: white;"><div class="conta-titulo" style="background: #0f172a;">Fechamento de Caixa</div>
+            <div class="dre-linha" style="padding:10px"><span>Disponibilidade Final</span> <span>R$ {s_ini + var_per:,.2f}</span></div></div>
+            """, unsafe_allow_html=True)
 
         st.divider()
-        st.subheader("📑 Detalhamento das Movimentações de Caixa")
-        tab1, tab2, tab3 = st.tabs(["🛒 Operacional", "🏗️ Investimento / Ativos", "💰 Financiamento"])
+        st.subheader("📑 Detalhamento por Natureza de Fluxo")
+        t1, t2, t3 = st.tabs(["🛒 Operacional", "🏗️ Investimento / Ativos", "💰 Financiamento"])
         
-        with tab1:
-            df_op = df_per[df_per['natureza'].isin(['Receita', 'Despesa'])]
-            if not df_op.empty:
-                st.dataframe(df_op[['data_lancamento', 'descricao', 'natureza', 'tipo', 'valor', 'justificativa']], use_container_width=True)
-            else: st.info("Sem movimentações operacionais no período.")
-
-        with tab2:
-            # Lista todas as movimentações de ativo para transparência
-            df_inv = df_per[df_per['natureza'] == 'Ativo']
-            if not df_inv.empty:
-                st.dataframe(df_inv[['data_lancamento', 'descricao', 'natureza', 'tipo', 'valor', 'justificativa']], use_container_width=True)
-            else: st.info("Sem movimentações de ativos no período.")
-
-        with tab3:
-            df_fin = df_per[(df_per['natureza'] == 'Patrimônio Líquido') | ((df_per['natureza'] == 'Passivo') & (df_per['tipo'] == 'Débito'))]
-            if not df_fin.empty:
-                st.dataframe(df_fin[['data_lancamento', 'descricao', 'natureza', 'tipo', 'valor', 'justificativa']], use_container_width=True)
-            else: st.info("Sem movimentações de financiamento no período.")
+        with t1:
+            st.dataframe(df_per[df_per['natureza'].isin(['Receita', 'Despesa'])][['data_lancamento', 'descricao', 'natureza', 'tipo', 'valor', 'justificativa']], use_container_width=True)
+        with t2:
+            st.dataframe(df_per[df_per['natureza'] == 'Ativo'][['data_lancamento', 'descricao', 'natureza', 'tipo', 'valor', 'justificativa']], use_container_width=True)
+        with t3:
+            st.dataframe(df_per[df_per['natureza'].isin(['Patrimônio Líquido', 'Passivo'])][['data_lancamento', 'descricao', 'natureza', 'tipo', 'valor', 'justificativa']], use_container_width=True)
 
     elif st.session_state.menu_opcao == "⚙️ Gestão":
         st.subheader("⚙️ Gestão de Lançamentos")
