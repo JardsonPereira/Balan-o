@@ -187,32 +187,34 @@ else:
     elif st.session_state.menu_opcao == "💸 Fluxo de Caixa":
         st.subheader("🌊 Demonstração do Fluxo de Caixa (Corrigida)")
         
-        # REGRA CRÍTICA: Status "Pendente" não pode afetar o fluxo, independente da natureza.
-        df_caixa_full = df[df['status'] != 'Pendente'].copy()
+        # FILTRO ABSOLUTO: Nada que seja Pendente entra na DFC
+        df_caixa_total = df[df['status'] != 'Pendente'].copy()
         
         def calc_atividades(tdf):
-            # 1. Operacional (Só entra se não estiver pendente)
+            # Operacional
             op_in = tdf[(tdf['natureza'] == 'Receita') & (tdf['tipo'] == 'Crédito')]['valor'].sum()
             op_out = tdf[(tdf['natureza'] == 'Despesa') & (tdf['tipo'] == 'Débito')]['valor'].sum()
             
-            # 2. Financiamento (Aportes de PL e Amortização de Dívidas PAGAS)
+            # Financiamento
             fin_in = tdf[(tdf['natureza'] == 'Patrimônio Líquido') & (tdf['tipo'] == 'Crédito')]['valor'].sum()
-            # fin_out: No passivo, só sai do caixa se o débito foi marcado como Pago (não pendente)
             fin_out = tdf[(tdf['natureza'] == 'Passivo') & (tdf['tipo'] == 'Débito')]['valor'].sum()
             
-            # 3. Investimento
+            # Investimento (Lógica de anulação de financiamento)
             inv_in = tdf[(tdf['natureza'] == 'Ativo') & (tdf['tipo'] == 'Crédito') & (~tdf['descricao'].str.contains('CAIXA|BANCO', case=False))]['valor'].sum()
-            
             total_compras_ativo = tdf[(tdf['natureza'] == 'Ativo') & (tdf['tipo'] == 'Débito') & (~tdf['descricao'].str.contains('CAIXA|BANCO', case=False))]['valor'].sum()
-            # valor_financiado: O valor da dívida assumida (C) não sai do caixa, portanto anula o efeito da compra (D)
+            
+            # ATENÇÃO: O passivo (C) que anula a compra (D) também deve ignorar pendentes
             valor_financiado = tdf[(tdf['natureza'] == 'Passivo') & (tdf['tipo'] == 'Crédito')]['valor'].sum()
             inv_out = max(0, total_compras_ativo - valor_financiado)
             
             return op_in, op_out, fin_in, fin_out, inv_in, inv_out
 
-        oi, oo, fi, fo, ii, io = calc_atividades(df_caixa_full[df_caixa_full['data_lancamento'] < data_ini])
+        # Cálculo do Saldo Inicial (Acumulado antes da data inicial)
+        oi, oo, fi, fo, ii, io = calc_atividades(df_caixa_total[df_caixa_total['data_lancamento'] < data_ini])
         s_ini = (oi - oo) + (fi - fo) + (ii - io)
-        df_per = df_caixa_full[(df_caixa_full['data_lancamento'] >= data_ini) & (df_caixa_full['data_lancamento'] <= data_fim)]
+        
+        # Cálculo do Período Atual
+        df_per = df_caixa_total[(df_caixa_total['data_lancamento'] >= data_ini) & (df_caixa_total['data_lancamento'] <= data_fim)]
         op_in, op_out, fin_in, fin_out, inv_in, inv_out = calc_atividades(df_per)
         var_per = (op_in - op_out) + (fin_in - fin_out) + (inv_in - inv_out)
 
