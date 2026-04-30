@@ -199,73 +199,68 @@ else:
             st.markdown(f"<div class='dre-total dre-linha' style='background:{cor_lucro}; color:white;'><span>LUCRO REAL LÍQUIDO</span> <span>R$ {lucro_real:,.2f}</span></div>", unsafe_allow_html=True)
 
     elif st.session_state.menu_opcao == "💸 Fluxo de Caixa":
-        st.subheader("🌊 Demonstração do Fluxo de Caixa")
+        st.subheader("🌊 Demonstração do Fluxo de Caixa (Conciliação de Giro)")
         
-        # Filtro de registros liquidados
-        df_caixa_total = df[df['status'].isin(['Pago', 'Investimento', 'Entrada', 'Realizado'])].copy()
-        
-        def calc_fluxo_avancado(tdf):
-            # 1. OPERACIONAL (Receitas e Despesas)
-            op_in = tdf[(tdf['natureza'] == 'Receita') & (tdf['tipo'] == 'Crédito')]['valor'].sum()
-            op_out = tdf[(tdf['natureza'] == 'Despesa') & (tdf['tipo'] == 'Débito')]['valor'].sum()
-            
-            # 2. FINANCIAMENTO (PL e Passivo)
-            fin_in = tdf[(tdf['natureza'] == 'Patrimônio Líquido') & (tdf['tipo'] == 'Crédito')]['valor'].sum()
-            fin_out = tdf[(tdf['natureza'] == 'Passivo') & (tdf['tipo'] == 'Débito')]['valor'].sum()
-            
-            # 3. ATIVOS (Lógica: Crédito no Ativo = Saída de Caixa)
-            contas_ativo = tdf[tdf['natureza'] == 'Ativo']
-            # Saídas de disponibilidade (Crédito no Ativo)
-            ativos_cre = contas_ativo[contas_ativo['tipo'] == 'Crédito']['valor'].sum()
-            # Informativo: Débitos no Ativo (Ignorados no saldo de entrada)
-            ativos_deb = contas_ativo[contas_ativo['tipo'] == 'Débito']['valor'].sum()
-            
-            return op_in, op_out, fin_in, fin_out, ativos_cre, ativos_deb
+        # --- LÓGICA DE SALDO REAL (Baseada no Capital de Giro do Ativo) ---
+        def get_saldo_giro(tdf):
+            # Filtra apenas contas de Ativo que sejam disponibilidade (Caixa/Banco)
+            df_giro = tdf[(tdf['natureza'] == 'Ativo') & (tdf['descricao'].str.contains('CAIXA|BANCO', case=False))]
+            d = df_giro[df_giro['tipo'] == 'Débito']['valor'].sum()
+            c = df_giro[df_giro['tipo'] == 'Crédito']['valor'].sum()
+            return d - c
 
-        # Cálculo do Período
-        oi0, oo0, fi0, fo0, ac0, ad0 = calc_fluxo_avancado(df_caixa_total[df_caixa_total['data_lancamento'] < data_ini])
-        s_ini = (oi0 + fi0) - (oo0 + fo0 + ac0)
+        # Saldo Final (Hoje)
+        saldo_final_real = get_saldo_giro(df)
+        # Saldo Inicial (Até o início do período)
+        saldo_inicial_real = get_saldo_giro(df[df['data_lancamento'] < data_ini])
         
-        df_per = df_caixa_total[(df_caixa_total['data_lancamento'] >= data_ini) & (df_caixa_total['data_lancamento'] <= data_fim)]
-        op_in, op_out, fin_in, fin_out, ativos_cre, ativos_deb = calc_fluxo_avancado(df_per)
+        # --- LÓGICA DE MOVIMENTAÇÃO (Explicação da Variação) ---
+        df_per = df[(df['data_lancamento'] >= data_ini) & (df['data_lancamento'] <= data_fim)]
         
-        var_per = (op_in + fin_in) - (op_out + fin_out + ativos_cre)
+        # Entradas: Receitas + Aportes PL
+        ent_op = df_per[(df_per['natureza'] == 'Receita') & (df_per['tipo'] == 'Crédito')]['valor'].sum()
+        ent_fin = df_per[(df_per['natureza'] == 'Patrimônio Líquido') & (df_per['tipo'] == 'Crédito')]['valor'].sum()
+        
+        # Saídas: Despesas + Pagamento Passivo + Créditos no Ativo (Saídas reais)
+        sai_op = df_per[(df_per['natureza'] == 'Despesa') & (df_per['tipo'] == 'Débito')]['valor'].sum()
+        sai_fin = df_per[(df_per['natureza'] == 'Passivo') & (df_per['tipo'] == 'Débito')]['valor'].sum()
+        # Créditos no ativo (Saídas) que não sejam transferências entre contas de giro
+        sai_ativo = df_per[(df_per['natureza'] == 'Ativo') & (df_per['tipo'] == 'Crédito') & (~df_per['descricao'].str.contains('CAIXA|BANCO', case=False))]['valor'].sum()
+        
+        var_periodo = (ent_op + ent_fin) - (sai_op + sai_fin + sai_ativo)
 
+        # Dashboard Visual
         c1, c2, c3 = st.columns(3)
-        c1.metric("Saldo Inicial", f"R$ {s_ini:,.2f}")
-        c2.metric("Variação Líquida", f"R$ {var_per:,.2f}", delta=f"{var_per:,.2f}")
-        c3.metric("Saldo Final Conciliado", f"R$ {s_ini + var_per:,.2f}")
+        c1.metric("Saldo Inicial (Giro)", f"R$ {saldo_inicial_real:,.2f}")
+        c2.metric("Variação do Período", f"R$ {var_periodo:,.2f}", delta=f"{var_periodo:,.2f}")
+        c3.metric("Saldo Final (Capital de Giro)", f"R$ {saldo_final_real:,.2f}")
         
         col1, col2 = st.columns(2)
         with col1:
             st.markdown(f"""
-            <div class="conta-card"><div class="conta-titulo">1. Atividades Operacionais</div>
-            <div class="dre-linha"><span>(+) Receitas</span> <span>R$ {op_in:,.2f}</span></div>
-            <div class="dre-linha"><span>(-) Despesas</span> <span>(R$ {op_out:,.2f})</span></div>
-            <div class="dre-total">Líquido Operacional: R$ {op_in - op_out:,.2f}</div></div>
-            
-            <div class="conta-card"><div class="conta-titulo">2. Movimentação de Ativos</div>
-            <div class="dre-linha"><span>(-) Créditos no Ativo (Saídas)</span> <span>(R$ {ativos_cre:,.2f})</span></div>
-            <div class="dre-linha" style="color:gray; font-style:italic;"><span>(Informativo) Débitos no Ativo</span> <span>R$ {ativos_deb:,.2f}</span></div>
-            <div class="conta-rodape" style="font-size:0.7rem; color:gray;">*Créditos no Ativo representam saída de recursos (Banco/Caixa).</div></div>
+            <div class="conta-card"><div class="conta-titulo">📥 Entradas Reais</div>
+            <div class="dre-linha"><span>(+) Receitas Operacionais</span> <span>R$ {ent_op:,.2f}</span></div>
+            <div class="dre-linha"><span>(+) Aportes de Capital (PL)</span> <span>R$ {ent_fin:,.2f}</span></div>
+            <div class="dre-total">Total Entradas: R$ {ent_op + ent_fin:,.2f}</div></div>
             """, unsafe_allow_html=True)
         with col2:
             st.markdown(f"""
-            <div class="conta-card" style="border-left: 5px solid #059669;"><div class="conta-titulo">3. Atividades de Financiamento</div>
-            <div class="dre-linha"><span>(+) Aportes (PL)</span> <span>R$ {fin_in:,.2f}</span></div>
-            <div class="dre-linha"><span>(-) Pagamento Dívidas (Passivo)</span> <span>(R$ {fin_out:,.2f})</span></div>
-            <div class="dre-total">Líquido Financiamento: R$ {fin_in - fin_out:,.2f}</div></div>
-            
-            <div class="conta-card" style="background: #1e293b; color: white;"><div class="conta-titulo" style="background: #0f172a;">Resumo Disponibilidade</div>
-            <div class="dre-linha" style="padding:10px"><span>Saldo Final</span> <span>R$ {s_ini + var_per:,.2f}</span></div></div>
+            <div class="conta-card" style="border-left: 5px solid #dc2626;"><div class="conta-titulo">out Saídas Reais</div>
+            <div class="dre-linha"><span>(-) Despesas Operacionais</span> <span>(R$ {sai_op:,.2f})</span></div>
+            <div class="dre-linha"><span>(-) Pagamento de Dívidas</span> <span>(R$ {sai_fin:,.2f})</span></div>
+            <div class="dre-linha"><span>(-) Saídas via Baixa de Ativos</span> <span>(R$ {sai_ativo:,.2f})</span></div>
+            <div class="dre-total">Total Saídas: (R$ {sai_op + sai_fin + sai_ativo:,.2f})</div></div>
             """, unsafe_allow_html=True)
 
         st.divider()
-        st.subheader("📑 Detalhamento por Natureza")
-        t1, t2, t3 = st.tabs(["🛒 Operacional", "🏗️ Ativos", "💰 Financiamento"])
-        with t1: st.dataframe(df_per[df_per['natureza'].isin(['Receita', 'Despesa'])][['data_lancamento', 'descricao', 'natureza', 'tipo', 'valor', 'justificativa']], use_container_width=True)
-        with t2: st.dataframe(df_per[df_per['natureza'] == 'Ativo'][['data_lancamento', 'descricao', 'natureza', 'tipo', 'valor', 'justificativa']], use_container_width=True)
-        with t3: st.dataframe(df_per[df_per['natureza'].isin(['Patrimônio Líquido', 'Passivo'])][['data_lancamento', 'descricao', 'natureza', 'tipo', 'valor', 'justificativa']], use_container_width=True)
+        st.subheader("📑 Detalhamento das Contas de Giro (Ativo)")
+        contas_giro = df[(df['natureza'] == 'Ativo') & (df['descricao'].str.contains('CAIXA|BANCO', case=False))]['descricao'].unique()
+        if len(contas_giro) > 0:
+            cols = st.columns(len(contas_giro))
+            for idx, c_giro in enumerate(contas_giro):
+                df_c = df[df['descricao'] == c_giro]
+                saldo_c = df_c[df_c['tipo'] == 'Débito']['valor'].sum() - df_c[df_c['tipo'] == 'Crédito']['valor'].sum()
+                cols[idx].metric(f"Disponibilidade: {c_giro}", f"R$ {saldo_c:,.2f}")
 
     elif st.session_state.menu_opcao == "⚙️ Gestão":
         st.subheader("⚙️ Gestão de Lançamentos")
