@@ -169,8 +169,10 @@ else:
             df_hist = target_df[(target_df['data_lancamento'] <= data_lim) & (target_df['status'].isin(status_liquidos))]
             saldo = 0.0
             for _, r in df_hist.iterrows():
+                # ENTRADAS REAIS (Receitas e Aportes de PL)
                 if r['natureza'] in ['Receita', 'Patrimônio Líquido'] and r['tipo'] == 'Crédito':
                     saldo += r['valor']
+                # SAÍDAS REAIS (Créditos no Ativo, Débitos em Despesa, Débitos no Passivo/Pagamentos)
                 elif r['tipo'] == 'Crédito' and r['natureza'] not in ['Receita', 'Patrimônio Líquido']:
                     saldo -= r['valor']
                 elif r['natureza'] in ['Despesa', 'Passivo', 'Encargos Financeiros'] and r['tipo'] == 'Débito':
@@ -187,9 +189,10 @@ else:
         ent_total = ent_op + ent_pl
 
         sai_op = df_per[df_per['natureza'] == 'Despesa'][df_per['tipo'] == 'Débito']['valor'].sum()
-        sai_div = df_per[df_per['natureza'] == 'Passivo'][df_per['tipo'] == 'Débito']['valor'].sum()
-        sai_atv = df_per[(df_per['natureza'] == 'Ativo') & (df_per['tipo'] == 'Crédito')]['valor'].sum()
-        sai_total = sai_op + sai_div + sai_atv
+        # Inclusão de Débitos no Passivo como Saída Real (Pagamento de Dívidas)
+        sai_passivo = df_per[df_per['natureza'] == 'Passivo'][df_per['tipo'] == 'Débito']['valor'].sum()
+        sai_atv_cred = df_per[(df_per['natureza'] == 'Ativo') & (df_per['tipo'] == 'Crédito')]['valor'].sum()
+        sai_total = sai_op + sai_passivo + sai_atv_cred
 
         # --- INFORMATIVO DE LIQUIDEZ ---
         proporcao = (ent_total / sai_total) if sai_total > 0 else (ent_total if ent_total > 0 else 0)
@@ -202,7 +205,6 @@ else:
         c2.metric("Variação do Período", f"R$ {var_periodo:,.2f}", delta=f"{var_periodo:,.2f}")
         c3.metric("Saldo Final (Capital de Giro)", f"R$ {saldo_final_real:,.2f}")
         
-        # Grid de Liquidez
         l1, l2 = st.columns(2)
         with l1:
             st.markdown(f"""<div style="background:{status_cor}; color:white; padding:15px; border-radius:10px; text-align:center;">
@@ -218,7 +220,7 @@ else:
         with col1:
             st.markdown(f"""<div class="conta-card"><div class="conta-titulo">📥 Entradas Reais</div><div class="dre-linha"><span>(+) Receitas Operacionais</span> <span>R$ {ent_op:,.2f}</span></div><div class="dre-linha"><span>(+) Aportes de Capital (PL)</span> <span>R$ {ent_pl:,.2f}</span></div><div class="dre-total">Total: R$ {ent_total:,.2f}</div></div>""", unsafe_allow_html=True)
         with col2:
-            st.markdown(f"""<div class="conta-card" style="border-left: 5px solid #dc2626;"><div class="conta-titulo">out Saídas Reais</div><div class="dre-linha"><span>(-) Despesas Operacionais</span> <span>(R$ {sai_op:,.2f})</span></div><div class="dre-linha"><span>(-) Pagamento de Dívidas</span> <span>(R$ {sai_div:,.2f})</span></div><div class="dre-linha"><span>(-) Saídas em Crédito (Ativos/Baixas)</span> <span>(R$ {sai_atv:,.2f})</span></div><div class="dre-total">Total: (R$ {sai_total:,.2f})</div></div>""", unsafe_allow_html=True)
+            st.markdown(f"""<div class="conta-card" style="border-left: 5px solid #dc2626;"><div class="conta-titulo">out Saídas Reais</div><div class="dre-linha"><span>(-) Despesas Operacionais</span> <span>(R$ {sai_op:,.2f})</span></div><div class="dre-linha"><span>(-) Pagamento de Dívidas (Passivo)</span> <span>(R$ {sai_passivo:,.2f})</span></div><div class="dre-linha"><span>(-) Saídas em Crédito (Ativos)</span> <span>(R$ {sai_atv_cred:,.2f})</span></div><div class="dre-total">Total: (R$ {sai_total:,.2f})</div></div>""", unsafe_allow_html=True)
 
         st.divider()
         st.subheader("📑 Saldos de Disponibilidades")
