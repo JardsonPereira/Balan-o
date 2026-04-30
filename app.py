@@ -200,24 +200,21 @@ else:
 
     elif st.session_state.menu_opcao == "💸 Fluxo de Caixa":
         st.subheader("🌊 Demonstração do Fluxo de Caixa")
-        df_caixa_total = df[df['status'] != 'Pendente'].copy()
+        
+        # --- ALTERAÇÃO AQUI: Agora aceita status 'Investimento' para afetar o caixa ---
+        df_caixa_total = df[df['status'].isin(['Pago', 'Investimento', 'Entrada'])].copy()
         
         def calc_atividades(tdf):
             op_in = tdf[(tdf['natureza'] == 'Receita') & (tdf['tipo'] == 'Crédito')]['valor'].sum()
             op_out = tdf[(tdf['natureza'] == 'Despesa') & (tdf['tipo'] == 'Débito')]['valor'].sum()
-            # Ajuste: Estoque como Ativo/Investimento influencia o fluxo operacional (entradas e saídas de mercadoria)
             estoque_out = tdf[(tdf['natureza'] == 'Ativo') & (tdf['tipo'] == 'Crédito') & (tdf['descricao'].str.contains('ESTOQUE', case=False))]['valor'].sum()
             estoque_in = tdf[(tdf['natureza'] == 'Ativo') & (tdf['tipo'] == 'Débito') & (tdf['descricao'].str.contains('ESTOQUE', case=False))]['valor'].sum()
-            
             fin_in = tdf[(tdf['natureza'] == 'Patrimônio Líquido') & (tdf['tipo'] == 'Crédito')]['valor'].sum()
             fin_out = tdf[(tdf['natureza'] == 'Passivo') & (tdf['tipo'] == 'Débito')]['valor'].sum()
-            
-            # Investimentos (Ativos que não sejam caixa ou estoque)
             inv_in = tdf[(tdf['natureza'] == 'Ativo') & (tdf['tipo'] == 'Crédito') & (~tdf['descricao'].str.contains('CAIXA|BANCO|ESTOQUE', case=False))]['valor'].sum()
             total_compras_ativo = tdf[(tdf['natureza'] == 'Ativo') & (tdf['tipo'] == 'Débito') & (~tdf['descricao'].str.contains('CAIXA|BANCO|ESTOQUE', case=False))]['valor'].sum()
             divida_pendente = df[(df['natureza'] == 'Passivo') & (df['status'] == 'Pendente') & (df['tipo'] == 'Crédito')]['valor'].sum()
             inv_out = max(0, total_compras_ativo - divida_pendente)
-            
             return (op_in + estoque_out), (op_out + estoque_in), fin_in, fin_out, inv_in, inv_out
 
         oi, oo, fi, fo, ii, io = calc_atividades(df_caixa_total[df_caixa_total['data_lancamento'] < data_ini])
