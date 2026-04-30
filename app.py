@@ -55,8 +55,6 @@ def carregar_dados(u_id):
             temp_df['data_lancamento'] = pd.to_datetime(temp_df['data_lancamento']).dt.date
             if 'status' not in temp_df.columns: temp_df['status'] = 'Pago'
             if 'justificativa' not in temp_df.columns: temp_df['justificativa'] = ''
-            if 'created_at' in temp_df.columns:
-                temp_df['created_at'] = pd.to_datetime(temp_df['created_at'])
         return temp_df
     except Exception: return pd.DataFrame()
 
@@ -156,90 +154,71 @@ else:
                     df_c = df_g[df_g['descricao'] == conta]
                     v_d, v_c = df_c[df_c['tipo'] == 'Débito']['valor'].sum(), df_c[df_c['tipo'] == 'Crédito']['valor'].sum()
                     saldo = (v_d - v_c) if grupo in ["Ativo", "Despesa", "Encargos Financeiros"] else (v_c - v_d)
-                    
                     deb_html = "".join([f"<div class='valor-item valor-deb'>D: {r['valor']:,.2f}<span class='just-hint'>{r['justificativa']}</span></div>" for _,r in df_c[df_c['tipo']=='Débito'].iterrows()])
                     cre_html = "".join([f"<div class='valor-item valor-cre'>C: {r['valor']:,.2f}<span class='just-hint'>{r['justificativa']}</span></div>" for _,r in df_c[df_c['tipo']=='Crédito'].iterrows()])
-                    
                     with cols[i % 3]:
                         st.markdown(f"""<div class="conta-card"><div class="conta-titulo">{conta}</div><div class="conta-corpo"><div class="lado-debito">{deb_html}</div><div class="lado-credito">{cre_html}</div></div><div class="conta-rodape">Saldo: R$ {saldo:,.2f}</div></div>""", unsafe_allow_html=True)
+
+    elif st.session_state.menu_opcao == "🧾 Balancete":
+        st.subheader(f"🧾 Balancete de Verificação")
+        bal_data = []
+        for conta in sorted(df_periodo['descricao'].unique()):
+            df_c = df_periodo[df_periodo['descricao'] == conta]
+            d, c = df_c[df_c['tipo'] == 'Débito']['valor'].sum(), df_c[df_c['tipo'] == 'Crédito']['valor'].sum()
+            bal_data.append({"Conta": conta, "Débito": d, "Crédito": c, "Saldo Devedor": d-c if d > c else 0, "Saldo Credor": c-d if c > d else 0})
+        bal_df = pd.DataFrame(bal_data)
+        st.table(bal_df.style.format(precision=2, decimal=',', thousands='.'))
+        c1, c2, c3, c4 = st.columns(4)
+        c1.metric("Total Débitos", f"R$ {bal_df['Débito'].sum():,.2f}")
+        c2.metric("Total Créditos", f"R$ {bal_df['Crédito'].sum():,.2f}")
+        c3.metric("Saldo Devedor", f"R$ {bal_df['Saldo Devedor'].sum():,.2f}")
+        c4.metric("Saldo Credor", f"R$ {bal_df['Saldo Credor'].sum():,.2f}")
 
     elif st.session_state.menu_opcao == "💸 Fluxo de Caixa":
         st.subheader("🌊 Fluxo de Caixa (Conciliação de Giro)")
         status_liquidos = ["Pago", "Entrada", "Investimento"]
-        
         def get_giro_na_data(target_df, data_lim):
             df_hist = target_df[(target_df['data_lancamento'] <= data_lim) & (target_df['status'].isin(status_liquidos))]
             saldo = 0.0
             for _, r in df_hist.iterrows():
-                if r['natureza'] in ['Receita', 'Patrimônio Líquido'] and r['tipo'] == 'Crédito':
-                    saldo += r['valor']
-                elif r['tipo'] == 'Crédito' and r['natureza'] not in ['Receita', 'Patrimônio Líquido']:
-                    saldo -= r['valor']
-                elif r['natureza'] in ['Despesa', 'Passivo', 'Encargos Financeiros'] and r['tipo'] == 'Débito':
-                    saldo -= r['valor']
+                if r['natureza'] in ['Receita', 'Patrimônio Líquido'] and r['tipo'] == 'Crédito': saldo += r['valor']
+                elif r['tipo'] == 'Crédito' and r['natureza'] not in ['Receita', 'Patrimônio Líquido']: saldo -= r['valor']
+                elif r['natureza'] in ['Despesa', 'Passivo', 'Encargos Financeiros'] and r['tipo'] == 'Débito': saldo -= r['valor']
             return saldo
-
-        saldo_final_real = get_giro_na_data(df, data_fim)
-        saldo_inicial_real = get_giro_na_data(df, data_ini - timedelta(days=1))
-        var_periodo = saldo_final_real - saldo_inicial_real
-
+        saldo_f = get_giro_na_data(df, data_fim)
+        saldo_i = get_giro_na_data(df, data_ini - timedelta(days=1))
+        var_per = saldo_f - saldo_i
         df_per = df[(df['status'].isin(status_liquidos)) & (df['data_lancamento'] >= data_ini) & (df['data_lancamento'] <= data_fim)]
         ent_op = df_per[df_per['natureza'] == 'Receita'][df_per['tipo'] == 'Crédito']['valor'].sum()
         ent_pl = df_per[df_per['natureza'] == 'Patrimônio Líquido'][df_per['tipo'] == 'Crédito']['valor'].sum()
-        ent_total = ent_op + ent_pl
-
         sai_op = df_per[df_per['natureza'] == 'Despesa'][df_per['tipo'] == 'Débito']['valor'].sum()
-        sai_passivo = df_per[df_per['natureza'] == 'Passivo'][df_per['tipo'] == 'Débito']['valor'].sum()
-        sai_encargos = df_per[df_per['natureza'] == 'Encargos Financeiros'][df_per['tipo'] == 'Débito']['valor'].sum()
-        sai_atv_cred = df_per[(df_per['natureza'] == 'Ativo') & (df_per['tipo'] == 'Crédito')]['valor'].sum()
-        sai_total = sai_op + sai_passivo + sai_encargos + sai_atv_cred
-
-        # --- INFORMATIVO DE LIQUIDEZ ---
-        proporcao = (ent_total / sai_total) if sai_total > 0 else (ent_total if ent_total > 0 else 0)
-        tem_liquidez = ent_total > sai_total
-        status_cor = "#059669" if tem_liquidez else "#dc2626"
-        status_txt = "COM LIQUIDEZ" if tem_liquidez else "SEM LIQUIDEZ (DÉFICIT)"
-
-        c1, c2, c3 = st.columns(3)
-        c1.metric("Saldo Inicial (Giro)", f"R$ {saldo_inicial_real:,.2f}")
-        c2.metric("Variação do Período", f"R$ {var_periodo:,.2f}", delta=f"{var_periodo:,.2f}")
-        c3.metric("Saldo Final (Capital de Giro)", f"R$ {saldo_final_real:,.2f}")
-        
-        l1, l2 = st.columns(2)
-        with l1:
-            st.markdown(f"""<div style="background:{status_cor}; color:white; padding:15px; border-radius:10px; text-align:center;">
-                <small>STATUS DE LIQUIDEZ NO PERÍODO</small><br><strong style="font-size:1.5rem;">{status_txt}</strong>
-            </div>""", unsafe_allow_html=True)
-        with l2:
-            st.markdown(f"""<div style="background:#1e293b; color:white; padding:15px; border-radius:10px; text-align:center;">
-                <small>PROPORÇÃO (ENTRADAS / SAÍDAS)</small><br><strong style="font-size:1.5rem;">{proporcao:.2f}x</strong>
-            </div>""", unsafe_allow_html=True)
-
-        st.divider()
+        sai_pas = df_per[df_per['natureza'] == 'Passivo'][df_per['tipo'] == 'Débito']['valor'].sum()
+        sai_enc = df_per[df_per['natureza'] == 'Encargos Financeiros'][df_per['tipo'] == 'Débito']['valor'].sum()
+        sai_atv = df_per[(df_per['natureza'] == 'Ativo') & (df_per['tipo'] == 'Crédito')]['valor'].sum()
+        e_total, s_total = ent_op + ent_pl, sai_op + sai_pas + sai_enc + sai_atv
+        prop = (e_total / s_total) if s_total > 0 else 0
+        l1, l2, l3 = st.columns(3)
+        l1.metric("Saldo Inicial", f"R$ {saldo_i:,.2f}")
+        l2.metric("Variação", f"R$ {var_per:,.2f}", delta=f"{var_per:,.2f}")
+        l3.metric("Saldo Final", f"R$ {saldo_f:,.2f}")
+        st.info(f"Liquidez: {'COM LIQUIDEZ' if e_total > s_total else 'DÉFICIT'} | Proporção: {prop:.2f}x")
         col1, col2 = st.columns(2)
         with col1:
-            st.markdown(f"""<div class="conta-card"><div class="conta-titulo">📥 Entradas Reais</div><div class="dre-linha"><span>(+) Receitas Operacionais</span> <span>R$ {ent_op:,.2f}</span></div><div class="dre-linha"><span>(+) Aportes de Capital (PL)</span> <span>R$ {ent_pl:,.2f}</span></div><div class="dre-total">Total: R$ {ent_total:,.2f}</div></div>""", unsafe_allow_html=True)
+            st.markdown(f"""<div class="conta-card"><div class="conta-titulo">📥 Entradas</div><div class="dre-linha"><span>(+) Receitas</span> <span>R$ {ent_op:,.2f}</span></div><div class="dre-linha"><span>(+) Aportes (PL)</span> <span>R$ {ent_pl:,.2f}</span></div></div>""", unsafe_allow_html=True)
         with col2:
-            st.markdown(f"""<div class="conta-card" style="border-left: 5px solid #dc2626;"><div class="conta-titulo">out Saídas Reais</div><div class="dre-linha"><span>(-) Despesas Operacionais</span> <span>(R$ {sai_op:,.2f})</span></div><div class="dre-linha"><span>(-) Pagamento de Dívidas (Passivo)</span> <span>(R$ {sai_passivo:,.2f})</span></div><div class="dre-linha"><span>(-) Encargos Financeiros</span> <span>(R$ {sai_encargos:,.2f})</span></div><div class="dre-linha"><span>(-) Saídas em Crédito (Ativos)</span> <span>(R$ {sai_atv_cred:,.2f})</span></div><div class="dre-total">Total: (R$ {sai_total:,.2f})</div></div>""", unsafe_allow_html=True)
-
-        st.divider()
-        st.subheader("📑 Saldos de Disponibilidades")
-        contas_dispo = df[(df['natureza'].isin(['Ativo', 'Patrimônio Líquido'])) & (df['descricao'].str.contains('CAIXA|BANCO|CAPITAL', case=False))]['descricao'].unique()
+            st.markdown(f"""<div class="conta-card" style="border-left: 5px solid #dc2626;"><div class="conta-titulo">out Saídas</div><div class="dre-linha"><span>(-) Despesas</span> <span>R$ {sai_op:,.2f}</span></div><div class="dre-linha"><span>(-) Passivo</span> <span>R$ {sai_pas:,.2f}</span></div><div class="dre-linha"><span>(-) Encargos</span> <span>R$ {sai_enc:,.2f}</span></div><div class="dre-linha"><span>(-) Crédito Ativo</span> <span>R$ {sai_atv:,.2f}</span></div></div>""", unsafe_allow_html=True)
+        st.subheader("📑 Saldos Bancários/Caixa")
+        contas_dispo = df[(df['natureza'] == 'Ativo') & (df['descricao'].str.contains('CAIXA|BANCO', case=False))]['descricao'].unique()
         if len(contas_dispo) > 0:
             cols = st.columns(len(contas_dispo))
             for idx, c_nome in enumerate(sorted(contas_dispo)):
                 df_c = df[(df['descricao'] == c_nome) & (df['data_lancamento'] <= data_fim)]
-                if not df_c.empty:
-                    nat_conta = df_c['natureza'].iloc[0]
-                    saldo_atual = df_c[df_c['tipo'] == 'Débito']['valor'].sum() - df_c[df_c['tipo'] == 'Crédito']['valor'].sum() if nat_conta == 'Ativo' else df_c[df_c['tipo'] == 'Crédito']['valor'].sum() - df_c[df_c['tipo'] == 'Débito']['valor'].sum()
-                    with cols[idx % len(contas_dispo)]:
-                        st.markdown(f"""<div class="conta-card"><div class="conta-titulo">{c_nome}</div><div style="padding: 20px; text-align:center;"><h3 style="margin:0;">R$ {saldo_atual:,.2f}</h3></div><div class="conta-rodape">Saldo em {data_fim.strftime('%d/%m/%Y')}</div></div>""", unsafe_allow_html=True)
+                saldo_c = df_c[df_c['tipo'] == 'Débito']['valor'].sum() - df_c[df_c['tipo'] == 'Crédito']['valor'].sum()
+                with cols[idx]: st.metric(c_nome, f"R$ {saldo_c:,.2f}")
 
     elif st.session_state.menu_opcao == "📈 DRE":
         st.subheader("📈 DRE Detalhada")
-        rec = df_periodo[df_periodo['natureza'] == 'Receita']
-        desp = df_periodo[df_periodo['natureza'] == 'Despesa']
-        enc = df_periodo[df_periodo['natureza'] == 'Encargos Financeiros']
+        rec, desp, enc = df_periodo[df_periodo['natureza'] == 'Receita'], df_periodo[df_periodo['natureza'] == 'Despesa'], df_periodo[df_periodo['natureza'] == 'Encargos Financeiros']
         t_rec = rec[rec['tipo'] == 'Crédito']['valor'].sum() - rec[rec['tipo'] == 'Débito']['valor'].sum()
         t_desp = desp[desp['tipo'] == 'Débito']['valor'].sum() - desp[desp['tipo'] == 'Crédito']['valor'].sum()
         t_enc = enc[enc['tipo'] == 'Débito']['valor'].sum() - enc[enc['tipo'] == 'Crédito']['valor'].sum()
@@ -247,25 +226,11 @@ else:
 
     elif st.session_state.menu_opcao == "⚙️ Gestão":
         st.subheader("⚙️ Gestão de Lançamentos")
-        
-        # Opção de ordenação
-        ordem_sel = st.selectbox("Ordenar por data de criação:", ["Mais recentes primeiro", "Mais antigos primeiro"])
-        ascending_bool = True if ordem_sel == "Mais antigos primeiro" else False
-        
-        # Ordenar o DataFrame original (ou o filtrado por período, dependendo da sua preferência)
-        # Aqui ordenamos por created_at se existir, senão pela data de lançamento
-        col_sort = 'created_at' if 'created_at' in df.columns else 'data_lancamento'
-        df_sorted = df.sort_values(by=col_sort, ascending=ascending_bool)
-        
-        for _, row in df_sorted.iterrows():
+        ordem = st.selectbox("Ordenar por:", ["Mais recentes", "Mais antigos"])
+        df_gestao = df.sort_values(by='data_lancamento', ascending=(ordem == "Mais antigos"))
+        for _, row in df_gestao.iterrows():
             with st.container():
                 c1, c2, c3 = st.columns([5, 1, 1])
-                just_txt = f" | {row['justificativa']}" if row['justificativa'] else ""
-                c1.markdown(f"**[{row['data_lancamento']}] {row['descricao']}** - R$ {row['valor']:,.2f} ({row['tipo']}){just_txt}")
-                if c2.button("✏️", key=f"ed_{row['id']}"): 
-                    st.session_state.edit_id = row['id']
-                    st.rerun()
-                if c3.button("🗑️", key=f"del_{row['id']}"): 
-                    supabase.table("lancamentos").delete().eq("id", row['id']).execute()
-                    st.cache_data.clear()
-                    st.rerun()
+                c1.markdown(f"**[{row['data_lancamento']}] {row['descricao']}** - R$ {row['valor']:,.2f} ({row['tipo']})")
+                if c2.button("✏️", key=f"ed_{row['id']}"): st.session_state.edit_id = row['id']; st.rerun()
+                if c3.button("🗑️", key=f"del_{row['id']}"): supabase.table("lancamentos").delete().eq("id", row['id']).execute(); st.cache_data.clear(); st.rerun()
