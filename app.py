@@ -168,7 +168,6 @@ else:
         bal_df = pd.DataFrame(bal_data)
         st.table(bal_df.style.format(precision=2, decimal=',', thousands='.'))
         
-        # Restaurando os cards de resultados do balancete
         c1, c2, c3, c4 = st.columns(4)
         c1.metric("Total Débitos", f"R$ {bal_df['Débito'].sum():,.2f}")
         c2.metric("Total Créditos", f"R$ {bal_df['Crédito'].sum():,.2f}")
@@ -202,6 +201,7 @@ else:
     elif st.session_state.menu_opcao == "💸 Fluxo de Caixa":
         st.subheader("🌊 Demonstração do Fluxo de Caixa (Corrigida)")
         
+        # Filtro: PENDENTE NÃO AFETA O FLUXO DE CAIXA
         df_caixa_full = df[df['status'].isin(['Pago', 'Entrada', 'Investimento'])].copy()
         
         def calc_atividades(tdf):
