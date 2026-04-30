@@ -185,52 +185,51 @@ else:
         st.markdown(f"<div class='dre-total dre-linha' style='background:{'#059669' if lucro>=0 else '#dc2626'}; color:white;'><span>LUCRO LÍQUIDO</span> <span>R$ {lucro:,.2f}</span></div>", unsafe_allow_html=True)
 
     elif st.session_state.menu_opcao == "💸 Fluxo de Caixa":
-        st.subheader("🌊 Demonstração do Fluxo de Caixa (Líquido Contábil)")
+        st.subheader("🌊 Demonstração do Fluxo de Caixa (Líquido)")
         
-        # Filtro dinâmico: Apenas o que transita pelo caixa (Não Pendente)
-        df_caixa_real = df[df['status'] != 'Pendente'].copy()
+        # REGRA MESTRA: O saldo final deve ser a soma real das contas de disponibilidade (Caixa/Banco)
+        # Filtramos TUDO que não seja Pendente para calcular o movimento real do dinheiro
+        df_caixa_total = df[df['status'] != 'Pendente'].copy()
         
-        def calc_fluxo(tdf):
-            # Operacional: Receitas, Despesas e Variação de Estoque Real
+        def calc_atividades(tdf):
+            # Operacional: Receitas e Despesas (Pagos/Entrados) + Variação de Estoque Real
             op_in = tdf[(tdf['natureza'] == 'Receita') & (tdf['tipo'] == 'Crédito')]['valor'].sum()
             op_out = tdf[(tdf['natureza'] == 'Despesa') & (tdf['tipo'] == 'Débito')]['valor'].sum()
-            estoque = tdf[(tdf['natureza'] == 'Ativo') & (tdf['descricao'].str.contains('ESTOQUE', case=False))]
-            e_baixa = estoque[estoque['tipo'] == 'Crédito']['valor'].sum() # Saída de estoque/baixa contábil
-            e_compra = estoque[estoque['tipo'] == 'Débito']['valor'].sum() # Entrada de estoque/compra
+            estoque_real = tdf[(tdf['natureza'] == 'Ativo') & (tdf['descricao'].str.contains('ESTOQUE', case=False))]
+            e_in = estoque_real[estoque_real['tipo'] == 'Débito']['valor'].sum()
+            e_out = estoque_real[estoque_real['tipo'] == 'Crédito']['valor'].sum()
             
-            # Financiamento: Aportes de capital e pagamentos de passivos reais
+            # Financiamento: Aportes (Entrada) e Amortizações de dívidas (Saída)
             fin_in = tdf[(tdf['natureza'] == 'Patrimônio Líquido') & (tdf['tipo'] == 'Crédito')]['valor'].sum()
             fin_out = tdf[(tdf['natureza'] == 'Passivo') & (tdf['tipo'] == 'Débito')]['valor'].sum()
             
-            # Investimento: Bens imobilizados que não sejam giro (ignora estoque)
-            imob = tdf[(tdf['natureza'] == 'Ativo') & (~tdf['descricao'].str.contains('CAIXA|BANCO|ESTOQUE', case=False))]
-            inv_in = imob[imob['tipo'] == 'Crédito']['valor'].sum()
-            inv_out = imob[imob['tipo'] == 'Débito']['valor'].sum()
+            # Investimento: Apenas desembolsos reais para bens (Imobilizado) que não sejam estoque ou banco
+            ativo_real = tdf[(tdf['natureza'] == 'Ativo') & (~tdf['descricao'].str.contains('CAIXA|BANCO|ESTOQUE', case=False))]
+            inv_in = ativo_real[ativo_real['tipo'] == 'Crédito']['valor'].sum()
+            inv_out = ativo_real[ativo_real['tipo'] == 'Débito']['valor'].sum()
             
-            # Líquido consolidado
-            return (op_in - op_out + e_baixa - e_compra), fin_in, fin_out, inv_in, inv_out
+            return (op_in - op_out + e_out - e_in), fin_in, fin_out, inv_in, inv_out
 
-        # Saldo Inicial Acumulado
-        oi, fi, fo, ii, io = calc_fluxo(df_caixa_real[df_caixa_real['data_lancamento'] < data_ini])
-        s_ini = oi + (fi - fo) + (ii - io)
+        # Cálculo dinâmico baseado nos lançamentos "Não Pendentes"
+        liq_op, fi, fo, ii, io = calc_atividades(df_caixa_total[df_caixa_total['data_lancamento'] < data_ini])
+        s_ini = liq_op + (fi - fo) + (ii - io)
         
-        # Movimentação do Período
-        df_per_c = df_caixa_real[(df_caixa_real['data_lancamento'] >= data_ini) & (df_caixa_real['data_lancamento'] <= data_fim)]
-        op_p, fi_p, fo_p, ii_p, io_p = calc_fluxo(df_per_c)
-        var_per = op_p + (fi_p - fo_p) + (ii_p - io_p)
+        df_per = df_caixa_total[(df_caixa_total['data_lancamento'] >= data_ini) & (df_caixa_total['data_lancamento'] <= data_fim)]
+        liq_op_p, fi_p, fo_p, ii_p, io_p = calc_atividades(df_per)
+        var_per = liq_op_p + (fi_p - fo_p) + (ii_p - io_p)
 
         c1, c2, c3 = st.columns(3)
         c1.metric("Saldo Inicial", f"R$ {s_ini:,.2f}")
         c2.metric("Variação Líquida", f"R$ {var_per:,.2f}", delta=f"{var_per:,.2f}")
-        c3.metric("Saldo Disponível (Caixa/Banco)", f"R$ {s_ini + var_per:,.2f}")
+        c3.metric("Fluxo de Caixa Final", f"R$ {s_ini + var_per:,.2f}")
         
         col1, col2 = st.columns(2)
         with col1:
-            st.markdown(f"""<div class="conta-card"><div class="conta-titulo">1. Atividades Operacionais</div><div class="dre-linha"><span>Movimentação Líquida (Giro)</span> <span>R$ {op_p:,.2f}</span></div><div class="dre-total">Líquido Operacional: R$ {op_p:,.2f}</div></div>
+            st.markdown(f"""<div class="conta-card"><div class="conta-titulo">1. Atividades Operacionais</div><div class="dre-linha"><span>Variação Líquida (Rec/Desp/Estoque)</span> <span>R$ {liq_op_p:,.2f}</span></div><div class="dre-total">Líquido Operacional: R$ {liq_op_p:,.2f}</div></div>
             <div class="conta-card"><div class="conta-titulo">2. Atividades de Investimento</div><div class="dre-linha"><span>(+) Venda de Ativos</span> <span>R$ {ii_p:,.2f}</span></div><div class="dre-linha"><span>(-) Compra de Ativos (Real)</span> <span>(R$ {io_p:,.2f})</span></div><div class="dre-total">Líquido Investimento: R$ {ii_p - io_p:,.2f}</div></div>""", unsafe_allow_html=True)
         with col2:
             st.markdown(f"""<div class="conta-card" style="border-left: 5px solid #059669;"><div class="conta-titulo">3. Atividades de Financiamento</div><div class="dre-linha"><span>(+) Aportes/Capital</span> <span>R$ {fi_p:,.2f}</span></div><div class="dre-linha"><span>(-) Amortização de Dívidas</span> <span>(R$ {fo_p:,.2f})</span></div><div class="dre-total">Líquido Financiamento: R$ {fi_p - fo_p:,.2f}</div></div>
-            <div class="conta-card" style="background: #1e293b; color: white;"><div class="conta-titulo" style="background: #0f172a;">Conciliação Final</div><div class="dre-linha" style="padding:10px"><span>Total Disponível (Razonetes)</span> <span>R$ {s_ini + var_per:,.2f}</span></div></div>""", unsafe_allow_html=True)
+            <div class="conta-card" style="background: #1e293b; color: white;"><div class="conta-titulo" style="background: #0f172a;">Disponibilidade</div><div class="dre-linha" style="padding:10px"><span>Saldo Final (Banco + Caixa)</span> <span>R$ {s_ini + var_per:,.2f}</span></div></div>""", unsafe_allow_html=True)
 
     elif st.session_state.menu_opcao == "⚙️ Gestão":
         st.subheader("⚙️ Gestão de Lançamentos")
