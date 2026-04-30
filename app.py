@@ -90,8 +90,9 @@ with st.sidebar:
         tipo = st.radio("Operação", ["Débito", "Crédito"], index=0 if item_edit['tipo'] == "Débito" else 1, horizontal=True)
         valor = st.number_input("Valor", min_value=0.0, value=float(item_edit['valor']))
         
-        opcoes_status = ["Pago", "Entrada", "Pendente", "Investimento", "Transferência Interna (Não afeta Caixa)"]
-        status_pag = st.selectbox("Status Financeiro", opcoes_status, index=0)
+        # AJUSTE NO STATUS: Unificado para garantir o salvamento
+        opcoes_status = ["Pago", "Entrada", "Pendente", "Investimento", "Transferência Interna"]
+        status_pag = st.selectbox("Status Financeiro", opcoes_status, index=opcoes_status.index(item_edit['status']) if item_edit['status'] in opcoes_status else 0)
         just = st.text_area("Justificativa", value=item_edit['justificativa'])
         
         if st.form_submit_button("Confirmar Lançamento"):
@@ -110,18 +111,14 @@ with st.sidebar:
 
 # --- CSS ---
 st.markdown("""<style>
-    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap');
-    html, body, [class*="css"] { font-family: 'Inter', sans-serif; }
-    .stApp { background-color: #f8fafc; }
     .conta-card { background: white; border-radius: 12px; box-shadow: 0 4px 12px rgba(0,0,0,0.05); margin-bottom: 20px; overflow: hidden; border: 1px solid #e2e8f0; }
     .conta-titulo { background: #1e293b; color: white; padding: 10px; text-align: center; font-weight: 700; text-transform: uppercase; font-size: 0.85rem; border-bottom: 2px solid #334155; }
     .conta-corpo { display: flex; min-height: 80px; position: relative; }
     .conta-corpo::after { content: ""; position: absolute; left: 50%; top: 0; bottom: 0; width: 1.5px; background-color: #cbd5e1; }
     .lado-debito, .lado-credito { flex: 1; padding: 10px; }
-    .valor-item { font-size: 0.8rem; margin-bottom: 4px; line-height: 1.2; }
-    .valor-deb { color: #059669; font-weight: 600; }
-    .valor-cre { color: #dc2626; font-weight: 600; text-align: right; }
-    .just-hint { font-size: 0.7rem; color: #64748b; font-style: italic; display: block; margin-top: 2px; }
+    .valor-deb { color: #059669; font-weight: 600; font-size: 0.8rem; }
+    .valor-cre { color: #dc2626; font-weight: 600; text-align: right; font-size: 0.8rem; }
+    .just-hint { font-size: 0.7rem; color: #64748b; font-style: italic; display: block; }
     .conta-rodape { padding: 8px; background: #f8fafc; border-top: 1.5px solid #1e293b; text-align: center; font-weight: 700; font-size: 0.85rem; }
     .dre-linha { display: flex; justify-content: space-between; padding: 5px 0; border-bottom: 1px solid #e2e8f0; }
     .dre-total { font-weight: 700; background-color: #e2e8f0; padding: 8px 5px; margin-top: 10px; }
@@ -131,8 +128,8 @@ st.title("📑 Sistema Contábil Digital")
 
 # --- NAVEGAÇÃO ---
 col_nav = st.columns(5)
-opcoes = ["📊 Razonetes", "🧾 Balancete", "📈 DRE", "💸 Fluxo de Caixa", "⚙️ Gestão"]
-for i, op in enumerate(opcoes):
+opcoes_menu = ["📊 Razonetes", "🧾 Balancete", "📈 DRE", "💸 Fluxo de Caixa", "⚙️ Gestão"]
+for i, op in enumerate(opcoes_menu):
     if col_nav[i].button(op, use_container_width=True): st.session_state.menu_opcao = op
 
 st.divider()
@@ -155,13 +152,13 @@ else:
                     df_c = df_g[df_g['descricao'] == conta]
                     v_d, v_c = df_c[df_c['tipo'] == 'Débito']['valor'].sum(), df_c[df_c['tipo'] == 'Crédito']['valor'].sum()
                     saldo = (v_d - v_c) if grupo in ["Ativo", "Despesa", "Encargos Financeiros"] else (v_c - v_d)
-                    deb_html = "".join([f"<div class='valor-item valor-deb'>D: {r['valor']:,.2f}<span class='just-hint'>{r['justificativa']}</span></div>" for _,r in df_c[df_c['tipo']=='Débito'].iterrows()])
-                    cre_html = "".join([f"<div class='valor-item valor-cre'>C: {r['valor']:,.2f}<span class='just-hint'>{r['justificativa']}</span></div>" for _,r in df_c[df_c['tipo']=='Crédito'].iterrows()])
+                    deb_html = "".join([f"<div class='valor-deb'>D: {r['valor']:,.2f}<span class='just-hint'>{r['justificativa']}</span></div>" for _,r in df_c[df_c['tipo']=='Débito'].iterrows()])
+                    cre_html = "".join([f"<div class='valor-cre'>C: {r['valor']:,.2f}<span class='just-hint'>{r['justificativa']}</span></div>" for _,r in df_c[df_c['tipo']=='Crédito'].iterrows()])
                     with cols[i % 3]:
                         st.markdown(f"""<div class="conta-card"><div class="conta-titulo">{conta}</div><div class="conta-corpo"><div class="lado-debito">{deb_html}</div><div class="lado-credito">{cre_html}</div></div><div class="conta-rodape">Saldo: R$ {saldo:,.2f}</div></div>""", unsafe_allow_html=True)
 
     elif st.session_state.menu_opcao == "🧾 Balancete":
-        st.subheader(f"🧾 Balancete de Verificação")
+        st.subheader("🧾 Balancete de Verificação")
         bal_data = []
         for conta in sorted(df_periodo['descricao'].unique()):
             df_c = df_periodo[df_periodo['descricao'] == conta]
@@ -176,11 +173,12 @@ else:
         c4.metric("Saldo Credor", f"R$ {bal_df['Saldo Credor'].sum():,.2f}")
 
     elif st.session_state.menu_opcao == "💸 Fluxo de Caixa":
-        st.subheader("🌊 Fluxo de Caixa (Conciliação de Giro)")
-        status_liquidos = ["Pago", "Entrada", "Investimento"]
+        st.subheader("🌊 Fluxo de Caixa")
+        # Filtro de liquidez ignora Transferência Interna
+        status_l = ["Pago", "Entrada", "Investimento"]
         
-        def get_giro_na_data(target_df, data_lim):
-            df_hist = target_df[(target_df['data_lancamento'] <= data_lim) & (target_df['status'].isin(status_liquidos))]
+        def get_giro(target_df, data_lim):
+            df_hist = target_df[(target_df['data_lancamento'] <= data_lim) & (target_df['status'].isin(status_l))]
             saldo = 0.0
             for _, r in df_hist.iterrows():
                 if r['natureza'] in ['Receita', 'Patrimônio Líquido'] and r['tipo'] == 'Crédito': saldo += r['valor']
@@ -188,41 +186,32 @@ else:
                 elif r['natureza'] in ['Despesa', 'Passivo', 'Encargos Financeiros'] and r['tipo'] == 'Débito': saldo -= r['valor']
             return saldo
 
-        sf_real = get_giro_na_data(df, data_fim)
-        si_real = get_giro_na_data(df, data_ini - timedelta(days=1))
-        var_per = sf_real - si_real
-
-        df_per = df[(df['status'].isin(status_liquidos)) & (df['data_lancamento'] >= data_ini) & (df['data_lancamento'] <= data_fim)]
+        sf = get_giro(df, data_fim); si = get_giro(df, data_ini - timedelta(days=1))
+        df_per = df[(df['status'].isin(status_l)) & (df['data_lancamento'] >= data_ini) & (df['data_lancamento'] <= data_fim)]
         ent_op = df_per[df_per['natureza'] == 'Receita'][df_per['tipo'] == 'Crédito']['valor'].sum()
         ent_pl = df_per[df_per['natureza'] == 'Patrimônio Líquido'][df_per['tipo'] == 'Crédito']['valor'].sum()
-        e_total = ent_op + ent_pl
-
         sai_op = df_per[df_per['natureza'] == 'Despesa'][df_per['tipo'] == 'Débito']['valor'].sum()
         sai_pas = df_per[df_per['natureza'] == 'Passivo'][df_per['tipo'] == 'Débito']['valor'].sum()
         sai_enc = df_per[df_per['natureza'] == 'Encargos Financeiros'][df_per['tipo'] == 'Débito']['valor'].sum()
         sai_atv = df_per[(df_per['natureza'] == 'Ativo') & (df_per['tipo'] == 'Crédito')]['valor'].sum()
-        s_total = sai_op + sai_pas + sai_enc + sai_atv
-
+        
+        e_total, s_total = ent_op + ent_pl, sai_op + sai_pas + sai_enc + sai_atv
         prop = (e_total / s_total) if s_total > 0 else (e_total if e_total > 0 else 0)
-        
-        c1, c2, c3 = st.columns(3)
-        c1.metric("Saldo Inicial (Giro)", f"R$ {si_real:,.2f}")
-        c2.metric("Variação do Período", f"R$ {var_per:,.2f}", delta=f"{var_per:,.2f}")
-        c3.metric("Saldo Final (Capital de Giro)", f"R$ {sf_real:,.2f}")
-        
-        l1, l2 = st.columns(2)
-        with l1: st.success(f"Status: {'COM LIQUIDEZ' if e_total > s_total else 'DÉFICIT'}")
-        with l2: st.info(f"Proporção: {prop:.2f}x")
 
-        st.divider()
+        c1, c2, c3 = st.columns(3)
+        c1.metric("Saldo Inicial", f"R$ {si:,.2f}")
+        c2.metric("Variação", f"R$ {sf-si:,.2f}", delta=f"{sf-si:,.2f}")
+        c3.metric("Saldo Final", f"R$ {sf:,.2f}")
+        
+        st.info(f"Liquidez: {'COM LIQUIDEZ' if e_total > s_total else 'DÉFICIT'} | Proporção: {prop:.2f}x")
+
         col1, col2 = st.columns(2)
         with col1:
             st.markdown(f"""<div class="conta-card"><div class="conta-titulo">📥 Entradas Reais</div><div class="dre-linha"><span>(+) Receitas Operacionais</span> <span>R$ {ent_op:,.2f}</span></div><div class="dre-linha"><span>(+) Aportes de Capital (PL)</span> <span>R$ {ent_pl:,.2f}</span></div><div class="dre-total">Total Entradas: R$ {e_total:,.2f}</div></div>""", unsafe_allow_html=True)
         with col2:
             st.markdown(f"""<div class="conta-card" style="border-left: 5px solid #dc2626;"><div class="conta-titulo">out Saídas Reais</div><div class="dre-linha"><span>(-) Despesas Operacionais</span> <span>R$ {sai_op:,.2f}</span></div><div class="dre-linha"><span>(-) Passivo (Pagamentos)</span> <span>R$ {sai_pas:,.2f}</span></div><div class="dre-linha"><span>(-) Encargos Financeiros</span> <span>R$ {sai_enc:,.2f}</span></div><div class="dre-linha"><span>(-) Créditos em Ativo</span> <span>R$ {sai_atv:,.2f}</span></div><div class="dre-total">Total Saídas: (R$ {s_total:,.2f})</div></div>""", unsafe_allow_html=True)
 
-        st.divider()
-        st.subheader("📑 Saldos de Disponibilidades")
+        st.subheader("📑 Disponibilidades")
         contas_dispo = df[(df['natureza'] == 'Ativo') & (df['descricao'].str.contains('CAIXA|BANCO', case=False))]['descricao'].unique()
         if len(contas_dispo) > 0:
             cols = st.columns(len(contas_dispo))
@@ -232,7 +221,7 @@ else:
                 with cols[idx]: st.metric(c_nome, f"R$ {saldo_c:,.2f}")
 
     elif st.session_state.menu_opcao == "📈 DRE":
-        st.subheader("📈 DRE Detalhada")
+        st.subheader("📈 DRE")
         rec, desp, enc = df_periodo[df_periodo['natureza'] == 'Receita'], df_periodo[df_periodo['natureza'] == 'Despesa'], df_periodo[df_periodo['natureza'] == 'Encargos Financeiros']
         t_rec = rec[rec['tipo'] == 'Crédito']['valor'].sum() - rec[rec['tipo'] == 'Débito']['valor'].sum()
         t_desp = desp[desp['tipo'] == 'Débito']['valor'].sum() - desp[desp['tipo'] == 'Crédito']['valor'].sum()
@@ -240,7 +229,7 @@ else:
         st.metric("Lucro Líquido", f"R$ {t_rec - t_desp - t_enc:,.2f}")
 
     elif st.session_state.menu_opcao == "⚙️ Gestão":
-        st.subheader("⚙️ Gestão de Lançamentos")
+        st.subheader("⚙️ Gestão")
         ordem = st.selectbox("Ordenar por:", ["Mais recentes", "Mais antigos"])
         df_gestao = df.sort_values(by='data_lancamento', ascending=(ordem == "Mais antigos"))
         for _, row in df_gestao.iterrows():
