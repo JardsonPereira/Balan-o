@@ -187,24 +187,27 @@ else:
     elif st.session_state.menu_opcao == "💸 Fluxo de Caixa":
         st.subheader("🌊 Demonstração do Fluxo de Caixa (Corrigida)")
         
+        # REGRA ABSOLUTA: Status "Pendente" não afeta NADA no fluxo
         df_caixa_total = df[df['status'] != 'Pendente'].copy()
         
         def calc_atividades(tdf):
             op_in = tdf[(tdf['natureza'] == 'Receita') & (tdf['tipo'] == 'Crédito')]['valor'].sum()
             op_out = tdf[(tdf['natureza'] == 'Despesa') & (tdf['tipo'] == 'Débito')]['valor'].sum()
-            estoque_out = tdf[(tdf['natureza'] == 'Ativo') & (tdf['tipo'] == 'Crédito') & (tdf['descricao'].str.contains('ESTOQUE', case=False))]['valor'].sum()
-            estoque_in = tdf[(tdf['natureza'] == 'Ativo') & (tdf['tipo'] == 'Débito') & (tdf['descricao'].str.contains('ESTOQUE', case=False))]['valor'].sum()
-            
             fin_in = tdf[(tdf['natureza'] == 'Patrimônio Líquido') & (tdf['tipo'] == 'Crédito')]['valor'].sum()
             fin_out = tdf[(tdf['natureza'] == 'Passivo') & (tdf['tipo'] == 'Débito')]['valor'].sum()
+            inv_in = tdf[(tdf['natureza'] == 'Ativo') & (tdf['tipo'] == 'Crédito') & (~tdf['descricao'].str.contains('CAIXA|BANCO', case=False))]['valor'].sum()
             
-            inv_in = tdf[(tdf['natureza'] == 'Ativo') & (tdf['tipo'] == 'Crédito') & (~tdf['descricao'].str.contains('CAIXA|BANCO|ESTOQUE', case=False))]['valor'].sum()
-            total_compras_ativo = tdf[(tdf['natureza'] == 'Ativo') & (tdf['tipo'] == 'Débito') & (~tdf['descricao'].str.contains('CAIXA|BANCO|ESTOQUE', case=False))]['valor'].sum()
+            # Cálculo da Saída de Investimento Real (Total Ativo Débito - Dívida Pendente no Passivo)
+            total_compras_ativo = tdf[(tdf['natureza'] == 'Ativo') & (tdf['tipo'] == 'Débito') & (~tdf['descricao'].str.contains('CAIXA|BANCO', case=False))]['valor'].sum()
             
+            # Aqui buscamos os R$ 40 mil que foram para o Passivo mas com status Pendente no DB Original
+            # No tdf (que é o df_caixa_total) o Pendente já sumiu, então buscamos no df original a dívida pendente
             divida_pendente = df[(df['natureza'] == 'Passivo') & (df['status'] == 'Pendente') & (df['tipo'] == 'Crédito')]['valor'].sum()
+            
+            # inv_out = (50k veículo + 8k outros) - 40k financiamento pendente = 18k saída real
             inv_out = max(0, total_compras_ativo - divida_pendente)
             
-            return (op_in + estoque_out), (op_out + estoque_in), fin_in, fin_out, inv_in, inv_out
+            return op_in, op_out, fin_in, fin_out, inv_in, inv_out
 
         oi, oo, fi, fo, ii, io = calc_atividades(df_caixa_total[df_caixa_total['data_lancamento'] < data_ini])
         s_ini = (oi - oo) + (fi - fo) + (ii - io)
@@ -219,7 +222,7 @@ else:
         
         col1, col2 = st.columns(2)
         with col1:
-            st.markdown(f"""<div class="conta-card"><div class="conta-titulo">1. Atividades Operacionais</div><div class="dre-linha"><span>(+) Recebimentos</span> <span>R$ {op_in:,.2f}</span></div><div class="dre-linha"><span>(-) Pagamentos/Estoque</span> <span>(R$ {op_out:,.2f})</span></div><div class="dre-total">Líquido Operacional: R$ {op_in - op_out:,.2f}</div></div>
+            st.markdown(f"""<div class="conta-card"><div class="conta-titulo">1. Atividades Operacionais</div><div class="dre-linha"><span>(+) Recebimentos</span> <span>R$ {op_in:,.2f}</span></div><div class="dre-linha"><span>(-) Pagamentos</span> <span>(R$ {op_out:,.2f})</span></div><div class="dre-total">Líquido Operacional: R$ {op_in - op_out:,.2f}</div></div>
             <div class="conta-card"><div class="conta-titulo">2. Atividades de Investimento</div><div class="dre-linha"><span>(+) Venda de Ativos</span> <span>R$ {inv_in:,.2f}</span></div><div class="dre-linha"><span>(-) Compra de Ativos (Saída Real)</span> <span>(R$ {inv_out:,.2f})</span></div><div class="dre-total">Líquido Investimento: R$ {inv_in - inv_out:,.2f}</div></div>""", unsafe_allow_html=True)
         with col2:
             st.markdown(f"""<div class="conta-card" style="border-left: 5px solid #059669;"><div class="conta-titulo">3. Atividades de Financiamento</div><div class="dre-linha"><span>(+) Aportes/Capital</span> <span>R$ {fin_in:,.2f}</span></div><div class="dre-linha"><span>(-) Amortização Dívidas</span> <span>(R$ {fin_out:,.2f})</span></div><div class="dre-total">Líquido Financiamento: R$ {fin_in - fin_out:,.2f}</div></div>
