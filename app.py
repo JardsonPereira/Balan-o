@@ -54,6 +54,7 @@ def carregar_dados(u_id):
         if not temp_df.empty:
             temp_df['data_lancamento'] = pd.to_datetime(temp_df['data_lancamento']).dt.date
             if 'status' not in temp_df.columns: temp_df['status'] = 'Pago'
+            if 'justificativa' not in temp_df.columns: temp_df['justificativa'] = ''
         return temp_df
     except Exception: return pd.DataFrame()
 
@@ -115,6 +116,7 @@ st.markdown("""<style>
     .valor-item { font-size: 0.8rem; margin-bottom: 4px; line-height: 1.2; }
     .valor-deb { color: #059669; font-weight: 600; }
     .valor-cre { color: #dc2626; font-weight: 600; text-align: right; }
+    .just-hint { font-size: 0.7rem; color: #64748b; font-style: italic; display: block; margin-top: 2px; }
     .conta-rodape { padding: 8px; background: #f8fafc; border-top: 1.5px solid #1e293b; text-align: center; font-weight: 700; font-size: 0.85rem; }
     .grupo-header { background: linear-gradient(90deg, #1e293b, #334155); color: white; padding: 10px 15px; border-radius: 8px; margin: 25px 0 10px 0; font-size: 0.95rem; font-weight: 600; }
     .dre-linha { display: flex; justify-content: space-between; padding: 5px 0; border-bottom: 1px solid #e2e8f0; }
@@ -158,13 +160,7 @@ else:
         for conta in sorted(df_periodo['descricao'].unique()):
             df_c = df_periodo[df_periodo['descricao'] == conta]
             d, c = df_c[df_c['tipo'] == 'Débito']['valor'].sum(), df_c[df_c['tipo'] == 'Crédito']['valor'].sum()
-            bal_data.append({
-                "Conta": conta, 
-                "Débito": d, 
-                "Crédito": c, 
-                "Saldo Devedor": d-c if d > c else 0, 
-                "Saldo Credor": c-d if c > d else 0
-            })
+            bal_data.append({"Conta": conta, "Débito": d, "Crédito": c, "Saldo Devedor": d-c if d > c else 0, "Saldo Credor": c-d if c > d else 0})
         bal_df = pd.DataFrame(bal_data)
         st.table(bal_df.style.format(precision=2, decimal=',', thousands='.'))
         
@@ -200,8 +196,7 @@ else:
 
     elif st.session_state.menu_opcao == "💸 Fluxo de Caixa":
         st.subheader("🌊 Demonstração do Fluxo de Caixa (Corrigida)")
-        
-        # Filtro: PENDENTE NÃO AFETA O FLUXO DE CAIXA
+        # Filtro: Pendente não afeta o fluxo
         df_caixa_full = df[df['status'].isin(['Pago', 'Entrada', 'Investimento'])].copy()
         
         def calc_atividades(tdf):
@@ -210,18 +205,13 @@ else:
             fin_in = tdf[(tdf['natureza'] == 'Patrimônio Líquido') & (tdf['tipo'] == 'Crédito')]['valor'].sum()
             fin_out = tdf[(tdf['natureza'] == 'Passivo') & (tdf['tipo'] == 'Débito')]['valor'].sum()
             inv_in = tdf[(tdf['natureza'] == 'Ativo') & (tdf['tipo'] == 'Crédito') & (~tdf['descricao'].str.contains('CAIXA|BANCO', case=False))]['valor'].sum()
-            
             total_compras_ativo = tdf[(tdf['natureza'] == 'Ativo') & (tdf['tipo'] == 'Débito') & (~tdf['descricao'].str.contains('CAIXA|BANCO', case=False))]['valor'].sum()
             valor_financiado_no_periodo = tdf[(tdf['natureza'] == 'Passivo') & (tdf['tipo'] == 'Crédito')]['valor'].sum()
-            
-            inv_out = total_compras_ativo - valor_financiado_no_periodo
-            if inv_out < 0: inv_out = 0
-            
+            inv_out = max(0, total_compras_ativo - valor_financiado_no_periodo)
             return op_in, op_out, fin_in, fin_out, inv_in, inv_out
 
         oi, oo, fi, fo, ii, io = calc_atividades(df_caixa_full[df_caixa_full['data_lancamento'] < data_ini])
         s_ini = (oi - oo) + (fi - fo) + (ii - io)
-        
         df_per = df_caixa_full[(df_caixa_full['data_lancamento'] >= data_ini) & (df_caixa_full['data_lancamento'] <= data_fim)]
         op_in, op_out, fin_in, fin_out, inv_in, inv_out = calc_atividades(df_per)
         var_per = (op_in - op_out) + (fin_in - fin_out) + (inv_in - inv_out)
@@ -244,6 +234,7 @@ else:
         for _, row in df.iterrows():
             with st.container():
                 c1, c2, c3 = st.columns([5, 1, 1])
-                c1.write(f"**[{row['data_lancamento']}] {row['descricao']}** - R$ {row['valor']:,.2f}")
+                justificativa_texto = f" | *Just: {row['justificativa']}*" if row['justificativa'] else ""
+                c1.markdown(f"**[{row['data_lancamento']}] {row['descricao']}** - R$ {row['valor']:,.2f} ({row['status']}){justificativa_texto}")
                 if c2.button("✏️", key=f"ed_{row['id']}"): st.session_state.edit_id = row['id']; st.rerun()
                 if c3.button("🗑️", key=f"del_{row['id']}"): supabase.table("lancamentos").delete().eq("id", row['id']).execute(); st.cache_data.clear(); st.rerun()
