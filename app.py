@@ -204,20 +204,36 @@ else:
     elif st.session_state.menu_opcao == "💸 Fluxo de Caixa":
         st.subheader("🌊 Demonstração do Fluxo de Caixa (Conciliação de Giro)")
         
-        def get_saldo_giro(tdf):
+        # Função para calcular o saldo de caixa em uma data específica
+        def get_saldo_giro_data(tdf, data_limite=None):
+            # Filtra por data se fornecida
+            if data_limite:
+                tdf = tdf[tdf['data_lancamento'] <= data_limite]
+            
+            # Filtra apenas contas de giro no Ativo
             df_giro = tdf[(tdf['natureza'] == 'Ativo') & (tdf['descricao'].str.contains('CAIXA|BANCO', case=False))]
+            
+            # Apenas status líquidos afetam o saldo real do caixa
+            status_liquidos = ["Pago", "Entrada", "Investimento"]
+            df_giro = df_giro[df_giro['status'].isin(status_liquidos)]
+            
             d = df_giro[df_giro['tipo'] == 'Débito']['valor'].sum()
             c = df_giro[df_giro['tipo'] == 'Crédito']['valor'].sum()
             return d - c
 
-        saldo_final_real = get_saldo_giro(df)
-        saldo_inicial_real = get_saldo_giro(df[df['data_lancamento'] < data_ini])
+        # Saldo Final: Tudo até a data final selecionada
+        saldo_final_real = get_saldo_giro_data(df, data_fim)
+        # Saldo Inicial: Tudo até o dia anterior ao início do período
+        import datetime as dt
+        dia_anterior = data_ini - dt.timedelta(days=1)
+        saldo_inicial_real = get_saldo_giro_data(df, dia_anterior)
         
-        # --- ATUALIZAÇÃO: APENAS STATUS DE LIQUIDEZ AFETAM O CAIXA ---
+        # A variação é a diferença matemática exata entre os saldos
+        var_periodo = saldo_final_real - saldo_inicial_real
+        
+        # Detalhamento do que compõe a variação no período selecionado
         status_liquidos = ["Pago", "Entrada", "Investimento"]
-        df_fluxo = df[df['status'].isin(status_liquidos)]
-        
-        df_per = df_fluxo[(df_fluxo['data_lancamento'] >= data_ini) & (df_fluxo['data_lancamento'] <= data_fim)]
+        df_per = df[(df['status'].isin(status_liquidos)) & (df['data_lancamento'] >= data_ini) & (df['data_lancamento'] <= data_fim)]
         
         ent_op = df_per[(df_per['natureza'] == 'Receita') & (df_per['tipo'] == 'Crédito')]['valor'].sum()
         ent_fin = df_per[(df_per['natureza'] == 'Patrimônio Líquido') & (df_per['tipo'] == 'Crédito')]['valor'].sum()
@@ -225,9 +241,8 @@ else:
         sai_op = df_per[(df_per['natureza'] == 'Despesa') & (df_per['tipo'] == 'Débito')]['valor'].sum()
         sai_fin = df_per[(df_per['natureza'] == 'Passivo') & (df_per['tipo'] == 'Débito')]['valor'].sum()
         
+        # Saídas por compra/baixa de ativos (que não sejam transferências banco/caixa)
         sai_ativo = df_per[(df_per['natureza'] == 'Ativo') & (df_per['tipo'] == 'Crédito') & (~df_per['descricao'].str.contains('CAIXA|BANCO', case=False))]['valor'].sum()
-        
-        var_periodo = (ent_op + ent_fin) - (sai_op + sai_fin + sai_ativo)
 
         c1, c2, c3 = st.columns(3)
         c1.metric("Saldo Inicial (Giro)", f"R$ {saldo_inicial_real:,.2f}")
@@ -236,9 +251,9 @@ else:
         
         col1, col2 = st.columns(2)
         with col1:
-            st.markdown(f"""<div class="conta-card"><div class="conta-titulo">📥 Entradas Reais</div><div class="dre-linha"><span>(+) Receitas Operacionais</span> <span>R$ {ent_op:,.2f}</span></div><div class="dre-linha"><span>(+) Aportes de Capital (PL)</span> <span>R$ {ent_fin:,.2f}</span></div><div class="dre-total">Total Entradas: R$ {ent_op + ent_fin:,.2f}</div></div>""", unsafe_allow_html=True)
+            st.markdown(f"""<div class="conta-card"><div class="conta-titulo">📥 Entradas Reais (Líquidas)</div><div class="dre-linha"><span>(+) Receitas Operacionais</span> <span>R$ {ent_op:,.2f}</span></div><div class="dre-linha"><span>(+) Aportes de Capital Social (PL)</span> <span>R$ {ent_fin:,.2f}</span></div><div class="dre-total">Total Entradas: R$ {ent_op + ent_fin:,.2f}</div></div>""", unsafe_allow_html=True)
         with col2:
-            st.markdown(f"""<div class="conta-card" style="border-left: 5px solid #dc2626;"><div class="conta-titulo">out Saídas Reais</div><div class="dre-linha"><span>(-) Despesas Operacionais</span> <span>(R$ {sai_op:,.2f})</span></div><div class="dre-linha"><span>(-) Pagamento de Dívidas</span> <span>(R$ {sai_fin:,.2f})</span></div><div class="dre-linha"><span>(-) Saídas via Baixa de Ativos</span> <span>(R$ {sai_ativo:,.2f})</span></div><div class="dre-total">Total Saídas: (R$ {sai_op + sai_fin + sai_ativo:,.2f})</div></div>""", unsafe_allow_html=True)
+            st.markdown(f"""<div class="conta-card" style="border-left: 5px solid #dc2626;"><div class="conta-titulo">out Saídas Reais (Líquidas)</div><div class="dre-linha"><span>(-) Despesas Operacionais</span> <span>(R$ {sai_op:,.2f})</span></div><div class="dre-linha"><span>(-) Pagamento de Dívidas</span> <span>(R$ {sai_fin:,.2f})</span></div><div class="dre-linha"><span>(-) Saídas via Baixa de Ativos</span> <span>(R$ {sai_ativo:,.2f})</span></div><div class="dre-total">Total Saídas: (R$ {sai_op + sai_fin + sai_ativo:,.2f})</div></div>""", unsafe_allow_html=True)
 
         st.divider()
         st.subheader("📑 Detalhamento das Contas de Giro (Ativo)")
@@ -246,8 +261,11 @@ else:
         if len(contas_giro) > 0:
             cols = st.columns(len(contas_giro))
             for idx, c_giro in enumerate(contas_giro):
-                df_c = df[df['descricao'] == c_giro]
-                saldo_c = df_c[df_c['tipo'] == 'Débito']['valor'].sum() - df_c[df_c['tipo'] == 'Crédito']['valor'].sum()
+                df_c = df[(df['descricao'] == c_giro) & (df['data_lancamento'] <= data_fim)]
+                # Saldo total acumulado da conta até a data final
+                v_d = df_c[(df_c['tipo'] == 'Débito') & (df_c['status'].isin(["Pago", "Entrada", "Investimento"]))]['valor'].sum()
+                v_c = df_c[(df_c['tipo'] == 'Crédito') & (df_c['status'].isin(["Pago", "Entrada", "Investimento"]))]['valor'].sum()
+                saldo_c = v_d - v_c
                 cols[idx].metric(f"Disponibilidade: {c_giro}", f"R$ {saldo_c:,.2f}")
 
     elif st.session_state.menu_opcao == "⚙️ Gestão":
