@@ -90,6 +90,7 @@ with st.sidebar:
         tipo = st.radio("Operação", ["Débito", "Crédito"], index=0 if item_edit['tipo'] == "Débito" else 1, horizontal=True)
         valor = st.number_input("Valor", min_value=0.0, value=float(item_edit['valor']))
         
+        # Opções de status corrigidas para salvamento
         opcoes_status = ["Pago", "Entrada", "Pendente", "Investimento", "Transferência Interna"]
         status_pag = st.selectbox("Status Financeiro", opcoes_status, index=opcoes_status.index(item_edit['status']) if item_edit['status'] in opcoes_status else 0)
         just = st.text_area("Justificativa", value=item_edit['justificativa'])
@@ -173,9 +174,7 @@ else:
 
     elif st.session_state.menu_opcao == "📈 DRE":
         st.subheader("📈 DRE Detalhada")
-        rec = df_periodo[df_periodo['natureza'] == 'Receita']
-        desp = df_periodo[df_periodo['natureza'] == 'Despesa']
-        enc = df_periodo[df_periodo['natureza'] == 'Encargos Financeiros']
+        rec, desp, enc = df_periodo[df_periodo['natureza'] == 'Receita'], df_periodo[df_periodo['natureza'] == 'Despesa'], df_periodo[df_periodo['natureza'] == 'Encargos Financeiros']
         
         st.markdown("### 🟢 Receitas")
         for c in sorted(rec['descricao'].unique()):
@@ -196,12 +195,12 @@ else:
         t_enc = enc[enc['tipo'] == 'Débito']['valor'].sum() - enc[enc['tipo'] == 'Crédito']['valor'].sum()
         
         lucro = t_rec - t_desp - t_enc
-        cor = "#059669" if lucro >= 0 else "#dc2626"
-        st.markdown(f"<div class='dre-total dre-linha' style='background:{cor}; color:white;'><span>LUCRO LÍQUIDO DO PERÍODO</span> <span>R$ {lucro:,.2f}</span></div>", unsafe_allow_html=True)
+        st.markdown(f"<div class='dre-total dre-linha' style='background:{'#059669' if lucro >= 0 else '#dc2626'}; color:white;'><span>LUCRO LÍQUIDO</span> <span>R$ {lucro:,.2f}</span></div>", unsafe_allow_html=True)
 
     elif st.session_state.menu_opcao == "💸 Fluxo de Caixa":
-        st.subheader("🌊 Fluxo de Caixa")
+        st.subheader("🌊 Fluxo de Caixa (Conciliação de Giro)")
         status_l = ["Pago", "Entrada", "Investimento"]
+        
         def get_giro(target_df, data_lim):
             df_hist = target_df[(target_df['data_lancamento'] <= data_lim) & (target_df['status'].isin(status_l))]
             saldo = 0.0
@@ -216,15 +215,30 @@ else:
         ent_op, ent_pl = df_per[df_per['natureza'] == 'Receita'][df_per['tipo'] == 'Crédito']['valor'].sum(), df_per[df_per['natureza'] == 'Patrimônio Líquido'][df_per['tipo'] == 'Crédito']['valor'].sum()
         sai_op, sai_pas, sai_enc = df_per[df_per['natureza'] == 'Despesa'][df_per['tipo'] == 'Débito']['valor'].sum(), df_per[df_per['natureza'] == 'Passivo'][df_per['tipo'] == 'Débito']['valor'].sum(), df_per[df_per['natureza'] == 'Encargos Financeiros'][df_per['tipo'] == 'Débito']['valor'].sum()
         sai_atv = df_per[(df_per['natureza'] == 'Ativo') & (df_per['tipo'] == 'Crédito')]['valor'].sum()
+        
         e_total, s_total = ent_op + ent_pl, sai_op + sai_pas + sai_enc + sai_atv
         
         c1, c2, c3 = st.columns(3); c1.metric("Saldo Inicial", f"R$ {si:,.2f}"); c2.metric("Variação", f"R$ {sf-si:,.2f}", delta=f"{sf-si:,.2f}"); c3.metric("Saldo Final", f"R$ {sf:,.2f}")
-        st.info(f"Liquidez: {'SIM' if e_total > s_total else 'NÃO'} | Proporção: {(e_total/s_total if s_total > 0 else 0):.2f}x")
+        
+        l1, l2 = st.columns(2)
+        with l1: st.markdown(f"<div style='background:{'#059669' if e_total > s_total else '#dc2626'}; color:white; padding:10px; border-radius:10px; text-align:center;'>LIQUIDEZ: {'SIM' if e_total > s_total else 'NÃO'}</div>", unsafe_allow_html=True)
+        with l2: st.markdown(f"<div style='background:#1e293b; color:white; padding:10px; border-radius:10px; text-align:center;'>PROPORÇÃO: {(e_total/s_total if s_total > 0 else 0):.2f}x</div>", unsafe_allow_html=True)
+
+        st.divider()
         col1, col2 = st.columns(2)
         with col1:
-            st.markdown(f"""<div class="conta-card"><div class="conta-titulo">📥 Entradas Reais</div><div class="dre-linha"><span>Receitas</span> <span>R$ {ent_op:,.2f}</span></div><div class="dre-linha"><span>Aportes</span> <span>R$ {ent_pl:,.2f}</span></div><div class="dre-total">Total: R$ {e_total:,.2f}</div></div>""", unsafe_allow_html=True)
+            st.markdown(f"""<div class="conta-card"><div class="conta-titulo">📥 Entradas Reais</div><div class="dre-linha"><span>Receitas</span> <span>R$ {ent_op:,.2f}</span></div><div class="dre-linha"><span>Aportes PL</span> <span>R$ {ent_pl:,.2f}</span></div><div class="dre-total">Total: R$ {e_total:,.2f}</div></div>""", unsafe_allow_html=True)
         with col2:
-            st.markdown(f"""<div class="conta-card" style="border-left: 5px solid #dc2626;"><div class="conta-titulo">out Saídas Reais</div><div class="dre-linha"><span>Saídas Totais</span> <span>(R$ {s_total:,.2f})</span></div></div>""", unsafe_allow_html=True)
+            st.markdown(f"""<div class="conta-card" style="border-left: 5px solid #dc2626;"><div class="conta-titulo">out Saídas Reais</div><div class="dre-linha"><span>Despesas</span> <span>(R$ {sai_op:,.2f})</span></div><div class="dre-linha"><span>Passivo</span> <span>(R$ {sai_pas:,.2f})</span></div><div class="dre-linha"><span>Encargos</span> <span>(R$ {sai_enc:,.2f})</span></div><div class="dre-linha"><span>Créditos Ativo</span> <span>(R$ {sai_atv:,.2f})</span></div><div class="dre-total">Total: (R$ {s_total:,.2f})</div></div>""", unsafe_allow_html=True)
+
+        st.subheader("📑 Saldos de Disponibilidades")
+        contas_dispo = df[(df['natureza'] == 'Ativo') & (df['descricao'].str.contains('CAIXA|BANCO', case=False))]['descricao'].unique()
+        if len(contas_dispo) > 0:
+            cols = st.columns(len(contas_dispo))
+            for idx, c_nome in enumerate(sorted(contas_dispo)):
+                df_c = df[(df['descricao'] == c_nome) & (df['data_lancamento'] <= data_fim)]
+                saldo_c = df_c[df_c['tipo'] == 'Débito']['valor'].sum() - df_c[df_c['tipo'] == 'Crédito']['valor'].sum()
+                with cols[idx]: st.metric(c_nome, f"R$ {saldo_c:,.2f}")
 
     elif st.session_state.menu_opcao == "⚙️ Gestão":
         st.subheader("⚙️ Gestão")
