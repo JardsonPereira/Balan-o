@@ -184,44 +184,62 @@ else:
         lucro = t_rec - t_desp - t_enc
         st.markdown(f"<div class='dre-total dre-linha' style='background:{'#059669' if lucro >= 0 else '#dc2626'}; color:white;'><span>LUCRO LÍQUIDO</span> <span>R$ {lucro:,.2f}</span></div>", unsafe_allow_html=True)
 
-    # --- 4. FLUXO DE CAIXA (LÓGICA: RESULTADO + PL) ---
+    # --- 4. FLUXO DE CAIXA (RESULTADO + PL + CRÉDITO NO ATIVO FINANCEIRO) ---
     elif st.session_state.menu_opcao == "💸 Fluxo de Caixa":
-        st.subheader("🌊 Fluxo de Caixa (Foco em Resultado e Patrimônio Líquido)")
+        st.subheader("🌊 Fluxo de Caixa (Impacto Direto no Disponível)")
         
-        # Filtramos apenas lançamentos de Receita, Despesa, Encargos e PL que tenham status "Pago", "Entrada" ou "Investimento"
-        status_pagos = ["Pago", "Entrada", "Investimento"]
-        df_caixa_base = df_periodo[
+        status_fluxo = ["Pago", "Entrada", "Investimento"]
+        contas_financeiras = ['CAIXA', 'BANCO', 'GIRO']
+        
+        # Filtro 1: Contas de Resultado e PL (Visão de Origem/Destino)
+        df_res_pl = df_periodo[
             (df_periodo['natureza'].isin(['Receita', 'Despesa', 'Encargos Financeiros', 'Patrimônio Líquido'])) &
-            (df_periodo['status'].isin(status_pagos))
+            (df_periodo['status'].isin(status_fluxo))
+        ]
+        
+        # Filtro 2: Créditos no Ativo Financeiro (Visão de Saída de Dinheiro por compra de bens, etc)
+        # Se você credita o Banco para comprar um Ativo Imobilizado, essa saída deve aparecer aqui.
+        df_ativo_saida = df_periodo[
+            (df_periodo['natureza'] == 'Ativo') &
+            (df_periodo['descricao'].str.contains('|'.join(contas_financeiras), case=False)) &
+            (df_periodo['tipo'] == 'Crédito')
         ]
 
-        if df_caixa_base.empty:
-            st.info("Nenhuma movimentação de Resultado ou PL identificada como paga neste período.")
-        else:
-            # Cálculo de Entradas (Receita no Crédito e PL no Crédito)
-            entradas = df_caixa_base[df_caixa_base['tipo'] == 'Crédito']['valor'].sum()
-            # Cálculo de Saídas (Despesa, Encargos no Débito e PL no Débito)
-            saidas = df_caixa_base[df_caixa_base['tipo'] == 'Débito']['valor'].sum()
-            saldo_fluxo = entradas - saidas
+        # Unimos os dois para compor o fluxo total
+        df_fluxo_final = pd.concat([df_res_pl, df_ativo_saida]).drop_duplicates()
 
-            st.columns(2)[0].metric("Total Entradas (Crédito)", f"R$ {entradas:,.2f}")
-            st.columns(2)[1].metric("Total Saídas (Débito)", f"R$ {saidas:,.2f}", delta=f"{saldo_fluxo:,.2f}")
+        if df_fluxo_final.empty:
+            st.info("Nenhuma movimentação financeira identificada neste período.")
+        else:
+            # Lógica de cálculo:
+            # ENTRADAS: Receita(C), PL(C)
+            entradas = df_fluxo_final[(df_fluxo_final['tipo'] == 'Crédito') & (df_fluxo_final['natureza'] != 'Ativo')]['valor'].sum()
+            # SAÍDAS: Despesa(D), Encargos(D), PL(D) E Créditos no Ativo (Saída de banco)
+            saidas_res_pl = df_fluxo_final[(df_fluxo_final['tipo'] == 'Débito')]['valor'].sum()
+            saidas_banco = df_ativo_saida['valor'].sum()
+            
+            total_saidas = saidas_res_pl + saidas_banco
+            saldo_periodo = entradas - total_saidas
+
+            st.columns(2)[0].metric("Total Entradas (Recursos Gerados)", f"R$ {entradas:,.2f}")
+            st.columns(2)[1].metric("Total Saídas (Recursos Consumidos)", f"R$ {total_saidas:,.2f}", delta=f"{saldo_periodo:,.2f}")
 
             st.divider()
-            st.write("### Detalhamento dos Lançamentos Financeiros")
+            st.write("### Detalhamento das Movimentações")
             
-            # Formatação para exibição
-            df_display = df_caixa_base[['data_lancamento', 'descricao', 'natureza', 'tipo', 'valor', 'justificativa']].copy()
-            df_display.columns = ['Data', 'Conta', 'Grupo', 'Operação', 'Valor (R$)', 'Observação']
+            df_disp = df_fluxo_final[['data_lancamento', 'descricao', 'natureza', 'tipo', 'valor', 'justificativa']].copy()
+            df_disp.columns = ['Data', 'Conta', 'Natureza', 'Operação', 'Valor (R$)', 'Observação']
             
-            def color_op(val):
-                color = '#059669' if val == 'Crédito' else '#dc2626'
-                return f'color: {color}; font-weight: bold'
+            def color_set(val):
+                # Crédito em Resultado/PL = Entrada (Verde)
+                # Crédito em Ativo Financeiro = Saída (Vermelho)
+                # Débito em qualquer conta = Saída (Vermelho)
+                if val == 'Crédito': return 'color: #059669; font-weight: bold'
+                return 'color: #dc2626; font-weight: bold'
 
             st.dataframe(
-                df_display.style.map(color_op, subset=['Operação']).format({"Valor (R$)": "{:,.2f}"}),
-                use_container_width=True,
-                hide_index=True
+                df_disp.style.map(color_set, subset=['Operação']).format({"Valor (R$)": "{:,.2f}"}),
+                use_container_width=True, hide_index=True
             )
 
     # --- 5. GESTÃO ---
