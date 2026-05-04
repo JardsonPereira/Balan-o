@@ -184,56 +184,51 @@ else:
         lucro = t_rec - t_desp - t_enc
         st.markdown(f"<div class='dre-total dre-linha' style='background:{'#059669' if lucro >= 0 else '#dc2626'}; color:white;'><span>LUCRO LÍQUIDO</span> <span>R$ {lucro:,.2f}</span></div>", unsafe_allow_html=True)
 
-    # --- 4. FLUXO DE CAIXA (RESULTADO + PL + CRÉDITO NO ATIVO FINANCEIRO) ---
+    # --- 4. FLUXO DE CAIXA (REGRAS DE FILTRO APLICADAS) ---
     elif st.session_state.menu_opcao == "💸 Fluxo de Caixa":
         st.subheader("🌊 Fluxo de Caixa (Impacto Direto no Disponível)")
         
-        status_fluxo = ["Pago", "Entrada", "Investimento"]
+        # Filtros de exclusão: Ignoramos "Transferência Interna" e lançamentos que não afetam o caixa real
+        status_ignorados = ["Transferência Interna", "Pendente"]
         contas_financeiras = ['CAIXA', 'BANCO', 'GIRO']
         
-        # Filtro 1: Contas de Resultado e PL (Visão de Origem/Destino)
+        # Filtramos apenas os registros que influenciam o fluxo financeiro:
+        # 1. Resultado e PL (desde que não seja transferência)
         df_res_pl = df_periodo[
             (df_periodo['natureza'].isin(['Receita', 'Despesa', 'Encargos Financeiros', 'Patrimônio Líquido'])) &
-            (df_periodo['status'].isin(status_fluxo))
+            (~df_periodo['status'].isin(status_ignorados))
         ]
         
-        # Filtro 2: Créditos no Ativo Financeiro (Visão de Saída de Dinheiro por compra de bens, etc)
-        # Se você credita o Banco para comprar um Ativo Imobilizado, essa saída deve aparecer aqui.
+        # 2. Créditos no Ativo Financeiro (saídas de banco/caixa para pagamentos diversos)
         df_ativo_saida = df_periodo[
             (df_periodo['natureza'] == 'Ativo') &
             (df_periodo['descricao'].str.contains('|'.join(contas_financeiras), case=False)) &
-            (df_periodo['tipo'] == 'Crédito')
+            (df_periodo['tipo'] == 'Crédito') &
+            (~df_periodo['status'].isin(status_ignorados))
         ]
 
-        # Unimos os dois para compor o fluxo total
         df_fluxo_final = pd.concat([df_res_pl, df_ativo_saida]).drop_duplicates()
 
         if df_fluxo_final.empty:
-            st.info("Nenhuma movimentação financeira identificada neste período.")
+            st.info("Nenhuma movimentação financeira real identificada (Transferências Internas são ignoradas aqui).")
         else:
-            # Lógica de cálculo:
-            # ENTRADAS: Receita(C), PL(C)
             entradas = df_fluxo_final[(df_fluxo_final['tipo'] == 'Crédito') & (df_fluxo_final['natureza'] != 'Ativo')]['valor'].sum()
-            # SAÍDAS: Despesa(D), Encargos(D), PL(D) E Créditos no Ativo (Saída de banco)
-            saidas_res_pl = df_fluxo_final[(df_fluxo_final['tipo'] == 'Débito')]['valor'].sum()
+            saidas_gerais = df_fluxo_final[(df_fluxo_final['tipo'] == 'Débito')]['valor'].sum()
             saidas_banco = df_ativo_saida['valor'].sum()
             
-            total_saidas = saidas_res_pl + saidas_banco
+            total_saidas = saidas_gerais + saidas_banco
             saldo_periodo = entradas - total_saidas
 
-            st.columns(2)[0].metric("Total Entradas (Recursos Gerados)", f"R$ {entradas:,.2f}")
-            st.columns(2)[1].metric("Total Saídas (Recursos Consumidos)", f"R$ {total_saidas:,.2f}", delta=f"{saldo_periodo:,.2f}")
+            st.columns(2)[0].metric("Total Entradas Reais", f"R$ {entradas:,.2f}")
+            st.columns(2)[1].metric("Total Saídas Reais", f"R$ {total_saidas:,.2f}", delta=f"{saldo_periodo:,.2f}")
 
             st.divider()
-            st.write("### Detalhamento das Movimentações")
+            st.write("### Extrato de Impacto Financeiro")
             
-            df_disp = df_fluxo_final[['data_lancamento', 'descricao', 'natureza', 'tipo', 'valor', 'justificativa']].copy()
-            df_disp.columns = ['Data', 'Conta', 'Natureza', 'Operação', 'Valor (R$)', 'Observação']
+            df_disp = df_fluxo_final[['data_lancamento', 'descricao', 'natureza', 'tipo', 'valor', 'status', 'justificativa']].copy()
+            df_disp.columns = ['Data', 'Conta', 'Natureza', 'Operação', 'Valor (R$)', 'Status', 'Observação']
             
             def color_set(val):
-                # Crédito em Resultado/PL = Entrada (Verde)
-                # Crédito em Ativo Financeiro = Saída (Vermelho)
-                # Débito em qualquer conta = Saída (Vermelho)
                 if val == 'Crédito': return 'color: #059669; font-weight: bold'
                 return 'color: #dc2626; font-weight: bold'
 
@@ -251,7 +246,7 @@ else:
                 st.cache_data.clear(); st.rerun()
         for _, row in df.sort_values(by='data_lancamento', ascending=False).iterrows():
             c1, c2, c3 = st.columns([5, 1, 1])
-            c1.write(f"**[{row['data_lancamento']}] {row['descricao']}** - R$ {row['valor']:,.2f}")
+            c1.write(f"**[{row['data_lancamento']}] {row['descricao']}** - R$ {row['valor']:,.2f} ({row['status']})")
             if c2.button("✏️", key=f"ed_{row['id']}"): st.session_state.edit_id = row['id']; st.rerun()
             if c3.button("🗑️", key=f"del_{row['id']}"): 
                 supabase.table("lancamentos").delete().eq("id", row['id']).execute()
