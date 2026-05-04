@@ -159,7 +159,7 @@ else:
                     with cols[i % 3]:
                         st.markdown(f"""<div class="conta-card"><div class="conta-titulo">{conta}</div><div class="conta-corpo"><div class="lado-debito">{deb_html}</div><div class="lado-credito">{cre_html}</div></div><div class="conta-rodape">Saldo: R$ {saldo:,.2f}</div></div>""", unsafe_allow_html=True)
 
-    # --- 2. BALANCETE (PROTEGIDO CONTRA KEYERROR) ---
+    # --- 2. BALANCETE (COM TOTAIS DE MOVIMENTAÇÃO E SALDO) ---
     elif st.session_state.menu_opcao == "🧾 Balancete":
         st.subheader("🧾 Balancete de Verificação")
         
@@ -179,10 +179,17 @@ else:
             st.table(bal_df.style.format(precision=2, decimal=',', thousands='.'))
 
             # Cálculos de Totais
+            t_debito, t_credito = bal_df["Débito"].sum(), bal_df["Crédito"].sum()
             t_sd, t_sc = bal_df["Saldo Devedor"].sum(), bal_df["Saldo Credor"].sum()
             diff = t_sd - t_sc
 
             st.markdown("### ⚖️ Verificação de Equilíbrio")
+            m1, m2 = st.columns(2)
+            m1.metric("Total Movimentação Débito", f"R$ {t_debito:,.2f}")
+            m2.metric("Total Movimentação Crédito", f"R$ {t_credito:,.2f}")
+            
+            st.divider()
+            
             c1, c2 = st.columns(2)
             c1.metric("Total Saldo Devedor", f"R$ {t_sd:,.2f}")
             c2.metric("Total Saldo Credor", f"R$ {t_sc:,.2f}", delta=f"Diferença: {diff:,.2f}" if abs(diff) > 0.01 else None, delta_color="inverse")
