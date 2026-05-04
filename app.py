@@ -156,7 +156,7 @@ else:
                     with cols[i % 3]:
                         st.markdown(f"""<div class="conta-card"><div class="conta-titulo">{conta}</div><div class="conta-corpo"><div class="lado-debito">{deb_html}</div><div class="lado-credito">{cre_html}</div></div><div class="conta-rodape">Saldo: R$ {saldo:,.2f}</div></div>""", unsafe_allow_html=True)
 
-    # --- 2. BALANCETE (COM DESTAQUE E TOTAIS) ---
+    # --- 2. BALANCETE ---
     elif st.session_state.menu_opcao == "🧾 Balancete":
         st.subheader("🧾 Balancete de Verificação")
         bal_data = []
@@ -170,7 +170,7 @@ else:
         st.table(bal_df.style.format(precision=2, decimal=',', thousands='.'))
 
         st.markdown('<div class="destaque-balancete">', unsafe_allow_html=True)
-        st.markdown("#### ⚖️ Resultados Consolidados do Balancete")
+        st.markdown("#### ⚖️ Resultados Consolidados")
         t_d, t_c = bal_df["Débito (Mov)"].sum(), bal_df["Crédito (Mov)"].sum()
         t_sd, t_sc = bal_df["Saldo Devedor"].sum(), bal_df["Saldo Credor"].sum()
         c1, c2, c3, c4 = st.columns(4)
@@ -192,26 +192,53 @@ else:
         lucro = t_rec - t_desp - t_enc
         st.markdown(f"### LUCRO LÍQUIDO: R$ {lucro:,.2f}")
 
-    # --- 4. FLUXO DE CAIXA (ACUMULADO E FILTRADO) ---
+    # --- 4. FLUXO DE CAIXA (LÓGICA CORRIGIDA) ---
     elif st.session_state.menu_opcao == "💸 Fluxo de Caixa":
-        st.subheader("🌊 Fluxo de Caixa (Lógica Contínua)")
+        st.subheader("🌊 Fluxo de Caixa (Impacto no Disponível)")
         contas_fin = ['CAIXA', 'BANCO', 'GIRO']
         
-        def calc_saldo(data_lim):
-            mask = (df['data_lancamento'] <= data_lim) & (df['natureza'] == 'Ativo') & (df['descricao'].str.contains('|'.join(contas_fin), case=False)) & (~df['status'].isin(["Transferência Interna", "Pendente"]))
-            return df[mask & (df['tipo'] == 'Débito')]['valor'].sum() - df[mask & (df['tipo'] == 'Crédito')]['valor'].sum()
+        def calc_saldo_acumulado(data_limite):
+            # Filtro de status que movimentam o caixa
+            status_movimentam = ["Pago", "Entrada", "Investimento"]
+            mask = (df['data_lancamento'] <= data_limite) & \
+                   (df['status'].isin(status_movimentam)) & \
+                   (~df['status'].isin(["Transferência Interna", "Pendente"]))
+            
+            saldo = 0.0
+            for _, row in df[mask].iterrows():
+                # Entradas (Receita C, PL C)
+                if row['tipo'] == 'Crédito' and row['natureza'] in ['Receita', 'Patrimônio Líquido']:
+                    saldo += row['valor']
+                # Saídas (Despesa D, Encargos D, PL D, Crédito no Ativo Financeiro)
+                elif row['tipo'] == 'Débito' and row['natureza'] in ['Despesa', 'Encargos Financeiros', 'Patrimônio Líquido']:
+                    saldo -= row['valor']
+                elif row['tipo'] == 'Crédito' and row['natureza'] == 'Ativo' and any(c in row['descricao'].upper() for c in contas_fin):
+                    saldo -= row['valor']
+            return saldo
 
-        si, sf = calc_saldo(data_ini - timedelta(days=1)), calc_saldo(data_fim)
-        st.columns(3)[0].metric("Saldo Inicial (Vem do mês anterior)", f"R$ {si:,.2f}")
-        st.columns(3)[1].metric("Variação Líquida", f"R$ {sf-si:,.2f}", delta=f"{sf-si:,.2f}")
-        st.columns(3)[2].metric("Saldo Final (Leva para o mês seguinte)", f"R$ {sf:,.2f}")
+        si = calc_saldo_acumulado(data_ini - timedelta(days=1))
+        sf = calc_saldo_acumulado(data_fim)
+        variacao = sf - si
+
+        st.columns(3)[0].metric("Saldo Inicial", f"R$ {si:,.2f}")
+        st.columns(3)[1].metric("Variação Líquida", f"R$ {variacao:,.2f}", delta=f"{variacao:,.2f}")
+        st.columns(3)[2].metric("Saldo Final", f"R$ {sf:,.2f}")
         
         st.divider()
-        st.write("### Lançamentos Reais no Período (Resultado, PL e Saídas de Ativo)")
-        # Filtra Resultado, PL e Ativo (apenas crédito do ativo financeiro) que influenciam o caixa
-        df_f = df_periodo[(df_periodo['natureza'].isin(['Receita', 'Despesa', 'Encargos Financeiros', 'Patrimônio Líquido', 'Ativo'])) & (df_periodo['status'].isin(["Pago", "Entrada", "Investimento"]))]
-        df_f = df_f[~((df_f['natureza'] == 'Ativo') & (df_f['tipo'] == 'Débito'))] # Ignora débito no Ativo
+        st.write("### Detalhamento Financeiro do Período")
         
+        # Filtro para exibição na tabela
+        df_f = df_periodo[
+            (df_periodo['status'].isin(["Pago", "Entrada", "Investimento"])) & 
+            (~df_periodo['status'].isin(["Transferência Interna", "Pendente"]))
+        ]
+        
+        # Filtro para garantir que mostramos despesas pagas e créditos de ativo
+        df_f = df_f[
+            (df_f['natureza'].isin(['Receita', 'Despesa', 'Encargos Financeiros', 'Patrimônio Líquido'])) | 
+            ((df_f['natureza'] == 'Ativo') & (df_f['tipo'] == 'Crédito'))
+        ]
+
         if not df_f.empty:
             st.dataframe(df_f[['data_lancamento', 'descricao', 'natureza', 'tipo', 'valor', 'justificativa']].rename(columns={'justificativa': 'Observação'}), use_container_width=True, hide_index=True)
         else:
