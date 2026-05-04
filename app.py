@@ -184,36 +184,48 @@ else:
         lucro = t_rec - t_desp - t_enc
         st.markdown(f"<div class='dre-total dre-linha' style='background:{'#059669' if lucro >= 0 else '#dc2626'}; color:white;'><span>LUCRO LÍQUIDO</span> <span>R$ {lucro:,.2f}</span></div>", unsafe_allow_html=True)
 
-    # --- 4. FLUXO DE CAIXA ---
+    # --- 4. FLUXO DE CAIXA (LÓGICA REFEITA BASEADA EM DISPONIBILIDADES) ---
     elif st.session_state.menu_opcao == "💸 Fluxo de Caixa":
-        st.subheader("🌊 Demonstração do Fluxo de Caixa")
-        status_reais = ["Pago", "Entrada", "Investimento"]
+        st.subheader("🌊 Demonstração do Fluxo de Caixa (Foco em Disponibilidades)")
         
-        def calc_fluxo(periodo_df):
-            # Resultado: Receitas - Despesas - Encargos
-            ent_op = periodo_df[(periodo_df['natureza'] == 'Receita') & (periodo_df['tipo'] == 'Crédito')]['valor'].sum()
-            sai_op = periodo_df[(periodo_df['natureza'] == 'Despesa') & (periodo_df['tipo'] == 'Débito')]['valor'].sum()
-            sai_enc = periodo_df[(periodo_df['natureza'] == 'Encargos Financeiros') & (periodo_df['tipo'] == 'Débito')]['valor'].sum()
-            
-            # Investimento: Saídas de caixa para comprar Ativos (Débito no Ativo não-caixa)
-            contas_caixa = ['CAIXA', 'BANCO', 'GIRO']
-            df_atv = periodo_df[periodo_df['natureza'] == 'Ativo']
-            df_atv = df_atv[~df_atv['descricao'].str.contains('|'.join(contas_caixa), case=False)]
-            sai_inv = df_atv[df_atv['tipo'] == 'Débito']['valor'].sum()
-            ent_inv = df_atv[df_atv['tipo'] == 'Crédito']['valor'].sum()
-            
-            # Financiamento: Passivo e PL
-            df_pas_pl = periodo_df[periodo_df['natureza'].isin(['Passivo', 'Patrimônio Líquido'])]
-            ent_fin = df_pas_pl[df_pas_pl['tipo'] == 'Crédito']['valor'].sum()
-            sai_fin = df_pas_pl[df_pas_pl['tipo'] == 'Débito']['valor'].sum()
-            
-            return {"res": ent_op - sai_op - sai_enc, "inv": ent_inv - sai_inv, "fin": ent_fin - sai_fin}
+        # Filtro estrito: Apenas lançamentos em contas de Ativo que sejam CAIXA ou BANCO
+        # O fluxo de caixa real é a variação nessas contas específicas.
+        contas_disponiveis = ['CAIXA', 'BANCO', 'GIRO']
+        
+        def get_saldo_disponivel(data_limite):
+            mask = (df['data_lancamento'] <= data_limite) & (df['natureza'] == 'Ativo') & (df['descricao'].str.contains('|'.join(contas_disponiveis), case=False))
+            debitos = df[mask & (df['tipo'] == 'Débito')]['valor'].sum()
+            creditos = df[mask & (df['tipo'] == 'Crédito')]['valor'].sum()
+            return debitos - creditos
 
-        res_fluxo = calc_fluxo(df_periodo[df_periodo['status'].isin(status_reais)])
-        c1, c2, c3 = st.columns(3)
-        c1.info(f"**Fluxo de Resultado:** R$ {res_fluxo['res']:,.2f}")
-        c2.success(f"**Fluxo de Investimento:** R$ {res_fluxo['inv']:,.2f}")
-        c3.warning(f"**Fluxo de Financiamento:** R$ {res_fluxo['fin']:,.2f}")
+        # Saldo Inicial e Final das contas de Caixa/Banco
+        si = get_saldo_disponivel(data_ini - timedelta(days=1))
+        sf = get_saldo_disponivel(data_fim)
+        variacao_total = sf - si
+
+        # Classificação das operações que causaram a variação (Creditando ou Debitando Banco/Caixa)
+        # 1. Fluxo de Resultado: Receitas (+) e Despesas/Encargos (-) que passaram pelo Banco
+        df_disponivel_periodo = df_periodo[(df_periodo['natureza'] == 'Ativo') & (df_periodo['descricao'].str.contains('|'.join(contas_disponiveis), case=False))]
+        
+        # Como o usuário pontuou: O que influencia o fluxo é o Débito (entrada) ou Crédito (saída) nessas contas.
+        entradas_totais = df_disponivel_periodo[df_disponivel_periodo['tipo'] == 'Débito']['valor'].sum()
+        saidas_totais = df_disponivel_periodo[df_disponivel_periodo['tipo'] == 'Crédito']['valor'].sum()
+
+        # Detalhamento para o usuário
+        st.columns(3)[0].metric("Saldo Inicial (Disponível)", f"R$ {si:,.2f}")
+        st.columns(3)[1].metric("Variação Líquida", f"R$ {variacao_total:,.2f}", delta=f"{variacao_total:,.2f}")
+        st.columns(3)[2].metric("Saldo Final (Disponível)", f"R$ {sf:,.2f}")
+
+        st.divider()
+        st.write("### Origem e Destino do Recurso (Movimentação Banco/Caixa)")
+        c1, c2 = st.columns(2)
+        with c1:
+            st.success(f"📥 **Entradas Totais (Débito no Banco/Caixa):** R$ {entradas_totais:,.2f}")
+            # Sugestão de detalhamento por natureza se houver contrapartida
+            st.caption("Reflete Receitas recebidas, Aportes de Sócios ou Empréstimos tomados.")
+        with c2:
+            st.error(f"📤 **Saídas Totais (Crédito no Banco/Caixa):** R$ {saidas_totais:,.2f}")
+            st.caption("Reflete Despesas pagas, Compras de Ativos (Imobilizado) ou Pagamento de Passivos.")
 
     # --- 5. GESTÃO ---
     elif st.session_state.menu_opcao == "⚙️ Gestão":
