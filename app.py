@@ -184,58 +184,45 @@ else:
         lucro = t_rec - t_desp - t_enc
         st.markdown(f"<div class='dre-total dre-linha' style='background:{'#059669' if lucro >= 0 else '#dc2626'}; color:white;'><span>LUCRO LÍQUIDO</span> <span>R$ {lucro:,.2f}</span></div>", unsafe_allow_html=True)
 
-    # --- 4. FLUXO DE CAIXA (SÓ LANÇAMENTOS DIRETOS) ---
+    # --- 4. FLUXO DE CAIXA (LÓGICA: RESULTADO + PL) ---
     elif st.session_state.menu_opcao == "💸 Fluxo de Caixa":
-        st.subheader("🌊 Fluxo de Caixa (Movimentação Direta)")
+        st.subheader("🌊 Fluxo de Caixa (Foco em Resultado e Patrimônio Líquido)")
         
-        # Filtro estrito: Somente registros onde a CONTA é Banco, Caixa ou Giro
-        contas_financeiras = ['CAIXA', 'BANCO', 'GIRO']
-        df_financeiro_total = df[df['descricao'].str.contains('|'.join(contas_financeiras), case=False)]
-        df_financeiro_periodo = df_periodo[df_periodo['descricao'].str.contains('|'.join(contas_financeiras), case=False)]
-        
-        def get_saldo_fin(data_limite):
-            mask = (df_financeiro_total['data_lancamento'] <= data_limite)
-            d = df_financeiro_total[mask & (df_financeiro_total['tipo'] == 'Débito')]['valor'].sum()
-            c = df_financeiro_total[mask & (df_financeiro_total['tipo'] == 'Crédito')]['valor'].sum()
-            return d - c
+        # Filtramos apenas lançamentos de Receita, Despesa, Encargos e PL que tenham status "Pago", "Entrada" ou "Investimento"
+        status_pagos = ["Pago", "Entrada", "Investimento"]
+        df_caixa_base = df_periodo[
+            (df_periodo['natureza'].isin(['Receita', 'Despesa', 'Encargos Financeiros', 'Patrimônio Líquido'])) &
+            (df_periodo['status'].isin(status_pagos))
+        ]
 
-        si = get_saldo_fin(data_ini - timedelta(days=1))
-        sf = get_saldo_fin(data_fim)
-        variacao = sf - si
-
-        st.columns(3)[0].metric("Saldo Inicial Disponível", f"R$ {si:,.2f}")
-        st.columns(3)[1].metric("Variação no Período", f"R$ {variacao:,.2f}", delta=f"{variacao:,.2f}")
-        st.columns(3)[2].metric("Saldo Final Disponível", f"R$ {sf:,.2f}")
-
-        st.divider()
-        st.write("### Detalhamento das Entradas e Saídas Reais")
-        
-        if df_financeiro_periodo.empty:
-            st.info("Nenhuma movimentação direta de caixa/banco neste período.")
+        if df_caixa_base.empty:
+            st.info("Nenhuma movimentação de Resultado ou PL identificada como paga neste período.")
         else:
-            # Exibe apenas os lançamentos que afetaram o caixa/banco
-            # Renomeamos as colunas para ficar claro que é a visão do caixa
-            df_display = df_financeiro_periodo[['data_lancamento', 'descricao', 'tipo', 'valor', 'justificativa']].copy()
-            df_display.columns = ['Data', 'Conta Financeira', 'Movimento', 'Valor (R$)', 'Observação']
+            # Cálculo de Entradas (Receita no Crédito e PL no Crédito)
+            entradas = df_caixa_base[df_caixa_base['tipo'] == 'Crédito']['valor'].sum()
+            # Cálculo de Saídas (Despesa, Encargos no Débito e PL no Débito)
+            saidas = df_caixa_base[df_caixa_base['tipo'] == 'Débito']['valor'].sum()
+            saldo_fluxo = entradas - saidas
+
+            st.columns(2)[0].metric("Total Entradas (Crédito)", f"R$ {entradas:,.2f}")
+            st.columns(2)[1].metric("Total Saídas (Débito)", f"R$ {saidas:,.2f}", delta=f"{saldo_fluxo:,.2f}")
+
+            st.divider()
+            st.write("### Detalhamento dos Lançamentos Financeiros")
             
-            # Formatação visual: Débito (Entrada) em verde, Crédito (Saída) em vermelho
-            def color_mov(val):
-                color = '#059669' if val == 'Débito' else '#dc2626'
+            # Formatação para exibição
+            df_display = df_caixa_base[['data_lancamento', 'descricao', 'natureza', 'tipo', 'valor', 'justificativa']].copy()
+            df_display.columns = ['Data', 'Conta', 'Grupo', 'Operação', 'Valor (R$)', 'Observação']
+            
+            def color_op(val):
+                color = '#059669' if val == 'Crédito' else '#dc2626'
                 return f'color: {color}; font-weight: bold'
 
             st.dataframe(
-                df_display.style.map(color_mov, subset=['Movimento']).format({"Valor (R$)": "{:,.2f}"}),
+                df_display.style.map(color_op, subset=['Operação']).format({"Valor (R$)": "{:,.2f}"}),
                 use_container_width=True,
                 hide_index=True
             )
-
-            # Resumo rápido
-            ent = df_financeiro_periodo[df_financeiro_periodo['tipo'] == 'Débito']['valor'].sum()
-            sai = df_financeiro_periodo[df_financeiro_periodo['tipo'] == 'Crédito']['valor'].sum()
-            
-            c1, c2 = st.columns(2)
-            c1.success(f"**Total de Entradas:** R$ {ent:,.2f}")
-            c2.error(f"**Total de Saídas:** R$ {sai:,.2f}")
 
     # --- 5. GESTÃO ---
     elif st.session_state.menu_opcao == "⚙️ Gestão":
@@ -244,7 +231,6 @@ else:
             if st.button("🔥 RESETAR TUDO", type="primary"):
                 supabase.table("lancamentos").delete().eq("user_id", user_id).execute()
                 st.cache_data.clear(); st.rerun()
-        
         for _, row in df.sort_values(by='data_lancamento', ascending=False).iterrows():
             c1, c2, c3 = st.columns([5, 1, 1])
             c1.write(f"**[{row['data_lancamento']}] {row['descricao']}** - R$ {row['valor']:,.2f}")
