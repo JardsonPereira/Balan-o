@@ -184,48 +184,58 @@ else:
         lucro = t_rec - t_desp - t_enc
         st.markdown(f"<div class='dre-total dre-linha' style='background:{'#059669' if lucro >= 0 else '#dc2626'}; color:white;'><span>LUCRO LÍQUIDO</span> <span>R$ {lucro:,.2f}</span></div>", unsafe_allow_html=True)
 
-    # --- 4. FLUXO DE CAIXA (LÓGICA REFEITA BASEADA EM DISPONIBILIDADES) ---
+    # --- 4. FLUXO DE CAIXA (SÓ LANÇAMENTOS DIRETOS) ---
     elif st.session_state.menu_opcao == "💸 Fluxo de Caixa":
-        st.subheader("🌊 Demonstração do Fluxo de Caixa (Foco em Disponibilidades)")
+        st.subheader("🌊 Fluxo de Caixa (Movimentação Direta)")
         
-        # Filtro estrito: Apenas lançamentos em contas de Ativo que sejam CAIXA ou BANCO
-        # O fluxo de caixa real é a variação nessas contas específicas.
-        contas_disponiveis = ['CAIXA', 'BANCO', 'GIRO']
+        # Filtro estrito: Somente registros onde a CONTA é Banco, Caixa ou Giro
+        contas_financeiras = ['CAIXA', 'BANCO', 'GIRO']
+        df_financeiro_total = df[df['descricao'].str.contains('|'.join(contas_financeiras), case=False)]
+        df_financeiro_periodo = df_periodo[df_periodo['descricao'].str.contains('|'.join(contas_financeiras), case=False)]
         
-        def get_saldo_disponivel(data_limite):
-            mask = (df['data_lancamento'] <= data_limite) & (df['natureza'] == 'Ativo') & (df['descricao'].str.contains('|'.join(contas_disponiveis), case=False))
-            debitos = df[mask & (df['tipo'] == 'Débito')]['valor'].sum()
-            creditos = df[mask & (df['tipo'] == 'Crédito')]['valor'].sum()
-            return debitos - creditos
+        def get_saldo_fin(data_limite):
+            mask = (df_financeiro_total['data_lancamento'] <= data_limite)
+            d = df_financeiro_total[mask & (df_financeiro_total['tipo'] == 'Débito')]['valor'].sum()
+            c = df_financeiro_total[mask & (df_financeiro_total['tipo'] == 'Crédito')]['valor'].sum()
+            return d - c
 
-        # Saldo Inicial e Final das contas de Caixa/Banco
-        si = get_saldo_disponivel(data_ini - timedelta(days=1))
-        sf = get_saldo_disponivel(data_fim)
-        variacao_total = sf - si
+        si = get_saldo_fin(data_ini - timedelta(days=1))
+        sf = get_saldo_fin(data_fim)
+        variacao = sf - si
 
-        # Classificação das operações que causaram a variação (Creditando ou Debitando Banco/Caixa)
-        # 1. Fluxo de Resultado: Receitas (+) e Despesas/Encargos (-) que passaram pelo Banco
-        df_disponivel_periodo = df_periodo[(df_periodo['natureza'] == 'Ativo') & (df_periodo['descricao'].str.contains('|'.join(contas_disponiveis), case=False))]
-        
-        # Como o usuário pontuou: O que influencia o fluxo é o Débito (entrada) ou Crédito (saída) nessas contas.
-        entradas_totais = df_disponivel_periodo[df_disponivel_periodo['tipo'] == 'Débito']['valor'].sum()
-        saidas_totais = df_disponivel_periodo[df_disponivel_periodo['tipo'] == 'Crédito']['valor'].sum()
-
-        # Detalhamento para o usuário
-        st.columns(3)[0].metric("Saldo Inicial (Disponível)", f"R$ {si:,.2f}")
-        st.columns(3)[1].metric("Variação Líquida", f"R$ {variacao_total:,.2f}", delta=f"{variacao_total:,.2f}")
-        st.columns(3)[2].metric("Saldo Final (Disponível)", f"R$ {sf:,.2f}")
+        st.columns(3)[0].metric("Saldo Inicial Disponível", f"R$ {si:,.2f}")
+        st.columns(3)[1].metric("Variação no Período", f"R$ {variacao:,.2f}", delta=f"{variacao:,.2f}")
+        st.columns(3)[2].metric("Saldo Final Disponível", f"R$ {sf:,.2f}")
 
         st.divider()
-        st.write("### Origem e Destino do Recurso (Movimentação Banco/Caixa)")
-        c1, c2 = st.columns(2)
-        with c1:
-            st.success(f"📥 **Entradas Totais (Débito no Banco/Caixa):** R$ {entradas_totais:,.2f}")
-            # Sugestão de detalhamento por natureza se houver contrapartida
-            st.caption("Reflete Receitas recebidas, Aportes de Sócios ou Empréstimos tomados.")
-        with c2:
-            st.error(f"📤 **Saídas Totais (Crédito no Banco/Caixa):** R$ {saidas_totais:,.2f}")
-            st.caption("Reflete Despesas pagas, Compras de Ativos (Imobilizado) ou Pagamento de Passivos.")
+        st.write("### Detalhamento das Entradas e Saídas Reais")
+        
+        if df_financeiro_periodo.empty:
+            st.info("Nenhuma movimentação direta de caixa/banco neste período.")
+        else:
+            # Exibe apenas os lançamentos que afetaram o caixa/banco
+            # Renomeamos as colunas para ficar claro que é a visão do caixa
+            df_display = df_financeiro_periodo[['data_lancamento', 'descricao', 'tipo', 'valor', 'justificativa']].copy()
+            df_display.columns = ['Data', 'Conta Financeira', 'Movimento', 'Valor (R$)', 'Observação']
+            
+            # Formatação visual: Débito (Entrada) em verde, Crédito (Saída) em vermelho
+            def color_mov(val):
+                color = '#059669' if val == 'Débito' else '#dc2626'
+                return f'color: {color}; font-weight: bold'
+
+            st.dataframe(
+                df_display.style.map(color_mov, subset=['Movimento']).format({"Valor (R$)": "{:,.2f}"}),
+                use_container_width=True,
+                hide_index=True
+            )
+
+            # Resumo rápido
+            ent = df_financeiro_periodo[df_financeiro_periodo['tipo'] == 'Débito']['valor'].sum()
+            sai = df_financeiro_periodo[df_financeiro_periodo['tipo'] == 'Crédito']['valor'].sum()
+            
+            c1, c2 = st.columns(2)
+            c1.success(f"**Total de Entradas:** R$ {ent:,.2f}")
+            c2.error(f"**Total de Saídas:** R$ {sai:,.2f}")
 
     # --- 5. GESTÃO ---
     elif st.session_state.menu_opcao == "⚙️ Gestão":
@@ -234,6 +244,7 @@ else:
             if st.button("🔥 RESETAR TUDO", type="primary"):
                 supabase.table("lancamentos").delete().eq("user_id", user_id).execute()
                 st.cache_data.clear(); st.rerun()
+        
         for _, row in df.sort_values(by='data_lancamento', ascending=False).iterrows():
             c1, c2, c3 = st.columns([5, 1, 1])
             c1.write(f"**[{row['data_lancamento']}] {row['descricao']}** - R$ {row['valor']:,.2f}")
