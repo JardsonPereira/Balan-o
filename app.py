@@ -132,8 +132,6 @@ for i, op in enumerate(opcoes_menu):
     if col_nav[i].button(op, use_container_width=True): st.session_state.menu_opcao = op
 
 st.divider()
-
-# --- FILTROS DE DATA ---
 f1, f2 = st.columns(2)
 with f1: data_ini = st.date_input("Início do Período", value=datetime.now().date().replace(day=1))
 with f2: data_fim = st.date_input("Fim do Período", value=datetime.now().date())
@@ -143,7 +141,7 @@ df_periodo = df[(df['data_lancamento'] >= data_ini) & (df['data_lancamento'] <= 
 if df.empty:
     st.info("Nenhum lançamento encontrado.")
 else:
-    # --- 1. RAZONETES ---
+    # --- ABA: RAZONETES ---
     if st.session_state.menu_opcao == "📊 Razonetes":
         for grupo in ["Ativo", "Passivo", "Patrimônio Líquido", "Receita", "Despesa", "Encargos Financeiros"]:
             df_g = df[df['natureza'] == grupo]
@@ -159,48 +157,61 @@ else:
                     with cols[i % 3]:
                         st.markdown(f"""<div class="conta-card"><div class="conta-titulo">{conta}</div><div class="conta-corpo"><div class="lado-debito">{deb_html}</div><div class="lado-credito">{cre_html}</div></div><div class="conta-rodape">Saldo: R$ {saldo:,.2f}</div></div>""", unsafe_allow_html=True)
 
-    # --- 2. BALANCETE (ATUALIZADO) ---
+    # --- ABA: BALANCETE (COM CORREÇÃO DE KEYERROR) ---
     elif st.session_state.menu_opcao == "🧾 Balancete":
         st.subheader("🧾 Balancete de Verificação")
-        bal_data = []
-        for conta in sorted(df_periodo['descricao'].unique()):
-            df_c = df_periodo[df_periodo['descricao'] == conta]
-            d = df_c[df_c['tipo'] == 'Débito']['valor'].sum()
-            c = df_c[df_c['tipo'] == 'Crédito']['valor'].sum()
-            
-            # Cálculo de Saldo Devedor ou Credor
-            sd = d - c if d > c else 0
-            sc = c - d if c > d else 0
-            
-            bal_data.append({"Conta": conta, "Débito": d, "Crédito": c, "Saldo Devedor": sd, "Saldo Credor": sc})
         
-        bal_df = pd.DataFrame(bal_data)
-        st.table(bal_df.style.format(precision=2, decimal=',', thousands='.'))
-
-        # Totais do Balancete
-        t_d, t_c = bal_df["Débito"].sum(), bal_df["Crédito"].sum()
-        t_sd, t_sc = bal_df["Saldo Devedor"].sum(), bal_df["Saldo Credor"].sum()
-
-        st.markdown("### ⚖️ Totais de Verificação")
-        c1, c2 = st.columns(2)
-        c1.metric("Total Débitos", f"R$ {t_d:,.2f}")
-        c2.metric("Total Créditos", f"R$ {t_c:,.2f}")
-        
-        c3, c4 = st.columns(2)
-        c3.metric("Soma Saldo Devedor", f"R$ {t_sd:,.2f}")
-        c4.metric("Soma Saldo Credor", f"R$ {t_sc:,.2f}", delta=f"{t_sd-t_sc:,.2f}" if t_sd != t_sc else None)
-
-        if round(t_sd, 2) == round(t_sc, 2):
-            st.success("✅ Balancete em Equilíbrio!")
+        if df_periodo.empty:
+            st.warning("Não há lançamentos no período selecionado para gerar o balancete.")
         else:
-            st.error("⚠️ Diferença detectada entre Débitos e Créditos!")
+            bal_data = []
+            for conta in sorted(df_periodo['descricao'].unique()):
+                df_c = df_periodo[df_periodo['descricao'] == conta]
+                d = df_c[df_c['tipo'] == 'Débito']['valor'].sum()
+                c = df_c[df_c['tipo'] == 'Crédito']['valor'].sum()
+                
+                # Regra de Saldo: Devedor se D > C, Credor se C > D
+                sd = d - c if d > c else 0
+                sc = c - d if c > d else 0
+                
+                bal_data.append({
+                    "Conta": conta, 
+                    "Débito": d, 
+                    "Crédito": c, 
+                    "Saldo Devedor": sd, 
+                    "Saldo Credor": sc
+                })
+            
+            bal_df = pd.DataFrame(bal_data)
+            
+            # Exibição da Tabela
+            st.table(bal_df.style.format(precision=2, decimal=',', thousands='.'))
 
-    # --- 3. DRE ---
+            # Totais de Verificação
+            t_d = bal_df["Débito"].sum()
+            t_c = bal_df["Crédito"].sum()
+            t_sd = bal_df["Saldo Devedor"].sum()
+            t_sc = bal_df["Saldo Credor"].sum()
+
+            st.divider()
+            st.markdown("### ⚖️ Equilíbrio das Contas")
+            c1, c2 = st.columns(2)
+            c1.metric("Soma dos Saldos Devedores", f"R$ {t_sd:,.2f}")
+            
+            diff = t_sd - t_sc
+            c2.metric("Soma dos Saldos Credores", f"R$ {t_sc:,.2f}", 
+                      delta=f"Diferença: {diff:,.2f}" if abs(diff) > 0.01 else None, 
+                      delta_color="inverse")
+
+            if abs(diff) < 0.01:
+                st.success("✅ O Balancete está em equilíbrio.")
+            else:
+                st.error("⚠️ O Balancete apresenta desequilíbrio entre débitos e créditos.")
+
+    # --- ABA: DRE ---
     elif st.session_state.menu_opcao == "📈 DRE":
         st.subheader("📈 DRE Detalhada")
-        rec = df_periodo[df_periodo['natureza'] == 'Receita']
-        desp = df_periodo[df_periodo['natureza'] == 'Despesa']
-        enc = df_periodo[df_periodo['natureza'] == 'Encargos Financeiros']
+        rec, desp, enc = df_periodo[df_periodo['natureza'] == 'Receita'], df_periodo[df_periodo['natureza'] == 'Despesa'], df_periodo[df_periodo['natureza'] == 'Encargos Financeiros']
         
         st.markdown("### 🟢 Receitas")
         for c in sorted(rec['descricao'].unique()):
@@ -223,7 +234,7 @@ else:
         lucro = t_rec - t_desp - t_enc
         st.markdown(f"<div class='dre-total dre-linha' style='background:{'#059669' if lucro >= 0 else '#dc2626'}; color:white;'><span>LUCRO LÍQUIDO</span> <span>R$ {lucro:,.2f}</span></div>", unsafe_allow_html=True)
 
-    # --- 4. FLUXO DE CAIXA ---
+    # --- ABA: FLUXO DE CAIXA ---
     elif st.session_state.menu_opcao == "💸 Fluxo de Caixa":
         st.subheader("🌊 Fluxo de Caixa")
         status_l = ["Pago", "Entrada", "Investimento"]
@@ -232,17 +243,20 @@ else:
             df_hist = target_df[(target_df['data_lancamento'] <= data_lim) & (target_df['status'].isin(status_l))]
             saldo = 0.0
             for _, r in df_hist.iterrows():
-                if r['natureza'] in ['Receita', 'Patrimônio Líquido'] and r['tipo'] == 'Crédito': saldo += r['valor']
-                elif r['tipo'] == 'Crédito' and r['natureza'] not in ['Receita', 'Patrimônio Líquido']: saldo -= r['valor']
-                elif r['natureza'] in ['Despesa', 'Passivo', 'Encargos Financeiros'] and r['tipo'] == 'Débito': saldo -= r['valor']
+                if r['natureza'] in ['Receita', 'Patrimônio Líquido'] and r['tipo'] == 'Crédito':
+                    saldo += r['valor']
+                elif r['tipo'] == 'Crédito' and r['natureza'] not in ['Receita', 'Patrimônio Líquido']:
+                    saldo -= r['valor']
+                elif r['natureza'] in ['Despesa', 'Passivo', 'Encargos Financeiros'] and r['tipo'] == 'Débito':
+                    saldo -= r['valor']
             return saldo
 
         sf, si = get_giro(df, data_fim), get_giro(df, data_ini - timedelta(days=1))
         c1, c2, c3 = st.columns(3); c1.metric("Saldo Inicial", f"R$ {si:,.2f}"); c2.metric("Variação", f"R$ {sf-si:,.2f}"); c3.metric("Saldo Final", f"R$ {sf:,.2f}")
 
-    # --- 5. GESTÃO ---
+    # --- ABA: GESTÃO ---
     elif st.session_state.menu_opcao == "⚙️ Gestão":
-        st.subheader("⚙️ Gestão de Lançamentos")
+        st.subheader("⚙️ Gestão")
         ordem = st.selectbox("Ordenar por:", ["Mais recentes", "Mais antigos"])
         df_gestao = df.sort_values(by='data_lancamento', ascending=(ordem == "Mais antigos"))
         for _, row in df_gestao.iterrows():
