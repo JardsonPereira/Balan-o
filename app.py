@@ -119,6 +119,7 @@ st.markdown("""<style>
     .valor-cre { color: #dc2626; font-weight: 600; text-align: right; font-size: 0.8rem; }
     .just-hint { font-size: 0.7rem; color: #64748b; font-style: italic; display: block; }
     .conta-rodape { padding: 8px; background: #f8fafc; border-top: 1.5px solid #1e293b; text-align: center; font-weight: 700; font-size: 0.85rem; }
+    .destaque-balancete { background-color: #f1f5f9; border: 2px solid #1e293b; border-radius: 10px; padding: 15px; margin-top: 20px; }
 </style>""", unsafe_allow_html=True)
 
 st.title("📑 Sistema Contábil Digital")
@@ -155,7 +156,7 @@ else:
                     with cols[i % 3]:
                         st.markdown(f"""<div class="conta-card"><div class="conta-titulo">{conta}</div><div class="conta-corpo"><div class="lado-debito">{deb_html}</div><div class="lado-credito">{cre_html}</div></div><div class="conta-rodape">Saldo: R$ {saldo:,.2f}</div></div>""", unsafe_allow_html=True)
 
-    # --- 2. BALANCETE (MOVIMENTAÇÃO + SALDO) ---
+    # --- 2. BALANCETE (COM DESTAQUE) ---
     elif st.session_state.menu_opcao == "🧾 Balancete":
         st.subheader("🧾 Balancete de Verificação")
         bal_data = []
@@ -166,9 +167,27 @@ else:
             bal_data.append({"Conta": conta, "Débito (Mov)": d, "Crédito (Mov)": c, "Saldo Devedor": sd, "Saldo Credor": sc})
         
         bal_df = pd.DataFrame(bal_data)
-        totais = pd.DataFrame([{"Conta": "TOTAL GERAL", "Débito (Mov)": bal_df["Débito (Mov)"].sum(), "Crédito (Mov)": bal_df["Crédito (Mov)"].sum(), "Saldo Devedor": bal_df["Saldo Devedor"].sum(), "Saldo Credor": bal_df["Saldo Credor"].sum()}])
-        bal_df = pd.concat([bal_df, totais], ignore_index=True)
         st.table(bal_df.style.format(precision=2, decimal=',', thousands='.'))
+
+        # --- SEÇÃO DE DESTAQUE ---
+        st.markdown('<div class="destaque-balancete">', unsafe_allow_html=True)
+        st.markdown("#### ⚖️ Resultados Consolidados")
+        
+        t_d, t_c = bal_df["Débito (Mov)"].sum(), bal_df["Crédito (Mov)"].sum()
+        t_sd, t_sc = bal_df["Saldo Devedor"].sum(), bal_df["Saldo Credor"].sum()
+        
+        c1, c2, c3, c4 = st.columns(4)
+        c1.metric("Soma Débitos", f"R$ {t_d:,.2f}")
+        c2.metric("Soma Créditos", f"R$ {t_c:,.2f}")
+        c3.metric("Total Devedor", f"R$ {t_sd:,.2f}")
+        c4.metric("Total Credor", f"R$ {t_sc:,.2f}")
+        
+        # Verificação de Equilíbrio
+        if abs(t_sd - t_sc) < 0.01:
+            st.success("✅ O Balancete está em perfeito equilíbrio (Partidas Dobradas confirmadas).")
+        else:
+            st.error(f"⚠️ Atenção: Desequilíbrio detectado de R$ {abs(t_sd - t_sc):,.2f}")
+        st.markdown('</div>', unsafe_allow_html=True)
 
     # --- 3. DRE ---
     elif st.session_state.menu_opcao == "📈 DRE":
@@ -180,7 +199,7 @@ else:
         lucro = t_rec - t_desp - t_enc
         st.markdown(f"### LUCRO LÍQUIDO: R$ {lucro:,.2f}")
 
-    # --- 4. FLUXO DE CAIXA (ACUMULADO) ---
+    # --- 4. FLUXO DE CAIXA ---
     elif st.session_state.menu_opcao == "💸 Fluxo de Caixa":
         st.subheader("🌊 Fluxo de Caixa (Lógica Acumulada)")
         contas_fin = ['CAIXA', 'BANCO', 'GIRO']
@@ -197,7 +216,7 @@ else:
         st.divider()
         st.write("### Lançamentos Reais no Período")
         df_f = df_periodo[(df_periodo['natureza'].isin(['Receita', 'Despesa', 'Encargos Financeiros', 'Patrimônio Líquido', 'Ativo'])) & (df_periodo['status'].isin(["Pago", "Entrada", "Investimento"]))]
-        df_f = df_f[~((df_f['natureza'] == 'Ativo') & (df_f['tipo'] == 'Débito'))] # Ignora débito no ativo (patrimônio)
+        df_f = df_f[~((df_f['natureza'] == 'Ativo') & (df_f['tipo'] == 'Débito'))]
         
         if not df_f.empty:
             st.dataframe(df_f[['data_lancamento', 'descricao', 'tipo', 'valor', 'justificativa']].rename(columns={'justificativa': 'Observação'}), use_container_width=True, hide_index=True)
