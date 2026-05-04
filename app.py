@@ -209,38 +209,35 @@ else:
         lucro = t_rec - t_desp - t_enc
         st.markdown(f"<div class='dre-total dre-linha' style='background:{'#059669' if lucro >= 0 else '#dc2626'}; color:white;'><span>LUCRO LÍQUIDO</span> <span>R$ {lucro:,.2f}</span></div>", unsafe_allow_html=True)
 
-    # --- 4. FLUXO DE CAIXA (DETALHADO) ---
+    # --- 4. FLUXO DE CAIXA ---
     elif st.session_state.menu_opcao == "💸 Fluxo de Caixa":
         st.subheader("🌊 Demonstração do Fluxo de Caixa (Método Direto)")
         status_reais = ["Pago", "Entrada", "Investimento"]
         
         def calc_fluxo(periodo_df):
-            # 1. Operacional (Receitas pagas - Despesas pagas - Encargos pagos)
+            # 1. Resultado (Receitas pagas - Despesas pagas - Encargos pagos)
             ent_op = periodo_df[(periodo_df['natureza'] == 'Receita') & (periodo_df['tipo'] == 'Crédito')]['valor'].sum()
             sai_op = periodo_df[(periodo_df['natureza'] == 'Despesa') & (periodo_df['tipo'] == 'Débito')]['valor'].sum()
             sai_enc = periodo_df[(periodo_df['natureza'] == 'Encargos Financeiros') & (periodo_df['tipo'] == 'Débito')]['valor'].sum()
             
             # 2. Investimentos (Venda de Ativos - Compra de Ativos)
-            # Nota: Consideramos crédito em Ativo (não caixa) como entrada e débito em Ativo (não caixa) como saída
             contas_caixa = ['CAIXA', 'BANCO', 'GIRO']
             df_atv = periodo_df[periodo_df['natureza'] == 'Ativo']
             df_atv = df_atv[~df_atv['descricao'].str.contains('|'.join(contas_caixa), case=False)]
             ent_inv = df_atv[df_atv['tipo'] == 'Crédito']['valor'].sum()
             sai_inv = df_atv[df_atv['tipo'] == 'Débito']['valor'].sum()
             
-            # 3. Financiamentos (Novos Empréstimos/Aportes - Pagamento Dívidas/Retiradas)
+            # 3. Financiamentos (Aportes/Empréstimos - Amortizações)
             df_pas_pl = periodo_df[periodo_df['natureza'].isin(['Passivo', 'Patrimônio Líquido'])]
             ent_fin = df_pas_pl[df_pas_pl['tipo'] == 'Crédito']['valor'].sum()
             sai_fin = df_pas_pl[df_pas_pl['tipo'] == 'Débito']['valor'].sum()
             
             return {
-                "op": ent_op - sai_op - sai_enc, "inv": ent_inv - sai_inv, "fin": ent_fin - sai_fin,
+                "res": ent_op - sai_op - sai_enc, "inv": ent_inv - sai_inv, "fin": ent_fin - sai_fin,
                 "detalhe": {"e_op": ent_op, "s_op": sai_op + sai_enc, "e_inv": ent_inv, "s_inv": sai_inv, "e_fin": ent_fin, "s_fin": sai_fin}
             }
 
-        # Cálculo de Saldos Históricos para conferência
         def get_saldo_caixa(data_limite):
-            # Saldo em contas de Ativo que contenham "CAIXA", "BANCO" ou "GIRO"
             mask = (df['data_lancamento'] <= data_limite) & (df['natureza'] == 'Ativo') & (df['descricao'].str.contains('CAIXA|BANCO|GIRO', case=False))
             dbs = df[mask & (df['tipo'] == 'Débito')]['valor'].sum()
             crs = df[mask & (df['tipo'] == 'Crédito')]['valor'].sum()
@@ -248,10 +245,9 @@ else:
 
         si = get_saldo_caixa(data_ini - timedelta(days=1))
         res_fluxo = calc_fluxo(df_periodo[df_periodo['status'].isin(status_reais)])
-        variacao = res_fluxo['op'] + res_fluxo['inv'] + res_fluxo['fin']
+        variacao = res_fluxo['res'] + res_fluxo['inv'] + res_fluxo['fin']
         sf = si + variacao
 
-        # Layout Visual
         st.columns(3)[0].metric("Saldo Inicial", f"R$ {si:,.2f}")
         st.columns(3)[1].metric("Geração Líquida de Caixa", f"R$ {variacao:,.2f}", delta=f"{variacao:,.2f}")
         st.columns(3)[2].metric("Saldo Final Calculado", f"R$ {sf:,.2f}")
@@ -259,10 +255,10 @@ else:
         st.divider()
         c1, c2, c3 = st.columns(3)
         with c1:
-            st.info("**Fluxo Operacional**")
+            st.info("**Fluxo de Resultado**")
             st.write(f"(+) Entradas: R$ {res_fluxo['detalhe']['e_op']:,.2f}")
             st.write(f"(-) Saídas: R$ {res_fluxo['detalhe']['s_op']:,.2f}")
-            st.markdown(f"**Líquido: R$ {res_fluxo['op']:,.2f}**")
+            st.markdown(f"**Líquido: R$ {res_fluxo['res']:,.2f}**")
         with c2:
             st.success("**Fluxo de Investimento**")
             st.write(f"(+) Desinvestimento: R$ {res_fluxo['detalhe']['e_inv']:,.2f}")
