@@ -174,8 +174,10 @@ else:
 
             st.markdown('<div class="destaque-balancete">', unsafe_allow_html=True)
             st.markdown("#### ⚖️ Resultados Consolidados")
-            t_d, t_c = bal_df["Débito (Mov)"].sum(), bal_df["Crédito (Mov)"].sum()
-            t_sd, t_sc = bal_df["Saldo Devedor"].sum(), bal_df["Saldo Credor"].sum()
+            t_d = bal_df["Débito (Mov)"].sum()
+            t_c = bal_df["Crédito (Mov)"].sum()
+            t_sd = bal_df["Saldo Devedor"].sum()
+            t_sc = bal_df["Saldo Credor"].sum()
             c1, c2, c3, c4 = st.columns(4)
             c1.metric("Soma Débitos", f"R$ {t_d:,.2f}")
             c2.metric("Soma Créditos", f"R$ {t_c:,.2f}")
@@ -185,19 +187,16 @@ else:
             else: st.error(f"⚠️ Desequilíbrio: R$ {abs(t_sd - t_sc):,.2f}")
             st.markdown('</div>', unsafe_allow_html=True)
 
-    # --- 3. DRE DETALHADA (CORRIGIDA) ---
+    # --- 3. DRE DETALHADA ---
     elif st.session_state.menu_opcao == "📈 DRE":
         st.subheader("📈 Demonstração do Resultado do Exercício (DRE)")
         
         def calcular_total_por_conta(df_sub, nat):
             if df_sub.empty: return pd.DataFrame(columns=['descricao', 'Total']), 0.0
-            
-            # Lógica: Receita (C-D), Despesa/Encargos (D-C)
             if nat == 'Receita':
                 res = df_sub.groupby('descricao').apply(lambda x: x[x['tipo'] == 'Crédito']['valor'].sum() - x[x['tipo'] == 'Débito']['valor'].sum(), include_groups=False)
             else:
                 res = df_sub.groupby('descricao').apply(lambda x: x[x['tipo'] == 'Débito']['valor'].sum() - x[x['tipo'] == 'Crédito']['valor'].sum(), include_groups=False)
-            
             df_res = res.reset_index(name='Total')
             return df_res, df_res['Total'].sum()
 
@@ -228,9 +227,9 @@ else:
         cor = "green" if lucro >= 0 else "red"
         st.markdown(f"## Lucro/Prejuízo Líquido: :{cor}[R$ {lucro:,.2f}]")
 
-    # --- 4. FLUXO DE CAIXA ---
+    # --- 4. FLUXO DE CAIXA (Lógica Corrigida para Passivo) ---
     elif st.session_state.menu_opcao == "💸 Fluxo de Caixa":
-        st.subheader("🌊 Fluxo de Caixa")
+        st.subheader("🌊 Fluxo de Caixa (Impacto no Disponível)")
         contas_fin = ['CAIXA', 'BANCO', 'GIRO']
         
         def calc_saldo_acumulado(data_lim):
@@ -239,9 +238,15 @@ else:
             sub = df[mask]
             saldo = 0.0
             for _, row in sub.iterrows():
-                if row['tipo'] == 'Crédito' and row['natureza'] in ['Receita', 'Patrimônio Líquido']: saldo += row['valor']
-                elif row['tipo'] == 'Débito' and row['natureza'] in ['Despesa', 'Encargos Financeiros', 'Patrimônio Líquido']: saldo -= row['valor']
-                elif row['tipo'] == 'Crédito' and row['natureza'] == 'Ativo' and any(c in row['descricao'].upper() for c in contas_fin): saldo -= row['valor']
+                # ENTRADAS: Receita(C), Patrimônio Líquido(C), Passivo(C - novos empréstimos)
+                if row['tipo'] == 'Crédito' and row['natureza'] in ['Receita', 'Patrimônio Líquido', 'Passivo']:
+                    saldo += row['valor']
+                # SAÍDAS: Despesa(D), Encargos(D), Patrimônio Líquido(D), Passivo(D - pagamento de obrigações)
+                elif row['tipo'] == 'Débito' and row['natureza'] in ['Despesa', 'Encargos Financeiros', 'Patrimônio Líquido', 'Passivo']:
+                    saldo -= row['valor']
+                # SAÍDA PATRIMONIAL: Crédito em Banco/Caixa
+                elif row['tipo'] == 'Crédito' and row['natureza'] == 'Ativo' and any(c in row['descricao'].upper() for c in contas_fin):
+                    saldo -= row['valor']
             return saldo
 
         si, sf = calc_saldo_acumulado(data_ini - timedelta(days=1)), calc_saldo_acumulado(data_fim)
@@ -250,6 +255,7 @@ else:
         st.columns(3)[2].metric("Saldo Final", f"R$ {sf:,.2f}")
         
         st.divider()
+        st.write("### Detalhamento Financeiro (Incluindo Pagamentos de Passivo)")
         df_f = df_periodo[df_periodo['status'].isin(["Pago", "Entrada", "Investimento"])]
         df_f = df_f[~((df_f['natureza'] == 'Ativo') & (df_f['tipo'] == 'Débito'))]
         if not df_f.empty:
