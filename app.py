@@ -137,6 +137,7 @@ f1, f2 = st.columns(2)
 with f1: data_ini = st.date_input("Início do Período", value=datetime.now().date().replace(day=1))
 with f2: data_fim = st.date_input("Fim do Período", value=datetime.now().date())
 
+# df_periodo: usado para DRE e Balancete (visão do período selecionado)
 df_periodo = df[(df['data_lancamento'] >= data_ini) & (df['data_lancamento'] <= data_fim)] if not df.empty else df
 
 if df.empty:
@@ -161,18 +162,15 @@ else:
     # --- 2. BALANCETE ---
     elif st.session_state.menu_opcao == "🧾 Balancete":
         st.subheader("🧾 Balancete de Verificação")
-        if df_periodo.empty:
-            st.warning("Nenhum lançamento no período.")
-        else:
-            bal_data = []
-            for conta in sorted(df_periodo['descricao'].unique()):
-                df_c = df_periodo[df_periodo['descricao'] == conta]
-                d, c = df_c[df_c['tipo'] == 'Débito']['valor'].sum(), df_c[df_c['tipo'] == 'Crédito']['valor'].sum()
-                sd, sc = (d - c if d > c else 0), (c - d if c > d else 0)
-                bal_data.append({"Conta": conta, "Débito": d, "Crédito": c, "Saldo Devedor": sd, "Saldo Credor": sc})
-            st.table(pd.DataFrame(bal_data).style.format(precision=2, decimal=',', thousands='.'))
-            t_sd, t_sc = sum(x['Saldo Devedor'] for x in bal_data), sum(x['Saldo Credor'] for x in bal_data)
-            st.metric("Saldo Devedor Total", f"R$ {t_sd:,.2f}"); st.metric("Saldo Credor Total", f"R$ {t_sc:,.2f}")
+        bal_data = []
+        for conta in sorted(df_periodo['descricao'].unique()):
+            df_c = df_periodo[df_periodo['descricao'] == conta]
+            d, c = df_c[df_c['tipo'] == 'Débito']['valor'].sum(), df_c[df_c['tipo'] == 'Crédito']['valor'].sum()
+            sd, sc = (d - c if d > c else 0), (c - d if c > d else 0)
+            bal_data.append({"Conta": conta, "Débito": d, "Crédito": c, "Saldo Devedor": sd, "Saldo Credor": sc})
+        st.table(pd.DataFrame(bal_data).style.format(precision=2, decimal=',', thousands='.'))
+        t_sd, t_sc = sum(x['Saldo Devedor'] for x in bal_data), sum(x['Saldo Credor'] for x in bal_data)
+        st.metric("Saldo Devedor Total", f"R$ {t_sd:,.2f}"); st.metric("Saldo Credor Total", f"R$ {t_sc:,.2f}")
 
     # --- 3. DRE ---
     elif st.session_state.menu_opcao == "📈 DRE":
@@ -184,58 +182,54 @@ else:
         lucro = t_rec - t_desp - t_enc
         st.markdown(f"<div class='dre-total dre-linha' style='background:{'#059669' if lucro >= 0 else '#dc2626'}; color:white;'><span>LUCRO LÍQUIDO</span> <span>R$ {lucro:,.2f}</span></div>", unsafe_allow_html=True)
 
-    # --- 4. FLUXO DE CAIXA (REGRAS DE FILTRO APLICADAS) ---
+    # --- 4. FLUXO DE CAIXA (LÓGICA DE CARREGAMENTO AUTOMÁTICO) ---
     elif st.session_state.menu_opcao == "💸 Fluxo de Caixa":
-        st.subheader("🌊 Fluxo de Caixa (Impacto Direto no Disponível)")
+        st.subheader("🌊 Fluxo de Caixa (Lógica Acumulada)")
         
-        # Filtros de exclusão: Ignoramos "Transferência Interna" e lançamentos que não afetam o caixa real
-        status_ignorados = ["Transferência Interna", "Pendente"]
-        contas_financeiras = ['CAIXA', 'BANCO', 'GIRO']
-        
-        # Filtramos apenas os registros que influenciam o fluxo financeiro:
-        # 1. Resultado e PL (desde que não seja transferência)
-        df_res_pl = df_periodo[
-            (df_periodo['natureza'].isin(['Receita', 'Despesa', 'Encargos Financeiros', 'Patrimônio Líquido'])) &
-            (~df_periodo['status'].isin(status_ignorados))
-        ]
-        
-        # 2. Créditos no Ativo Financeiro (saídas de banco/caixa para pagamentos diversos)
-        df_ativo_saida = df_periodo[
-            (df_periodo['natureza'] == 'Ativo') &
-            (df_periodo['descricao'].str.contains('|'.join(contas_financeiras), case=False)) &
-            (df_periodo['tipo'] == 'Crédito') &
-            (~df_periodo['status'].isin(status_ignorados))
-        ]
+        contas_fin = ['CAIXA', 'BANCO', 'GIRO']
+        status_excluidos = ["Transferência Interna", "Pendente"]
 
-        df_fluxo_final = pd.concat([df_res_pl, df_ativo_saida]).drop_duplicates()
+        # Função para calcular o saldo real disponível em qualquer data (Soma histórica)
+        def calcular_saldo_disponivel(data_limite):
+            # Filtra todo o histórico do banco de dados até aquela data
+            mask = (df['data_lancamento'] <= data_limite) & \
+                   (df['natureza'] == 'Ativo') & \
+                   (df['descricao'].str.contains('|'.join(contas_fin), case=False)) & \
+                   (~df['status'].isin(status_excluidos))
+            
+            debitos = df[mask & (df['tipo'] == 'Débito')]['valor'].sum()
+            creditos = df[mask & (df['tipo'] == 'Crédito')]['valor'].sum()
+            return debitos - creditos
 
-        if df_fluxo_final.empty:
-            st.info("Nenhuma movimentação financeira real identificada (Transferências Internas são ignoradas aqui).")
+        # Saldo Inicial: Tudo o que aconteceu antes do dia 'data_ini'
+        si = calcular_saldo_disponivel(data_ini - timedelta(days=1))
+        
+        # Saldo Final: Tudo o que aconteceu até o dia 'data_fim' (Carrega o SI + movimentos do mês)
+        sf = calcular_saldo_disponivel(data_fim)
+        variacao = sf - si
+
+        st.columns(3)[0].metric("Saldo Inicial (Vindo do mês anterior)", f"R$ {si:,.2f}")
+        st.columns(3)[1].metric("Variação Líquida no Período", f"R$ {variacao:,.2f}", delta=f"{variacao:,.2f}")
+        st.columns(3)[2].metric("Saldo Final (Para o mês seguinte)", f"R$ {sf:,.2f}")
+
+        st.divider()
+        st.write("### Lançamentos que afetaram o Caixa/Banco no período")
+        
+        # Filtro para mostrar apenas os lançamentos do período que movimentaram o caixa
+        df_f = df_periodo[
+            (df_periodo['natureza'].isin(['Receita', 'Despesa', 'Encargos Financeiros', 'Patrimônio Líquido', 'Ativo'])) &
+            (df_periodo['status'].isin(["Pago", "Entrada", "Investimento"])) &
+            (~df_periodo['status'].isin(status_excluidos))
+        ]
+        # Garantimos que se for Ativo, seja apenas Crédito (saída de banco para compra de bens)
+        df_f = df_f[~((df_f['natureza'] == 'Ativo') & (df_f['tipo'] == 'Débito'))]
+
+        if not df_f.empty:
+            df_disp = df_f[['data_lancamento', 'descricao', 'tipo', 'valor', 'justificativa']].copy()
+            df_disp.columns = ['Data', 'Conta', 'Operação', 'Valor (R$)', 'Obs']
+            st.dataframe(df_disp.style.format({"Valor (R$)": "{:,.2f}"}), use_container_width=True, hide_index=True)
         else:
-            entradas = df_fluxo_final[(df_fluxo_final['tipo'] == 'Crédito') & (df_fluxo_final['natureza'] != 'Ativo')]['valor'].sum()
-            saidas_gerais = df_fluxo_final[(df_fluxo_final['tipo'] == 'Débito')]['valor'].sum()
-            saidas_banco = df_ativo_saida['valor'].sum()
-            
-            total_saidas = saidas_gerais + saidas_banco
-            saldo_periodo = entradas - total_saidas
-
-            st.columns(2)[0].metric("Total Entradas Reais", f"R$ {entradas:,.2f}")
-            st.columns(2)[1].metric("Total Saídas Reais", f"R$ {total_saidas:,.2f}", delta=f"{saldo_periodo:,.2f}")
-
-            st.divider()
-            st.write("### Extrato de Impacto Financeiro")
-            
-            df_disp = df_fluxo_final[['data_lancamento', 'descricao', 'natureza', 'tipo', 'valor', 'status', 'justificativa']].copy()
-            df_disp.columns = ['Data', 'Conta', 'Natureza', 'Operação', 'Valor (R$)', 'Status', 'Observação']
-            
-            def color_set(val):
-                if val == 'Crédito': return 'color: #059669; font-weight: bold'
-                return 'color: #dc2626; font-weight: bold'
-
-            st.dataframe(
-                df_disp.style.map(color_set, subset=['Operação']).format({"Valor (R$)": "{:,.2f}"}),
-                use_container_width=True, hide_index=True
-            )
+            st.info("Nenhuma movimentação financeira real no período selecionado.")
 
     # --- 5. GESTÃO ---
     elif st.session_state.menu_opcao == "⚙️ Gestão":
@@ -246,7 +240,7 @@ else:
                 st.cache_data.clear(); st.rerun()
         for _, row in df.sort_values(by='data_lancamento', ascending=False).iterrows():
             c1, c2, c3 = st.columns([5, 1, 1])
-            c1.write(f"**[{row['data_lancamento']}] {row['descricao']}** - R$ {row['valor']:,.2f} ({row['status']})")
+            c1.write(f"**[{row['data_lancamento']}] {row['descricao']}** - R$ {row['valor']:,.2f}")
             if c2.button("✏️", key=f"ed_{row['id']}"): st.session_state.edit_id = row['id']; st.rerun()
             if c3.button("🗑️", key=f"del_{row['id']}"): 
                 supabase.table("lancamentos").delete().eq("id", row['id']).execute()
