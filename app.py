@@ -156,7 +156,7 @@ else:
                     with cols[i % 3]:
                         st.markdown(f"""<div class="conta-card"><div class="conta-titulo">{conta}</div><div class="conta-corpo"><div class="lado-debito">{deb_html}</div><div class="lado-credito">{cre_html}</div></div><div class="conta-rodape">Saldo: R$ {saldo:,.2f}</div></div>""", unsafe_allow_html=True)
 
-    # --- 2. BALANCETE (COM DESTAQUE) ---
+    # --- 2. BALANCETE (COM DESTAQUE E TOTAIS) ---
     elif st.session_state.menu_opcao == "🧾 Balancete":
         st.subheader("🧾 Balancete de Verificação")
         bal_data = []
@@ -169,24 +169,17 @@ else:
         bal_df = pd.DataFrame(bal_data)
         st.table(bal_df.style.format(precision=2, decimal=',', thousands='.'))
 
-        # --- SEÇÃO DE DESTAQUE ---
         st.markdown('<div class="destaque-balancete">', unsafe_allow_html=True)
-        st.markdown("#### ⚖️ Resultados Consolidados")
-        
+        st.markdown("#### ⚖️ Resultados Consolidados do Balancete")
         t_d, t_c = bal_df["Débito (Mov)"].sum(), bal_df["Crédito (Mov)"].sum()
         t_sd, t_sc = bal_df["Saldo Devedor"].sum(), bal_df["Saldo Credor"].sum()
-        
         c1, c2, c3, c4 = st.columns(4)
         c1.metric("Soma Débitos", f"R$ {t_d:,.2f}")
         c2.metric("Soma Créditos", f"R$ {t_c:,.2f}")
         c3.metric("Total Devedor", f"R$ {t_sd:,.2f}")
         c4.metric("Total Credor", f"R$ {t_sc:,.2f}")
-        
-        # Verificação de Equilíbrio
-        if abs(t_sd - t_sc) < 0.01:
-            st.success("✅ O Balancete está em perfeito equilíbrio (Partidas Dobradas confirmadas).")
-        else:
-            st.error(f"⚠️ Atenção: Desequilíbrio detectado de R$ {abs(t_sd - t_sc):,.2f}")
+        if abs(t_sd - t_sc) < 0.01: st.success("✅ O Balancete está equilibrado.")
+        else: st.error(f"⚠️ Desequilíbrio: R$ {abs(t_sd - t_sc):,.2f}")
         st.markdown('</div>', unsafe_allow_html=True)
 
     # --- 3. DRE ---
@@ -199,9 +192,9 @@ else:
         lucro = t_rec - t_desp - t_enc
         st.markdown(f"### LUCRO LÍQUIDO: R$ {lucro:,.2f}")
 
-    # --- 4. FLUXO DE CAIXA ---
+    # --- 4. FLUXO DE CAIXA (ACUMULADO E FILTRADO) ---
     elif st.session_state.menu_opcao == "💸 Fluxo de Caixa":
-        st.subheader("🌊 Fluxo de Caixa (Lógica Acumulada)")
+        st.subheader("🌊 Fluxo de Caixa (Lógica Contínua)")
         contas_fin = ['CAIXA', 'BANCO', 'GIRO']
         
         def calc_saldo(data_lim):
@@ -209,17 +202,20 @@ else:
             return df[mask & (df['tipo'] == 'Débito')]['valor'].sum() - df[mask & (df['tipo'] == 'Crédito')]['valor'].sum()
 
         si, sf = calc_saldo(data_ini - timedelta(days=1)), calc_saldo(data_fim)
-        st.columns(3)[0].metric("Saldo Inicial", f"R$ {si:,.2f}")
-        st.columns(3)[1].metric("Variação", f"R$ {sf-si:,.2f}", delta=f"{sf-si:,.2f}")
-        st.columns(3)[2].metric("Saldo Final", f"R$ {sf:,.2f}")
+        st.columns(3)[0].metric("Saldo Inicial (Vem do mês anterior)", f"R$ {si:,.2f}")
+        st.columns(3)[1].metric("Variação Líquida", f"R$ {sf-si:,.2f}", delta=f"{sf-si:,.2f}")
+        st.columns(3)[2].metric("Saldo Final (Leva para o mês seguinte)", f"R$ {sf:,.2f}")
         
         st.divider()
-        st.write("### Lançamentos Reais no Período")
+        st.write("### Lançamentos Reais no Período (Resultado, PL e Saídas de Ativo)")
+        # Filtra Resultado, PL e Ativo (apenas crédito do ativo financeiro) que influenciam o caixa
         df_f = df_periodo[(df_periodo['natureza'].isin(['Receita', 'Despesa', 'Encargos Financeiros', 'Patrimônio Líquido', 'Ativo'])) & (df_periodo['status'].isin(["Pago", "Entrada", "Investimento"]))]
-        df_f = df_f[~((df_f['natureza'] == 'Ativo') & (df_f['tipo'] == 'Débito'))]
+        df_f = df_f[~((df_f['natureza'] == 'Ativo') & (df_f['tipo'] == 'Débito'))] # Ignora débito no Ativo
         
         if not df_f.empty:
-            st.dataframe(df_f[['data_lancamento', 'descricao', 'tipo', 'valor', 'justificativa']].rename(columns={'justificativa': 'Observação'}), use_container_width=True, hide_index=True)
+            st.dataframe(df_f[['data_lancamento', 'descricao', 'natureza', 'tipo', 'valor', 'justificativa']].rename(columns={'justificativa': 'Observação'}), use_container_width=True, hide_index=True)
+        else:
+            st.info("Nenhuma movimentação financeira identificada.")
 
     # --- 5. GESTÃO ---
     elif st.session_state.menu_opcao == "⚙️ Gestão":
