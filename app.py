@@ -228,29 +228,47 @@ else:
                         st.markdown(f'<div class="conta-rodape">Saldo: R$ {saldo:,.2f}</div></div>', unsafe_allow_html=True)
 
     elif st.session_state.menu_opcao == "🧾 Balancete":
-        st.subheader("🧾 Balancete de Verificação e Resultados")
+        st.subheader("🧾 Balancete de Verificação")
         
-        # Lógica de Resultados para o Balancete
+        # Tabela de Contas com saldos individuais
+        bal_data = []
+        for conta in sorted(df_periodo['descricao'].unique()):
+            df_c = df_periodo[df_periodo['descricao'] == conta]
+            d, c = df_c[df_c['tipo'] == 'Débito']['valor'].sum(), df_c[df_c['tipo'] == 'Crédito']['valor'].sum()
+            sd = d - c if d > c else 0
+            sc = c - d if c > d else 0
+            bal_data.append({"Conta": conta, "Débito": d, "Crédito": c, "Saldo Devedor": sd, "Saldo Credor": sc})
+        
+        df_balancete = pd.DataFrame(bal_data)
+        st.table(df_balancete.style.format(precision=2))
+
+        # --- TOTAIS DO BALANCETE (REQUISITO SOLICITADO) ---
+        st.markdown("#### 📊 Totais das Colunas")
+        t_debito = df_balancete["Débito"].sum()
+        t_credito = df_balancete["Crédito"].sum()
+        t_s_devedor = df_balancete["Saldo Devedor"].sum()
+        t_s_credor = df_balancete["Saldo Credor"].sum()
+
+        tc1, tc2, tc3, tc4 = st.columns(4)
+        tc1.metric("Soma Débitos", f"R$ {t_debito:,.2f}")
+        tc2.metric("Soma Créditos", f"R$ {t_credito:,.2f}")
+        tc3.metric("Total Devedor", f"R$ {t_s_devedor:,.2f}")
+        tc4.metric("Total Credor", f"R$ {t_s_credor:,.2f}")
+
+        # Conferência de Igualdade
+        if abs(t_debito - t_credito) < 0.01 and abs(t_s_devedor - t_s_credor) < 0.01:
+            st.success("✅ Balancete validado: As somas das colunas são iguais.")
+        else:
+            st.error("⚠️ Atenção: Há divergência entre as somas das colunas.")
+
+        # --- LÓGICA DE EQUILÍBRIO PATRIMONIAL ---
+        st.markdown("---")
+        st.markdown("#### ⚖️ Equilíbrio Patrimonial (Integração com DRE)")
         rec = df_periodo[(df_periodo['natureza'] == 'Receita') & (df_periodo['tipo'] == 'Crédito')]['valor'].sum() - df_periodo[(df_periodo['natureza'] == 'Receita') & (df_periodo['tipo'] == 'Débito')]['valor'].sum()
         desp = df_periodo[(df_periodo['natureza'] == 'Despesa') & (df_periodo['tipo'] == 'Débito')]['valor'].sum() - df_periodo[(df_periodo['natureza'] == 'Despesa') & (df_periodo['tipo'] == 'Crédito')]['valor'].sum()
         enc = df_periodo[(df_periodo['natureza'] == 'Encargos Financeiros') & (df_periodo['tipo'] == 'Débito')]['valor'].sum()
         lucro_periodo = rec - desp - enc
 
-        # Tabela de Contas
-        bal_data = []
-        for conta in sorted(df_periodo['descricao'].unique()):
-            df_c = df_periodo[df_periodo['descricao'] == conta]
-            d, c = df_c[df_c['tipo'] == 'Débito']['valor'].sum(), df_c[df_c['tipo'] == 'Crédito']['valor'].sum()
-            sd = d-c if d > c else 0
-            sc = c-d if c > d else 0
-            bal_data.append({"Conta": conta, "Débito": d, "Crédito": c, "Saldo Devedor": sd, "Saldo Credor": sc})
-        
-        st.table(pd.DataFrame(bal_data).style.format(precision=2))
-
-        # Resultados Consolidados
-        st.markdown("---")
-        st.markdown("#### ⚖️ Equilíbrio Patrimonial (Integrando Resultados)")
-        
         t_at = df_periodo[df_periodo['natureza'] == 'Ativo'][df_periodo['tipo'] == 'Débito']['valor'].sum() - df_periodo[df_periodo['natureza'] == 'Ativo'][df_periodo['tipo'] == 'Crédito']['valor'].sum()
         t_pa = df_periodo[df_periodo['natureza'] == 'Passivo'][df_periodo['tipo'] == 'Crédito']['valor'].sum() - df_periodo[df_periodo['natureza'] == 'Passivo'][df_periodo['tipo'] == 'Débito']['valor'].sum()
         t_pl = df_periodo[df_periodo['natureza'] == 'Patrimônio Líquido'][df_periodo['tipo'] == 'Crédito']['valor'].sum() - df_periodo[df_periodo['natureza'] == 'Patrimônio Líquido'][df_periodo['tipo'] == 'Débito']['valor'].sum()
@@ -258,13 +276,7 @@ else:
         col1, col2, col3 = st.columns(3)
         col1.metric("Total Ativo", f"R$ {t_at:,.2f}")
         col2.metric("Passivo + PL (Base)", f"R$ {t_pa + t_pl:,.2f}")
-        col3.metric("Resultado do Período", f"R$ {lucro_periodo:,.2f}", delta=f"{lucro_periodo:,.2f}")
-
-        total_direito = t_pa + t_pl + lucro_periodo
-        if abs(t_at - total_direito) < 0.01:
-            st.success(f"✅ Balancete Equilibrado: Ativo ({t_at:,.2f}) = Passivo + PL + Resultado ({total_direito:,.2f})")
-        else:
-            st.error(f"⚠️ Desequilíbrio Detectado: Diferença de R$ {abs(t_at - total_direito):,.2f}")
+        col3.metric("Resultado (DRE)", f"R$ {lucro_periodo:,.2f}", delta=f"{lucro_periodo:,.2f}")
 
     elif st.session_state.menu_opcao == "📈 DRE":
         st.subheader("📈 Demonstração do Resultado (DRE)")
