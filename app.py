@@ -19,6 +19,7 @@ if 'user' not in st.session_state: st.session_state.user = None
 if 'edit_id' not in st.session_state: st.session_state.edit_id = None
 if 'form_count' not in st.session_state: st.session_state.form_count = 0
 if 'menu_opcao' not in st.session_state: st.session_state.menu_opcao = "📊 Razonetes"
+if 'confirm_reset' not in st.session_state: st.session_state.confirm_reset = False
 
 # --- AUTENTICAÇÃO ---
 def gerenciar_acesso():
@@ -120,6 +121,7 @@ st.markdown("""<style>
     .just-hint { font-size: 0.7rem; color: #64748b; font-style: italic; display: block; }
     .conta-rodape { padding: 8px; background: #f8fafc; border-top: 1.5px solid #1e293b; text-align: center; font-weight: 700; font-size: 0.85rem; }
     .destaque-balancete { background-color: #f1f5f9; border: 2px solid #1e293b; border-radius: 10px; padding: 15px; margin-top: 20px; }
+    .metric-container { background: #ffffff; padding: 15px; border-radius: 10px; border: 1px solid #e2e8f0; }
 </style>""", unsafe_allow_html=True)
 
 st.title("📑 Sistema Contábil Digital")
@@ -137,7 +139,7 @@ with f2: data_fim = st.date_input("Fim do Período", value=datetime.now().date()
 
 df_periodo = df[(df['data_lancamento'] >= data_ini) & (df['data_lancamento'] <= data_fim)] if not df.empty else df
 
-if df.empty:
+if df.empty and st.session_state.menu_opcao != "⚙️ Gestão":
     st.info("Nenhum lançamento encontrado.")
 else:
     # --- 1. RAZONETES ---
@@ -208,26 +210,26 @@ else:
 
         st.write("### 1. Receitas")
         if not df_r.empty:
-            for _, r in df_r.iterrows(): st.write(f"   (+) {r['descricao']}: R$ {r['Total']:,.2f}")
+            for _, r in df_r.iterrows(): st.write(f"    (+) {r['descricao']}: R$ {r['Total']:,.2f}")
         st.write(f"**(=) RECEITA BRUTA: R$ {tot_r:,.2f}**")
         st.divider()
 
         st.write("### 2. Despesas Operacionais")
         if not df_d.empty:
-            for _, r in df_d.iterrows(): st.write(f"   (-) {r['descricao']}: R$ {r['Total']:,.2f}")
+            for _, r in df_d.iterrows(): st.write(f"    (-) {r['descricao']}: R$ {r['Total']:,.2f}")
         st.write(f"**(=) TOTAL DESPESAS: R$ {tot_d:,.2f}**")
         st.divider()
 
         st.write("### 3. Resultados Financeiros (Encargos)")
         if not df_e.empty:
-            for _, r in df_e.iterrows(): st.write(f"   (-) {r['descricao']}: R$ {r['Total']:,.2f}")
+            for _, r in df_e.iterrows(): st.write(f"    (-) {r['descricao']}: R$ {r['Total']:,.2f}")
         st.write(f"**(=) TOTAL ENCARGOS: R$ {tot_e:,.2f}**")
         st.divider()
         
         cor = "green" if lucro >= 0 else "red"
         st.markdown(f"## Lucro/Prejuízo Líquido: :{cor}[R$ {lucro:,.2f}]")
 
-    # --- 4. FLUXO DE CAIXA (Lógica Corrigida para Passivo) ---
+    # --- 4. FLUXO DE CAIXA (Visual Melhorado) ---
     elif st.session_state.menu_opcao == "💸 Fluxo de Caixa":
         st.subheader("🌊 Fluxo de Caixa (Impacto no Disponível)")
         contas_fin = ['CAIXA', 'BANCO', 'GIRO']
@@ -238,36 +240,79 @@ else:
             sub = df[mask]
             saldo = 0.0
             for _, row in sub.iterrows():
-                # ENTRADAS: Receita(C), Patrimônio Líquido(C), Passivo(C - novos empréstimos)
                 if row['tipo'] == 'Crédito' and row['natureza'] in ['Receita', 'Patrimônio Líquido', 'Passivo']:
                     saldo += row['valor']
-                # SAÍDAS: Despesa(D), Encargos(D), Patrimônio Líquido(D), Passivo(D - pagamento de obrigações)
                 elif row['tipo'] == 'Débito' and row['natureza'] in ['Despesa', 'Encargos Financeiros', 'Patrimônio Líquido', 'Passivo']:
                     saldo -= row['valor']
-                # SAÍDA PATRIMONIAL: Crédito em Banco/Caixa
                 elif row['tipo'] == 'Crédito' and row['natureza'] == 'Ativo' and any(c in row['descricao'].upper() for c in contas_fin):
                     saldo -= row['valor']
             return saldo
 
         si, sf = calc_saldo_acumulado(data_ini - timedelta(days=1)), calc_saldo_acumulado(data_fim)
-        st.columns(3)[0].metric("Saldo Inicial", f"R$ {si:,.2f}")
-        st.columns(3)[1].metric("Variação Líquida", f"R$ {sf-si:,.2f}", delta=f"{sf-si:,.2f}")
-        st.columns(3)[2].metric("Saldo Final", f"R$ {sf:,.2f}")
+        
+        m1, m2, m3 = st.columns(3)
+        with m1:
+            st.markdown('<div style="background:#f0f9ff; padding:15px; border-radius:10px; border-left:5px solid #0ea5e9">', unsafe_allow_html=True)
+            st.metric("Saldo Inicial", f"R$ {si:,.2f}")
+            st.markdown('</div>', unsafe_allow_html=True)
+        with m2:
+            st.markdown('<div style="background:#f0fdf4; padding:15px; border-radius:10px; border-left:5px solid #22c55e">', unsafe_allow_html=True)
+            st.metric("Variação Líquida", f"R$ {sf-si:,.2f}", delta=f"{sf-si:,.2f}")
+            st.markdown('</div>', unsafe_allow_html=True)
+        with m3:
+            st.markdown('<div style="background:#fef2f2; padding:15px; border-radius:10px; border-left:5px solid #ef4444">', unsafe_allow_html=True)
+            st.metric("Saldo Final", f"R$ {sf:,.2f}")
+            st.markdown('</div>', unsafe_allow_html=True)
         
         st.divider()
-        st.write("### Detalhamento Financeiro (Incluindo Pagamentos de Passivo)")
+        if not df_periodo.empty:
+            st.write("### 📈 Evolução do Período")
+            df_chart = df_periodo.sort_values('data_lancamento').copy()
+            df_chart['valor_net'] = df_chart.apply(lambda r: r['valor'] if (r['tipo'] == 'Crédito' and r['natureza'] in ['Receita', 'Patrimônio Líquido', 'Passivo']) else -r['valor'], axis=1)
+            df_chart['acumulado'] = df_chart['valor_net'].cumsum() + si
+            st.area_chart(df_chart.set_index('data_lancamento')['acumulado'], color="#0ea5e9")
+
+        st.write("### 📄 Detalhamento Financeiro")
         df_f = df_periodo[df_periodo['status'].isin(["Pago", "Entrada", "Investimento"])]
         df_f = df_f[~((df_f['natureza'] == 'Ativo') & (df_f['tipo'] == 'Débito'))]
         if not df_f.empty:
             st.dataframe(df_f[['data_lancamento', 'descricao', 'natureza', 'tipo', 'valor', 'status', 'justificativa']], use_container_width=True, hide_index=True)
 
-    # --- 5. GESTÃO ---
+    # --- 5. GESTÃO (Com Botão Reset) ---
     elif st.session_state.menu_opcao == "⚙️ Gestão":
-        st.subheader("⚙️ Gestão")
-        for _, row in df.sort_values(by='data_lancamento', ascending=False).iterrows():
-            c1, c2, c3 = st.columns([5, 1, 1])
-            c1.write(f"**[{row['data_lancamento']}] {row['descricao']}** - R$ {row['valor']:,.2f} | *{row['justificativa']}*")
-            if c2.button("✏️", key=f"ed_{row['id']}"): st.session_state.edit_id = row['id']; st.rerun()
-            if c3.button("🗑️", key=f"del_{row['id']}"): 
-                supabase.table("lancamentos").delete().eq("id", row['id']).execute()
-                st.cache_data.clear(); st.rerun()
+        col_tit, col_reset = st.columns([4, 1])
+        with col_tit:
+            st.subheader("⚙️ Gestão de Lançamentos")
+        with col_reset:
+            if st.button("🚨 Resetar Banco", use_container_width=True):
+                st.session_state.confirm_reset = True
+            
+            if st.session_state.confirm_reset:
+                st.warning("Confirmar exclusão de TODOS os dados?")
+                cr1, cr2 = st.columns(2)
+                if cr1.button("Sim, apagar", type="primary"):
+                    supabase.table("lancamentos").delete().eq("user_id", user_id).execute()
+                    st.session_state.confirm_reset = False
+                    st.cache_data.clear()
+                    st.rerun()
+                if cr2.button("Cancelar"):
+                    st.session_state.confirm_reset = False
+                    st.rerun()
+
+        st.divider()
+        if df.empty:
+            st.info("Nenhum dado para gerenciar.")
+        else:
+            for _, row in df.sort_values(by='data_lancamento', ascending=False).iterrows():
+                with st.container():
+                    c1, c2, c3 = st.columns([5, 0.5, 0.5])
+                    c1.write(f"**[{row['data_lancamento']}] {row['descricao']}**")
+                    c1.caption(f"Natureza: {row['natureza']} | Tipo: {row['tipo']} | Valor: R$ {row['valor']:,.2f} | Obs: {row['justificativa']}")
+                    if c2.button("✏️", key=f"ed_{row['id']}"): 
+                        st.session_state.edit_id = row['id']
+                        st.rerun()
+                    if c3.button("🗑️", key=f"del_{row['id']}"): 
+                        supabase.table("lancamentos").delete().eq("id", row['id']).execute()
+                        st.cache_data.clear()
+                        st.rerun()
+                    st.markdown("---")
