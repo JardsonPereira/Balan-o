@@ -236,30 +236,25 @@ else:
         cor = "green" if lucro >= 0 else "red"
         st.markdown(f"## Lucro/Prejuízo Líquido: :{cor}[R$ {lucro:,.2f}]")
 
-    # --- 4. FLUXO DE CAIXA ---
+    # --- 4. FLUXO DE CAIXA (LÓGICA BASEADA NO STATUS) ---
     elif st.session_state.menu_opcao == "💸 Fluxo de Caixa":
-        st.subheader("🌊 Fluxo de Caixa (Impacto no Disponível)")
-        contas_fin = ['CAIXA', 'BANCO', 'GIRO']
+        st.subheader("🌊 Fluxo de Caixa (Baseado no Status)")
         
         def calc_saldo_acumulado(data_lim):
-            # Status que influenciam o caixa: Pago e Entrada (mantido Investimento por segurança financeira)
-            status_efetivos = ["Pago", "Entrada", "Investimento"]
-            mask = (df['data_lancamento'] <= data_lim) & (df['status'].isin(status_efetivos))
+            mask = (df['data_lancamento'] <= data_lim)
             sub = df[mask]
             saldo = 0.0
             for _, row in sub.iterrows():
-                # Entradas de dinheiro (Crédito em Receita, PL ou Passivo)
-                if row['tipo'] == 'Crédito' and row['natureza'] in ['Receita', 'Patrimônio Líquido', 'Passivo']:
+                # Lógica simplificada: Status define o movimento independente da natureza contabil
+                if row['status'] == "Entrada":
                     saldo += row['valor']
-                # Saídas de dinheiro (Débito em Despesa, Encargos, PL ou Passivo)
-                elif row['tipo'] == 'Débito' and row['natureza'] in ['Despesa', 'Encargos Financeiros', 'Patrimônio Líquido', 'Passivo']:
+                elif row['status'] == "Pago":
                     saldo -= row['valor']
-                # Saídas por compra de ativos financeiros (Crédito em Ativo Circulante/Disponível)
-                elif row['tipo'] == 'Crédito' and row['natureza'] == 'Ativo' and any(c in row['descricao'].upper() for c in contas_fin):
-                    saldo -= row['valor']
+                # Transferência Interna, Pendente e Investimento não alteram o saldo líquido total aqui
             return saldo
 
-        si, sf = calc_saldo_acumulado(data_ini - timedelta(days=1)), calc_saldo_acumulado(data_fim)
+        si = calc_saldo_acumulado(data_ini - timedelta(days=1))
+        sf = calc_saldo_acumulado(data_fim)
         
         m1, m2, m3 = st.columns(3)
         with m1:
@@ -276,14 +271,13 @@ else:
             st.markdown('</div>', unsafe_allow_html=True)
         
         st.divider()
-        st.write("### 📄 Detalhamento de Movimentações Financeiras")
-        # Filtro visual para a tabela também refletir Pago e Entrada
-        df_f = df_periodo[df_periodo['status'].isin(["Pago", "Entrada", "Investimento"])]
-        df_f = df_f[~((df_f['natureza'] == 'Ativo') & (df_f['tipo'] == 'Débito'))]
+        st.write("### 📄 Detalhamento de Movimentações (Entradas e Saídas)")
+        # Mostra apenas o que de fato movimentou caixa (Entrada e Pago)
+        df_f = df_periodo[df_periodo['status'].isin(["Entrada", "Pago"])]
         if not df_f.empty:
-            st.dataframe(df_f[['data_lancamento', 'descricao', 'natureza', 'tipo', 'valor', 'status', 'justificativa']], use_container_width=True, hide_index=True)
+            st.dataframe(df_f[['data_lancamento', 'descricao', 'natureza', 'valor', 'status', 'justificativa']], use_container_width=True, hide_index=True)
         else:
-            st.info("Nenhuma movimentação financeira efetivada no período.")
+            st.info("Nenhuma entrada ou saída registrada no período selecionado.")
 
     # --- 5. GESTÃO ---
     elif st.session_state.menu_opcao == "⚙️ Gestão":
@@ -314,7 +308,7 @@ else:
                 with st.container():
                     c1, c2, c3 = st.columns([5, 0.5, 0.5])
                     c1.write(f"**[{row['data_lancamento']}] {row['descricao']}**")
-                    c1.caption(f"Natureza: {row['natureza']} | Tipo: {row['tipo']} | Valor: R$ {row['valor']:,.2f} | Obs: {row['justificativa']}")
+                    c1.caption(f"Natureza: {row['natureza']} | Status: {row['status']} | Valor: R$ {row['valor']:,.2f}")
                     if c2.button("✏️", key=f"ed_{row['id']}"): 
                         st.session_state.edit_id = row['id']
                         st.rerun()
