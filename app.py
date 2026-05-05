@@ -188,7 +188,7 @@ else:
             else: st.error(f"⚠️ Desequilíbrio: R$ {abs(t_sd - t_sc):,.2f}")
             st.markdown('</div>', unsafe_allow_html=True)
 
-    # --- 3. DRE DETALHADA ---
+    # --- 3. DRE ---
     elif st.session_state.menu_opcao == "📈 DRE":
         st.subheader("📈 Demonstração do Resultado do Exercício (DRE)")
         
@@ -205,7 +205,9 @@ else:
         df_d, tot_d = calcular_total_por_conta(df_periodo[df_periodo['natureza'] == 'Despesa'], 'Despesa')
         df_e, tot_e = calcular_total_por_conta(df_periodo[df_periodo['natureza'] == 'Encargos Financeiros'], 'Encargos Financeiros')
         
-        lucro = tot_r - tot_d - tot_e
+        # Lógica EBITDA: Receitas - Despesas (Não inclui encargos financeiros/juros)
+        ebitda = tot_r - tot_d
+        lucro = ebitda - tot_e
 
         st.write("### 1. Receitas")
         if not df_r.empty:
@@ -217,6 +219,14 @@ else:
         if not df_d.empty:
             for _, r in df_d.iterrows(): st.write(f"    (-) {r['descricao']}: R$ {r['Total']:,.2f}")
         st.write(f"**(=) TOTAL DESPESAS: R$ {tot_d:,.2f}**")
+        
+        # Destaque do EBITDA
+        st.markdown(f"""
+            <div style="background-color: #f8fafc; padding: 15px; border-radius: 10px; border: 1px solid #1e293b; margin: 15px 0;">
+                <h4 style="margin:0; color: #1e293b;">⚡ EBITDA: R$ {ebitda:,.2f}</h4>
+                <small style="color: #64748b;">(Resultado Operacional antes de Encargos e Juros)</small>
+            </div>
+        """, unsafe_allow_html=True)
         st.divider()
 
         st.write("### 3. Resultados Financeiros (Encargos)")
@@ -228,7 +238,7 @@ else:
         cor = "green" if lucro >= 0 else "red"
         st.markdown(f"## Lucro/Prejuízo Líquido: :{cor}[R$ {lucro:,.2f}]")
 
-    # --- 4. FLUXO DE CAIXA (Visual Melhorado, Sem Gráfico) ---
+    # --- 4. FLUXO DE CAIXA ---
     elif st.session_state.menu_opcao == "💸 Fluxo de Caixa":
         st.subheader("🌊 Fluxo de Caixa (Impacto no Disponível)")
         contas_fin = ['CAIXA', 'BANCO', 'GIRO']
@@ -249,7 +259,6 @@ else:
 
         si, sf = calc_saldo_acumulado(data_ini - timedelta(days=1)), calc_saldo_acumulado(data_fim)
         
-        # Cards de Resumo Visual
         m1, m2, m3 = st.columns(3)
         with m1:
             st.markdown('<div style="background:#f0f9ff; padding:15px; border-radius:10px; border-left:5px solid #0ea5e9">', unsafe_allow_html=True)
@@ -273,7 +282,7 @@ else:
         else:
             st.info("Nenhuma movimentação financeira efetivada no período.")
 
-    # --- 5. GESTÃO (Com Botão Reset) ---
+    # --- 5. GESTÃO ---
     elif st.session_state.menu_opcao == "⚙️ Gestão":
         col_tit, col_reset = st.columns([4, 1])
         with col_tit:
