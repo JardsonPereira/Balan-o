@@ -310,6 +310,18 @@ else:
         st.dataframe(df_periodo[df_periodo['status'].isin(["Entrada", "Pago"])][['data_lancamento', 'descricao', 'valor', 'status', 'justificativa']], use_container_width=True)
 
     elif st.session_state.menu_opcao == "⚙️ Gestão":
+        col_res, _ = st.columns([1, 4])
+        if col_res.button("🚨 Resetar Todos Lançamentos", type="primary", use_container_width=True):
+            try:
+                supabase.table("lancamentos").delete().eq("user_id", user_id).execute()
+                st.cache_data.clear()
+                st.success("Todos os lançamentos foram excluídos.")
+                st.rerun()
+            except Exception as e:
+                st.error(f"Erro ao resetar: {e}")
+        
+        st.divider()
+        
         for _, row in df.sort_values('data_lancamento', ascending=False).iterrows():
             with st.expander(f"{row['data_lancamento']} - {row['descricao']} - R$ {row['valor']} ({row['status']})"):
                 st.write(f"Natureza: {row['natureza']} | Justificativa: {row['justificativa']}")
