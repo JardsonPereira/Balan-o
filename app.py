@@ -21,20 +21,17 @@ if 'edit_id' not in st.session_state: st.session_state.edit_id = None
 if 'form_count' not in st.session_state: st.session_state.form_count = 0
 if 'menu_opcao' not in st.session_state: st.session_state.menu_opcao = "📊 Razonetes"
 
-# --- FUNÇÃO PARA GERAR PDF (DRE + BALANCETE + DETALHAMENTO COM JUSTIFICATIVAS) ---
+# --- FUNÇÃO PARA GERAR PDF ---
 def gerar_pdf(df_periodo, data_ini, data_fim, user_email):
     pdf = FPDF()
     pdf.add_page()
     pdf.set_font("Helvetica", "B", 16)
-    
-    # Cabeçalho
     pdf.cell(190, 10, "Relatorio Contabil Consolidado", ln=True, align="C")
     pdf.set_font("Helvetica", "", 10)
     pdf.cell(190, 10, f"Periodo: {data_ini} ate {data_fim} | Usuario: {user_email}", ln=True, align="C")
     pdf.line(10, 30, 200, 30)
     pdf.ln(10)
 
-    # 1. DRE para cálculo do Lucro
     def calc_valor_pdf(nat, tipo_dev=True):
         sub = df_periodo[df_periodo['natureza'] == nat]
         d, c = sub[sub['tipo'] == 'Débito']['valor'].sum(), sub[sub['tipo'] == 'Crédito']['valor'].sum()
@@ -57,7 +54,6 @@ def gerar_pdf(df_periodo, data_ini, data_fim, user_email):
     pdf.cell(100, 7, f"LUCRO LIQUIDO: R$ {lucro:,.2f}", ln=True)
     pdf.ln(10)
 
-    # 2. Balancete Patrimonial
     pdf.set_font("Helvetica", "B", 12)
     pdf.cell(190, 10, "2. Balancete Patrimonial", ln=True)
     
@@ -90,7 +86,6 @@ def gerar_pdf(df_periodo, data_ini, data_fim, user_email):
     pdf.cell(50, 8, f"R$ {t_pa + t_pl + lucro:,.2f}", ln=True, align="R")
     pdf.ln(10)
 
-    # 3. Detalhamento com Justificativas
     pdf.set_font("Helvetica", "B", 12)
     pdf.cell(190, 10, "3. Detalhamento de Lancamentos", ln=True)
     pdf.set_font("Helvetica", "B", 7)
@@ -221,7 +216,8 @@ f1, f2, f3 = st.columns([2, 2, 1])
 with f1: data_ini = st.date_input("Início do Período", value=datetime.now().date().replace(day=1))
 with f2: data_fim = st.date_input("Fim do Período", value=datetime.now().date())
 
-df_periodo = df[(df['data_lancamento'] >= data_ini) & (df['data_lancamento'] <= data_fim)] if not df.empty else df
+# Filtro de período (Lancamentos pontuais)
+df_periodo = df[(df['data_lancamento'] >= data_ini) & (df['data_lancamento'] <= data_fim)] if not df.empty else pd.DataFrame()
 
 with f3:
     if not df_periodo.empty:
@@ -231,8 +227,8 @@ with f3:
         except Exception as e: st.error(f"Erro PDF: {e}")
 
 # --- CONTEÚDO DAS ABAS ---
-if df.empty and st.session_state.menu_opcao != "⚙️ Gestão":
-    st.info("Nenhum lançamento encontrado.")
+if df_periodo.empty and st.session_state.menu_opcao != "⚙️ Gestão":
+    st.info("Nenhum lançamento encontrado para o período selecionado.")
 else:
     if st.session_state.menu_opcao == "📊 Razonetes":
         for grupo in ["Ativo", "Passivo", "Patrimônio Líquido", "Receita", "Despesa", "Encargos Financeiros"]:
@@ -283,76 +279,71 @@ else:
         st.metric("Resultado Líquido", f"R$ {ebitda - enc:,.2f}")
 
     elif st.session_state.menu_opcao == "💸 Fluxo de Caixa":
-        st.subheader("🌊 Fluxo e Grau de Liquidez")
+        st.subheader("🌊 Fluxo e Grau de Liquidez (Acumulado)")
         
-        # --- LÓGICA DE SALDOS CARREGADOS (RESTAURADA) ---
-        def calc_caixa(limite):
+        # --- LÓGICA DE SALDOS ACUMULADOS (SALDO TRANSPORTADO) ---
+        def calc_acumulado(limite_data, natureza=None):
+            # Filtra tudo desde o início dos tempos até a data limite
+            if df.empty: return 0.0
+            sub = df[df['data_lancamento'] <= limite_data]
+            
+            if natureza:
+                sub = sub[sub['natureza'] == natureza]
+            
+            # Cálculo de Ativo / Caixa (Status Entrada vs Pago para Caixa)
+            if natureza == "Ativo" or natureza is None:
+                entradas = sub[sub['status'] == "Entrada"]['valor'].sum()
+                saidas = sub[sub['status'] == "Pago"]['valor'].sum()
+                return entradas - saidas
+            
+            # Cálculo de Passivo (Crédito - Débito)
+            if natureza == "Passivo":
+                c = sub[sub['tipo'] == "Crédito"]['valor'].sum()
+                d = sub[sub['tipo'] == "Débito"]['valor'].sum()
+                return c - d
+            return 0.0
+
+        si = calc_acumulado(data_ini - timedelta(days=1))
+        sf = calc_acumulado(data_fim)
+        passivo_acumulado = calc_acumulado(data_fim, "Passivo")
+
+        # --- ÍNDICES DE LIQUIDEZ COM DADOS ACUMULADOS ---
+        def saldo_grupo_acumulado(keywords, limite):
+            if df.empty: return 0.0
             sub = df[df['data_lancamento'] <= limite]
-            return sub[sub['status'] == "Entrada"]['valor'].sum() - sub[sub['status'] == "Pago"]['valor'].sum()
-        
-        si, sf = calc_caixa(data_ini - timedelta(days=1)), calc_caixa(data_fim)
-        
-        # --- CÁLCULOS DE GRAU E ÍNDICES DE LIQUIDEZ ---
-        df_ativo = df_periodo[df_periodo['natureza'] == 'Ativo']
-        df_passivo = df_periodo[df_periodo['natureza'] == 'Passivo']
+            mask = sub['descricao'].str.contains('|'.join(keywords), case=False, na=False)
+            final = sub[mask]
+            return final[final['tipo'] == 'Débito']['valor'].sum() - final[final['tipo'] == 'Crédito']['valor'].sum()
 
-        def saldo_grupo(df_grupo, keywords):
-            mask = df_grupo['descricao'].str.contains('|'.join(keywords), case=False, na=False)
-            sub = df_grupo[mask]
-            if df_grupo['natureza'].iloc[0] == 'Ativo':
-                return sub[sub['tipo'] == 'Débito']['valor'].sum() - sub[sub['tipo'] == 'Crédito']['valor'].sum()
-            else:
-                return sub[sub['tipo'] == 'Crédito']['valor'].sum() - sub[sub['tipo'] == 'Débito']['valor'].sum()
-
-        disponivel = saldo_grupo(df_ativo, ['CAIXA', 'BANCO', 'NUBANK', 'POUPANCA', 'CORRENTE'])
-        estoques = saldo_grupo(df_ativo, ['ESTOQUE', 'MERCADORIA', 'PRODUTO'])
-        recebeis = saldo_grupo(df_ativo, ['CLIENTES', 'RECEBER', 'INVESTIMENTO'])
+        disponivel = saldo_grupo_acumulado(['CAIXA', 'BANCO', 'NUBANK', 'POUPANCA'], data_fim)
+        estoques = saldo_grupo_acumulado(['ESTOQUE', 'MERCADORIA'], data_fim)
+        recebeis = saldo_grupo_acumulado(['CLIENTES', 'RECEBER'], data_fim)
         
         at_circulante = disponivel + estoques + recebeis
-        pa_circulante = df_passivo[df_passivo['tipo'] == 'Crédito']['valor'].sum() - df_passivo[df_passivo['tipo'] == 'Débito']['valor'].sum()
+        pa_circulante = passivo_acumulado # Considera a dívida total acumulada
         
         l_corrente = at_circulante / pa_circulante if pa_circulante > 0 else at_circulante
         l_seca = (at_circulante - estoques) / pa_circulante if pa_circulante > 0 else (at_circulante - estoques)
-        l_imediata = disponivel / pa_circulante if pa_circulante > 0 else disponivel
 
-        # --- EXIBIÇÃO DE MÉTRICAS ---
         m1, m2, m3 = st.columns(3)
-        m1.metric("Saldo Inicial", f"R$ {si:,.2f}")
-        m2.metric("Saldo Final", f"R$ {sf:,.2f}")
-        m3.metric("Variação Período", f"R$ {sf-si:,.2f}", delta=f"{sf-si:,.2f}")
+        m1.metric("Saldo Transportado (Mês Anterior)", f"R$ {si:,.2f}")
+        m2.metric("Saldo Final de Caixa", f"R$ {sf:,.2f}")
+        m3.metric("Dívidas Acumuladas (Passivo)", f"R$ {pa_circulante:,.2f}", delta=f"-{pa_circulante:,.2f}")
 
         st.write("---")
-        st.markdown("#### 📏 Índices de Liquidez")
+        st.markdown("#### 📏 Saúde Financeira (Considerando Dívidas Pendentes)")
         c1, c2, c3 = st.columns(3)
         with c1:
-            st.markdown(f"<div class='metric-card'><p class='liquidez-label'>Liquidez Corrente</p><h3>{l_corrente:.2f}</h3><small>Ativo Circ. / Passivo Circ.</small></div>", unsafe_allow_html=True)
+            st.markdown(f"<div class='metric-card'><p class='liquidez-label'>Liquidez Corrente</p><h3>{l_corrente:.2f}</h3><small>Ativo Total / Dívida Acumulada</small></div>", unsafe_allow_html=True)
         with c2:
-            st.markdown(f"<div class='metric-card' style='border-left-color: #f59e0b'><p class='liquidez-label'>Liquidez Seca</p><h3>{l_seca:.2f}</h3><small>(Ativo - Estoque) / Passivo</small></div>", unsafe_allow_html=True)
+            st.markdown(f"<div class='metric-card' style='border-left-color: #f59e0b'><p class='liquidez-label'>Liquidez Seca</p><h3>{l_seca:.2f}</h3><small>Excluindo Estoques</small></div>", unsafe_allow_html=True)
         with c3:
-            st.markdown(f"<div class='metric-card' style='border-left-color: #10b981'><p class='liquidez-label'>Liquidez Imediata</p><h3>{l_imediata:.2f}</h3><small>Disponível / Passivo</small></div>", unsafe_allow_html=True)
+            # Liquidez Imediata baseada no saldo de caixa atual vs dívida
+            l_imediata = disponivel / pa_circulante if pa_circulante > 0 else disponivel
+            st.markdown(f"<div class='metric-card' style='border-left-color: #10b981'><p class='liquidez-label'>Liquidez Imediata</p><h3>{l_imediata:.2f}</h3><small>Dinheiro em Mão / Dívida</small></div>", unsafe_allow_html=True)
 
         st.write("---")
-        col_at, col_diag = st.columns([2, 1])
-        with col_at:
-            st.markdown("#### 💰 Ativos Conversíveis (Futuros)")
-            dados_at = [
-                {"Item": "💵 Disponibilidade Imediata", "Valor": disponivel},
-                {"Item": "📦 Estoques (Conversão Venda)", "Valor": estoques},
-                {"Item": "⏳ Recebíveis e Futuros", "Valor": recebeis},
-                {"Item": "🏛️ Total Ativo Circulante", "Valor": at_circulante}
-            ]
-            st.table(pd.DataFrame(dados_at).style.format({"Valor": "R$ {:,.2f}"}))
-        
-        with col_diag:
-            st.markdown("#### 🚩 Diagnóstico")
-            if l_corrente > 1.5: st.success("Excelente liquidez de curto prazo.")
-            elif l_corrente >= 1: st.warning("Liquidez ajustada. Cuidado com novas dívidas.")
-            else: st.error("Déficit de capital de giro identificado.")
-            
-            st.info(f"Capacidade de conversão futura: R$ {recebeis:,.2f}")
-
-        st.write("---")
-        st.markdown("#### 📋 Histórico de Movimentações")
+        st.markdown("#### 📋 Histórico de Movimentações do Período")
         st.dataframe(df_periodo[df_periodo['status'].isin(["Entrada", "Pago"])][['data_lancamento', 'descricao', 'valor', 'status', 'justificativa']], use_container_width=True)
 
     elif st.session_state.menu_opcao == "⚙️ Gestão":
@@ -366,14 +357,17 @@ else:
             except Exception as e: st.error(f"Erro: {e}")
         
         st.divider()
-        for _, row in df.sort_values('data_lancamento', ascending=False).iterrows():
-            with st.expander(f"{row['data_lancamento']} - {row['descricao']} - R$ {row['valor']} ({row['status']})"):
-                st.write(f"Justificativa: {row['justificativa']}")
-                c_edit, c_del = st.columns(2)
-                if c_edit.button("✏️ Editar", key=f"ed_{row['id']}"):
-                    st.session_state.edit_id = row['id']
-                    st.rerun()
-                if c_del.button("🗑️ Excluir", key=f"del_{row['id']}"):
-                    supabase.table("lancamentos").delete().eq("id", row['id']).execute()
-                    st.cache_data.clear()
-                    st.rerun()
+        if df.empty:
+            st.info("Nenhum lançamento geral para gerenciar.")
+        else:
+            for _, row in df.sort_values('data_lancamento', ascending=False).iterrows():
+                with st.expander(f"{row['data_lancamento']} - {row['descricao']} - R$ {row['valor']} ({row['status']})"):
+                    st.write(f"Justificativa: {row['justificativa']}")
+                    c_edit, c_del = st.columns(2)
+                    if c_edit.button("✏️ Editar", key=f"ed_{row['id']}"):
+                        st.session_state.edit_id = row['id']
+                        st.rerun()
+                    if c_del.button("🗑️ Excluir", key=f"del_{row['id']}"):
+                        supabase.table("lancamentos").delete().eq("id", row['id']).execute()
+                        st.cache_data.clear()
+                        st.rerun()
