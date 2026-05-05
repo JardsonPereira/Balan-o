@@ -23,7 +23,7 @@ if 'form_count' not in st.session_state: st.session_state.form_count = 0
 if 'menu_opcao' not in st.session_state: st.session_state.menu_opcao = "📊 Razonetes"
 if 'confirm_reset' not in st.session_state: st.session_state.confirm_reset = False
 
-# --- FUNÇÃO PARA GERAR PDF (CORREÇÃO DE FORMATO BINÁRIO) ---
+# --- FUNÇÃO PARA GERAR PDF (COM BALANCETE PATRIMONIAL) ---
 def gerar_pdf(df_periodo, data_ini, data_fim, user_email):
     pdf = FPDF()
     pdf.add_page()
@@ -36,65 +36,99 @@ def gerar_pdf(df_periodo, data_ini, data_fim, user_email):
     pdf.line(10, 30, 200, 30)
     pdf.ln(10)
 
-    # 1. Resumo DRE
+    # --- 1. DRE (CÁLCULO DO LUCRO PARA O BALANCETE) ---
+    def calc_valor_pdf(natureza, tipo_devedor=True):
+        sub = df_periodo[df_periodo['natureza'] == natureza]
+        d = sub[sub['tipo'] == 'Débito']['valor'].sum()
+        c = sub[sub['tipo'] == 'Crédito']['valor'].sum()
+        return (d - c) if tipo_devedor else (c - d)
+
+    receitas = calc_valor_pdf('Receita', False)
+    despesas = calc_valor_pdf('Despesa', True)
+    encargos = calc_valor_pdf('Encargos Financeiros', True)
+    ebitda = receitas - despesas
+    lucro_periodo = ebitda - encargos
+
     pdf.set_font("Helvetica", "B", 12)
     pdf.cell(190, 10, "1. Demonstracao do Resultado (DRE)", ln=True)
     pdf.set_font("Helvetica", "", 10)
-    
-    def calc_dre_pdf(nat, tipo_base):
-        sub = df_periodo[df_periodo['natureza'] == nat]
-        if tipo_base == 'Crédito':
-            return sub[sub['tipo'] == 'Crédito']['valor'].sum() - sub[sub['tipo'] == 'Débito']['valor'].sum()
-        return sub[sub['tipo'] == 'Débito']['valor'].sum() - sub[sub['tipo'] == 'Crédito']['valor'].sum()
-
-    receitas = calc_dre_pdf('Receita', 'Crédito')
-    despesas = calc_dre_pdf('Despesa', 'Débito')
-    encargos = calc_dre_pdf('Encargos Financeiros', 'Débito')
-    ebitda = receitas - despesas
-    lucro = ebitda - encargos
-
-    pdf.cell(100, 8, f"Receita Bruta: R$ {receitas:,.2f}", ln=True)
-    pdf.cell(100, 8, f"Despesas Operacionais: R$ {despesas:,.2f}", ln=True)
+    pdf.cell(100, 7, f"Receita Bruta: R$ {receitas:,.2f}", ln=True)
+    pdf.cell(100, 7, f"Despesas Operacionais: R$ {despesas:,.2f}", ln=True)
     pdf.set_font("Helvetica", "B", 10)
-    pdf.cell(100, 8, f"EBITDA: R$ {ebitda:,.2f}", ln=True)
+    pdf.cell(100, 7, f"EBITDA: R$ {ebitda:,.2f}", ln=True)
     pdf.set_font("Helvetica", "", 10)
-    pdf.cell(100, 8, f"Encargos Financeiros: R$ {encargos:,.2f}", ln=True)
+    pdf.cell(100, 7, f"Encargos Financeiros: R$ {encargos:,.2f}", ln=True)
     pdf.set_font("Helvetica", "B", 10)
-    pdf.cell(100, 8, f"LUCRO/PREJUIZO LIQUIDO: R$ {lucro:,.2f}", ln=True)
+    pdf.cell(100, 7, f"LUCRO/PREJUIZO LIQUIDO: R$ {lucro_periodo:,.2f}", ln=True)
     pdf.ln(5)
 
-    # 2. Fluxo de Caixa
+    # --- 2. BALANCETE PATRIMONIAL ---
     pdf.set_font("Helvetica", "B", 12)
-    pdf.cell(190, 10, "2. Fluxo de Caixa (Baseado no Status)", ln=True)
+    pdf.cell(190, 10, "2. Balancete Patrimonial", ln=True)
+    
+    def render_secao_balancete(titulo, nat, tipo_dev):
+        pdf.set_font("Helvetica", "B", 10)
+        pdf.cell(190, 8, titulo, ln=True, fill=False)
+        pdf.set_font("Helvetica", "", 9)
+        contas = sorted(df_periodo[df_periodo['natureza'] == nat]['descricao'].unique())
+        total_secao = 0
+        for conta in contas:
+            df_c = df_periodo[(df_periodo['natureza'] == nat) & (df_periodo['descricao'] == conta)]
+            d, c = df_c[df_c['tipo'] == 'Débito']['valor'].sum(), df_c[df_c['tipo'] == 'Crédito']['valor'].sum()
+            saldo = (d - c) if tipo_dev else (c - d)
+            pdf.cell(140, 6, f"  {conta.capitalize()}", border="B")
+            pdf.cell(50, 6, f"R$ {saldo:,.2f}", border="B", ln=True, align="R")
+            total_secao += saldo
+        return total_secao
+
+    total_ativo = render_secao_balancete("ATIVO", "Ativo", True)
+    total_passivo = render_secao_balancete("PASSIVO", "Passivo", False)
+    total_pl = render_secao_balancete("PATRIMONIO LIQUIDO", "Patrimônio Líquido", False)
+
+    # Inclusão do Lucro no PL do Balancete
+    pdf.set_font("Helvetica", "I", 9)
+    pdf.cell(140, 6, "  (+) Resultado do Periodo (Lucro/Prejuizo)", border="B")
+    pdf.cell(50, 6, f"R$ {lucro_periodo:,.2f}", border="B", ln=True, align="R")
+    
+    total_pl_final = total_pl + lucro_periodo
+    pdf.ln(2)
+    pdf.set_font("Helvetica", "B", 10)
+    pdf.cell(140, 8, "TOTAL DO ATIVO")
+    pdf.cell(50, 8, f"R$ {total_ativo:,.2f}", ln=True, align="R")
+    pdf.cell(140, 8, "TOTAL DO PASSIVO + PL")
+    pdf.cell(50, 8, f"R$ {total_passivo + total_pl_final:,.2f}", ln=True, align="R")
+    pdf.ln(5)
+
+    # --- 3. FLUXO DE CAIXA ---
+    pdf.set_font("Helvetica", "B", 12)
+    pdf.cell(190, 10, "3. Fluxo de Caixa (Baseado no Status)", ln=True)
     pdf.set_font("Helvetica", "", 10)
     entradas = df_periodo[df_periodo['status'] == 'Entrada']['valor'].sum()
     saidas = df_periodo[df_periodo['status'] == 'Pago']['valor'].sum()
-    pdf.cell(100, 8, f"Total de Entradas: R$ {entradas:,.2f}", ln=True)
-    pdf.cell(100, 8, f"Total de Saidas: R$ {saidas:,.2f}", ln=True)
-    pdf.cell(100, 8, f"Variacao Liquida: R$ {entradas - saidas:,.2f}", ln=True)
+    pdf.cell(100, 7, f"Total de Entradas: R$ {entradas:,.2f}", ln=True)
+    pdf.cell(100, 7, f"Total de Saidas: R$ {saidas:,.2f}", ln=True)
+    pdf.cell(100, 7, f"Variacao Liquida: R$ {entradas - saidas:,.2f}", ln=True)
     pdf.ln(5)
 
-    # 3. Listagem de Lancamentos
+    # --- 4. DETALHAMENTO ---
     pdf.set_font("Helvetica", "B", 12)
-    pdf.cell(190, 10, "3. Detalhamento de Lancamentos", ln=True)
+    pdf.cell(190, 10, "4. Listagem Detalhada", ln=True)
     pdf.set_font("Helvetica", "B", 8)
     pdf.cell(25, 7, "Data", 1)
-    pdf.cell(60, 7, "Conta", 1)
-    pdf.cell(40, 7, "Grupo", 1)
+    pdf.cell(70, 7, "Conta", 1)
+    pdf.cell(30, 7, "Grupo", 1)
     pdf.cell(25, 7, "Valor", 1)
     pdf.cell(40, 7, "Status", 1)
     pdf.ln()
-    
     pdf.set_font("Helvetica", "", 7)
     for _, row in df_periodo.sort_values('data_lancamento').iterrows():
         pdf.cell(25, 6, str(row['data_lancamento']), 1)
-        pdf.cell(60, 6, str(row['descricao'])[:35].encode('latin-1', 'replace').decode('latin-1'), 1)
-        pdf.cell(40, 6, str(row['natureza']).encode('latin-1', 'replace').decode('latin-1'), 1)
+        pdf.cell(70, 6, str(row['descricao'])[:40].encode('latin-1', 'replace').decode('latin-1'), 1)
+        pdf.cell(30, 6, str(row['natureza']).encode('latin-1', 'replace').decode('latin-1'), 1)
         pdf.cell(25, 6, f"{row['valor']:,.2f}", 1)
         pdf.cell(40, 6, str(row['status']), 1)
         pdf.ln()
 
-    # CONVERSÃO EXPLÍCITA PARA BYTES (Resolve o erro do bytearray)
     return bytes(pdf.output())
 
 # --- AUTENTICAÇÃO ---
@@ -214,18 +248,12 @@ with f2: data_fim = st.date_input("Fim do Período", value=datetime.now().date()
 
 df_periodo = df[(df['data_lancamento'] >= data_ini) & (df['data_lancamento'] <= data_fim)] if not df.empty else df
 
-# BOTÃO PDF COM CONVERSÃO PARA BYTES
+# BOTÃO DOWNLOAD PDF
 with f3:
     if not df_periodo.empty:
         try:
             pdf_bytes = gerar_pdf(df_periodo, data_ini, data_fim, st.session_state.user.email)
-            st.download_button(
-                label="📥 Baixar PDF", 
-                data=pdf_bytes, 
-                file_name=f"relatorio_{data_ini}_{data_fim}.pdf", 
-                mime="application/pdf", 
-                use_container_width=True
-            )
+            st.download_button(label="📥 Baixar PDF", data=pdf_bytes, file_name=f"relatorio_{data_ini}_{data_fim}.pdf", mime="application/pdf", use_container_width=True)
         except Exception as e:
             st.error(f"Erro ao gerar PDF: {e}")
 
@@ -266,15 +294,11 @@ else:
 
             st.markdown('<div class="destaque-balancete">', unsafe_allow_html=True)
             st.markdown("#### ⚖️ Resultados Consolidados")
-            t_d = bal_df["Débito (Mov)"].sum()
-            t_c = bal_df["Crédito (Mov)"].sum()
             t_sd = bal_df["Saldo Devedor"].sum()
             t_sc = bal_df["Saldo Credor"].sum()
-            c1, c2, c3, c4 = st.columns(4)
-            c1.metric("Soma Débitos", f"R$ {t_d:,.2f}")
-            c2.metric("Soma Créditos", f"R$ {t_c:,.2f}")
-            c3.metric("Total Devedor", f"R$ {t_sd:,.2f}")
-            c4.metric("Total Credor", f"R$ {t_sc:,.2f}")
+            c1, c2 = st.columns(2)
+            c1.metric("Total Devedor", f"R$ {t_sd:,.2f}")
+            c2.metric("Total Credor", f"R$ {t_sc:,.2f}")
             if abs(t_sd - t_sc) < 0.01: st.success("✅ O Balancete está equilibrado.")
             else: st.error(f"⚠️ Desequilíbrio: R$ {abs(t_sd - t_sc):,.2f}")
             st.markdown('</div>', unsafe_allow_html=True)
