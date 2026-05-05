@@ -23,7 +23,7 @@ if 'form_count' not in st.session_state: st.session_state.form_count = 0
 if 'menu_opcao' not in st.session_state: st.session_state.menu_opcao = "📊 Razonetes"
 if 'confirm_reset' not in st.session_state: st.session_state.confirm_reset = False
 
-# --- FUNÇÃO PARA GERAR PDF (CORRIGIDA) ---
+# --- FUNÇÃO PARA GERAR PDF (CORREÇÃO DE FORMATO BINÁRIO) ---
 def gerar_pdf(df_periodo, data_ini, data_fim, user_email):
     pdf = FPDF()
     pdf.add_page()
@@ -87,7 +87,6 @@ def gerar_pdf(df_periodo, data_ini, data_fim, user_email):
     
     pdf.set_font("Helvetica", "", 7)
     for _, row in df_periodo.sort_values('data_lancamento').iterrows():
-        # .encode('latin-1', 'replace').decode('latin-1') evita erros de caracteres especiais
         pdf.cell(25, 6, str(row['data_lancamento']), 1)
         pdf.cell(60, 6, str(row['descricao'])[:35].encode('latin-1', 'replace').decode('latin-1'), 1)
         pdf.cell(40, 6, str(row['natureza']).encode('latin-1', 'replace').decode('latin-1'), 1)
@@ -95,8 +94,8 @@ def gerar_pdf(df_periodo, data_ini, data_fim, user_email):
         pdf.cell(40, 6, str(row['status']), 1)
         pdf.ln()
 
-    # Retorno corrigido para compatibilidade com fpdf2
-    return pdf.output()
+    # CONVERSÃO EXPLÍCITA PARA BYTES (Resolve o erro do bytearray)
+    return bytes(pdf.output())
 
 # --- AUTENTICAÇÃO ---
 def gerenciar_acesso():
@@ -215,12 +214,18 @@ with f2: data_fim = st.date_input("Fim do Período", value=datetime.now().date()
 
 df_periodo = df[(df['data_lancamento'] >= data_ini) & (df['data_lancamento'] <= data_fim)] if not df.empty else df
 
-# BOTÃO PDF CORRIGIDO
+# BOTÃO PDF COM CONVERSÃO PARA BYTES
 with f3:
     if not df_periodo.empty:
         try:
             pdf_bytes = gerar_pdf(df_periodo, data_ini, data_fim, st.session_state.user.email)
-            st.download_button(label="📥 Baixar PDF", data=pdf_bytes, file_name=f"relatorio_{data_ini}_{data_fim}.pdf", mime="application/pdf", use_container_width=True)
+            st.download_button(
+                label="📥 Baixar PDF", 
+                data=pdf_bytes, 
+                file_name=f"relatorio_{data_ini}_{data_fim}.pdf", 
+                mime="application/pdf", 
+                use_container_width=True
+            )
         except Exception as e:
             st.error(f"Erro ao gerar PDF: {e}")
 
