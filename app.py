@@ -121,7 +121,6 @@ st.markdown("""<style>
     .just-hint { font-size: 0.7rem; color: #64748b; font-style: italic; display: block; }
     .conta-rodape { padding: 8px; background: #f8fafc; border-top: 1.5px solid #1e293b; text-align: center; font-weight: 700; font-size: 0.85rem; }
     .destaque-balancete { background-color: #f1f5f9; border: 2px solid #1e293b; border-radius: 10px; padding: 15px; margin-top: 20px; }
-    .metric-container { background: #ffffff; padding: 15px; border-radius: 10px; border: 1px solid #e2e8f0; }
 </style>""", unsafe_allow_html=True)
 
 st.title("📑 Sistema Contábil Digital")
@@ -229,7 +228,7 @@ else:
         cor = "green" if lucro >= 0 else "red"
         st.markdown(f"## Lucro/Prejuízo Líquido: :{cor}[R$ {lucro:,.2f}]")
 
-    # --- 4. FLUXO DE CAIXA (Visual Melhorado) ---
+    # --- 4. FLUXO DE CAIXA (Visual Melhorado, Sem Gráfico) ---
     elif st.session_state.menu_opcao == "💸 Fluxo de Caixa":
         st.subheader("🌊 Fluxo de Caixa (Impacto no Disponível)")
         contas_fin = ['CAIXA', 'BANCO', 'GIRO']
@@ -250,6 +249,7 @@ else:
 
         si, sf = calc_saldo_acumulado(data_ini - timedelta(days=1)), calc_saldo_acumulado(data_fim)
         
+        # Cards de Resumo Visual
         m1, m2, m3 = st.columns(3)
         with m1:
             st.markdown('<div style="background:#f0f9ff; padding:15px; border-radius:10px; border-left:5px solid #0ea5e9">', unsafe_allow_html=True)
@@ -265,18 +265,13 @@ else:
             st.markdown('</div>', unsafe_allow_html=True)
         
         st.divider()
-        if not df_periodo.empty:
-            st.write("### 📈 Evolução do Período")
-            df_chart = df_periodo.sort_values('data_lancamento').copy()
-            df_chart['valor_net'] = df_chart.apply(lambda r: r['valor'] if (r['tipo'] == 'Crédito' and r['natureza'] in ['Receita', 'Patrimônio Líquido', 'Passivo']) else -r['valor'], axis=1)
-            df_chart['acumulado'] = df_chart['valor_net'].cumsum() + si
-            st.area_chart(df_chart.set_index('data_lancamento')['acumulado'], color="#0ea5e9")
-
-        st.write("### 📄 Detalhamento Financeiro")
+        st.write("### 📄 Detalhamento de Movimentações Financeiras")
         df_f = df_periodo[df_periodo['status'].isin(["Pago", "Entrada", "Investimento"])]
         df_f = df_f[~((df_f['natureza'] == 'Ativo') & (df_f['tipo'] == 'Débito'))]
         if not df_f.empty:
             st.dataframe(df_f[['data_lancamento', 'descricao', 'natureza', 'tipo', 'valor', 'status', 'justificativa']], use_container_width=True, hide_index=True)
+        else:
+            st.info("Nenhuma movimentação financeira efetivada no período.")
 
     # --- 5. GESTÃO (Com Botão Reset) ---
     elif st.session_state.menu_opcao == "⚙️ Gestão":
@@ -284,11 +279,11 @@ else:
         with col_tit:
             st.subheader("⚙️ Gestão de Lançamentos")
         with col_reset:
-            if st.button("🚨 Resetar Banco", use_container_width=True):
+            if st.button("🚨 Resetar Banco", use_container_width=True, help="Apaga todos os seus lançamentos permanentemente"):
                 st.session_state.confirm_reset = True
             
             if st.session_state.confirm_reset:
-                st.warning("Confirmar exclusão de TODOS os dados?")
+                st.warning("Confirmar exclusão de TODOS os seus dados?")
                 cr1, cr2 = st.columns(2)
                 if cr1.button("Sim, apagar", type="primary"):
                     supabase.table("lancamentos").delete().eq("user_id", user_id).execute()
@@ -301,7 +296,7 @@ else:
 
         st.divider()
         if df.empty:
-            st.info("Nenhum dado para gerenciar.")
+            st.info("Nenhum dado cadastrado para gerenciar.")
         else:
             for _, row in df.sort_values(by='data_lancamento', ascending=False).iterrows():
                 with st.container():
