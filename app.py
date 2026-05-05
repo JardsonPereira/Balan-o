@@ -205,7 +205,7 @@ st.markdown("""<style>
     .valor-deb { color: #059669; font-size: 0.8rem; padding: 2px 10px; font-weight: 600; }
     .valor-cre { color: #dc2626; font-size: 0.8rem; text-align: right; padding: 2px 10px; font-weight: 600; }
     .just-box { font-size: 0.65rem; color: #64748b; font-style: italic; padding: 0 10px 5px 10px; line-height: 1.1; }
-    .liquidez-label { font-size: 0.9rem; font-weight: bold; color: #475569; }
+    .metric-card { background: #f1f5f9; padding: 15px; border-radius: 10px; border-left: 5px solid #3b82f6; }
 </style>""", unsafe_allow_html=True)
 
 st.title("📑 Sistema Contábil Digital")
@@ -299,50 +299,77 @@ else:
         st.metric("Resultado Líquido", f"R$ {ebitda - enc:,.2f}")
 
     elif st.session_state.menu_opcao == "💸 Fluxo de Caixa":
-        st.subheader("🌊 Fluxo e Grau de Liquidez")
+        st.subheader("🌊 Análise Detalhada de Liquidez")
         
-        def calc_caixa(limite):
-            sub = df[df['data_lancamento'] <= limite]
-            return sub[sub['status'] == "Entrada"]['valor'].sum() - sub[sub['status'] == "Pago"]['valor'].sum()
+        # --- CÁLCULOS DE LIQUIDEZ ---
+        # Ativo Circulante (Disponível + Conversíveis a Curto Prazo)
+        # Filtramos descrições comuns para identificar subgrupos
+        df_ativo = df_periodo[df_periodo['natureza'] == 'Ativo']
         
-        si, sf = calc_caixa(data_ini - timedelta(days=1)), calc_caixa(data_fim)
-        
-        # Dados de Liquidez
-        entradas_per = df_periodo[df_periodo['status'] == "Entrada"]['valor'].sum()
-        saidas_per = df_periodo[df_periodo['status'] == "Pago"]['valor'].sum()
-        liquidez_periodo = entradas_per - saidas_per
-        
-        # Grau de Liquidez (Índice de Liquidez Corrente Simplificado: Entradas / Saídas)
-        grau_liquidez = entradas_per / saidas_per if saidas_per > 0 else (entradas_per if entradas_per > 0 else 0)
-        
-        m1, m2, m3, m4 = st.columns(4)
-        m1.metric("Saldo Inicial", f"R$ {si:,.2f}")
-        m2.metric("Saldo Final", f"R$ {sf:,.2f}")
-        m3.metric("Variação (Liquidez)", f"R$ {liquidez_periodo:,.2f}", delta=f"{liquidez_periodo:,.2f}")
-        m4.metric("Grau de Liquidez", f"{grau_liquidez:.2f} x")
-        
-        # Indicadores Visuais de Grau
-        st.write("---")
-        c1, c2 = st.columns(2)
-        with c1:
-            st.markdown("#### 📊 Análise de Liquidez")
-            if grau_liquidez > 1:
-                st.success(f"O grau de {grau_liquidez:.2f} indica que para cada R$ 1,00 de saída, houve R$ {grau_liquidez:.2f} de entrada.")
-            elif grau_liquidez == 1:
-                st.warning("Ponto de equilíbrio: As entradas cobrem exatamente as saídas.")
-            else:
-                st.error(f"Déficit operacional: Entradas representam apenas {(grau_liquidez*100):.1f}% das saídas.")
+        def saldo_conta(descricao_keywords):
+            mask = df_ativo['descricao'].str.contains('|'.join(descricao_keywords), case=False, na=False)
+            sub = df_ativo[mask]
+            return sub[sub['tipo'] == 'Débito']['valor'].sum() - sub[sub['tipo'] == 'Crédito']['valor'].sum()
 
-        with c2:
-            st.markdown("#### 💰 Resumo Financeiro")
-            liq_df = pd.DataFrame({
-                "Categoria": ["Total Entradas", "Total Saídas", "Saldo do Período"],
-                "Valor (R$)": [entradas_per, saidas_per, liquidez_periodo]
-            })
-            st.table(liq_df.style.format({"Valor (R$)": "R$ {:,.2f}"}))
+        disponivel = saldo_conta(['CAIXA', 'BANCO', 'NUBANK', 'POUPANCA', 'CORRENTE'])
+        estoques = saldo_conta(['ESTOQUE', 'MERCADORIA', 'PRODUTO'])
+        outros_circulantes = saldo_conta(['CLIENTES', 'RECEBER', 'INVESTIMENTO']) # Futuros convertíveis
+        
+        ativo_circulante = disponivel + estoques + outros_circulantes
+        
+        # Passivo Circulante (Dívidas curto prazo)
+        df_passivo = df_periodo[df_periodo['natureza'] == 'Passivo']
+        passivo_circulante = df_passivo[df_passivo['tipo'] == 'Crédito']['valor'].sum() - df_passivo[df_passivo['tipo'] == 'Débito']['valor'].sum()
+        
+        # Índices
+        liq_corrente = ativo_circulante / passivo_circulante if passivo_circulante > 0 else ativo_circulante
+        liq_seca = (ativo_circulante - estoques) / passivo_circulante if passivo_circulante > 0 else (ativo_circulante - estoques)
+        liq_imediata = disponivel / passivo_circulante if passivo_circulante > 0 else disponivel
+
+        # --- EXIBIÇÃO ---
+        col1, col2, col3 = st.columns(3)
+        with col1:
+            st.markdown(f"""<div class='metric-card'>
+                <p class='liquidez-label'>Liquidez Corrente</p>
+                <h3>{liq_corrente:.2f} x</h3>
+                <small>Ativo Circulante / Passivo Circulante</small>
+            </div>""", unsafe_allow_html=True)
+        with col2:
+            st.markdown(f"""<div class='metric-card' style='border-left-color: #f59e0b;'>
+                <p class='liquidez-label'>Liquidez Seca</p>
+                <h3>{liq_seca:.2f} x</h3>
+                <small>(Ativo - Estoques) / Passivo Circ.</small>
+            </div>""", unsafe_allow_html=True)
+        with col3:
+            st.markdown(f"""<div class='metric-card' style='border-left-color: #10b981;'>
+                <p class='liquidez-label'>Liquidez Imediata</p>
+                <h3>{liq_imediata:.2f} x</h3>
+                <small>Disponível / Passivo Circulante</small>
+            </div>""", unsafe_allow_html=True)
+
+        st.divider()
+        
+        c_at, c_res = st.columns([2, 1])
+        with c_at:
+            st.markdown("#### 💰 Ativos Conversíveis (Curto Prazo)")
+            st.write("Estes são ativos que podem ser transformados em dinheiro:")
+            dados_ativos = [
+                {"Categoria": "💵 Disponível (Imediato)", "Valor": disponivel},
+                {"Categoria": "📦 Estoques (Venda)", "Valor": estoques},
+                {"Categoria": "⏳ Futuros (Recebíveis/Investimentos)", "Valor": outros_circulantes},
+                {"Categoria": "🏛️ TOTAL CIRCULANTE", "Valor": ativo_circulante}
+            ]
+            st.table(pd.DataFrame(dados_ativos).style.format({"Valor": "R$ {:,.2f}"}))
+        
+        with c_res:
+            st.markdown("#### 🚩 Diagnóstico")
+            if liq_corrente > 1: st.success("A empresa possui folga para pagar dívidas de curto prazo.")
+            else: st.error("Atenção: Ativos de curto prazo não cobrem as obrigações imediatas.")
             
-        st.write("---")
-        st.markdown("#### 📋 Histórico de Movimentações (Entrada/Saída)")
+            st.info(f"**Total em Ativos Futuros:** R$ {outros_circulantes:,.2f} (Valores a receber ou investimentos conversíveis).")
+
+        st.divider()
+        st.markdown("#### 📋 Movimentações de Caixa (Entrada/Pago)")
         st.dataframe(df_periodo[df_periodo['status'].isin(["Entrada", "Pago"])][['data_lancamento', 'descricao', 'valor', 'status', 'justificativa']], use_container_width=True)
 
     elif st.session_state.menu_opcao == "⚙️ Gestão":
