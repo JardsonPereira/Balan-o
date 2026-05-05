@@ -197,7 +197,7 @@ with st.sidebar:
             st.session_state.form_count += 1
             st.rerun()
 
-# --- CSS (RAZONETES RESTAURADOS) ---
+# --- CSS ---
 st.markdown("""<style>
     .conta-card { background: white; border-radius: 12px; box-shadow: 0 4px 12px rgba(0,0,0,0.05); margin-bottom: 20px; border: 1px solid #e2e8f0; }
     .conta-titulo { background: #1e293b; color: white; padding: 10px; text-align: center; font-weight: 700; border-radius: 12px 12px 0 0; }
@@ -205,6 +205,7 @@ st.markdown("""<style>
     .valor-deb { color: #059669; font-size: 0.8rem; padding: 2px 10px; font-weight: 600; }
     .valor-cre { color: #dc2626; font-size: 0.8rem; text-align: right; padding: 2px 10px; font-weight: 600; }
     .just-box { font-size: 0.65rem; color: #64748b; font-style: italic; padding: 0 10px 5px 10px; line-height: 1.1; }
+    .liquidez-label { font-size: 0.9rem; font-weight: bold; color: #475569; }
 </style>""", unsafe_allow_html=True)
 
 st.title("📑 Sistema Contábil Digital")
@@ -298,30 +299,47 @@ else:
         st.metric("Resultado Líquido", f"R$ {ebitda - enc:,.2f}")
 
     elif st.session_state.menu_opcao == "💸 Fluxo de Caixa":
-        st.subheader("🌊 Fluxo e Liquidez")
+        st.subheader("🌊 Fluxo e Grau de Liquidez")
+        
         def calc_caixa(limite):
             sub = df[df['data_lancamento'] <= limite]
             return sub[sub['status'] == "Entrada"]['valor'].sum() - sub[sub['status'] == "Pago"]['valor'].sum()
         
         si, sf = calc_caixa(data_ini - timedelta(days=1)), calc_caixa(data_fim)
         
-        # Cálculo de Liquidez (Entradas vs Saídas no período selecionado)
+        # Dados de Liquidez
         entradas_per = df_periodo[df_periodo['status'] == "Entrada"]['valor'].sum()
         saidas_per = df_periodo[df_periodo['status'] == "Pago"]['valor'].sum()
-        liquidez = entradas_per - saidas_per
+        liquidez_periodo = entradas_per - saidas_per
+        
+        # Grau de Liquidez (Índice de Liquidez Corrente Simplificado: Entradas / Saídas)
+        grau_liquidez = entradas_per / saidas_per if saidas_per > 0 else (entradas_per if entradas_per > 0 else 0)
         
         m1, m2, m3, m4 = st.columns(4)
         m1.metric("Saldo Inicial", f"R$ {si:,.2f}")
         m2.metric("Saldo Final", f"R$ {sf:,.2f}")
-        m3.metric("Liquidez do Período", f"R$ {liquidez:,.2f}", delta=f"{liquidez:,.2f}")
+        m3.metric("Variação (Liquidez)", f"R$ {liquidez_periodo:,.2f}", delta=f"{liquidez_periodo:,.2f}")
+        m4.metric("Grau de Liquidez", f"{grau_liquidez:.2f} x")
         
-        # Status de Liquidez
-        if sf > 0:
-            m4.success("✅ Liquidez Positiva")
-        elif sf == 0:
-            m4.warning("⚠️ Equilíbrio Crítico")
-        else:
-            m4.error("🚨 Déficit de Liquidez")
+        # Indicadores Visuais de Grau
+        st.write("---")
+        c1, c2 = st.columns(2)
+        with c1:
+            st.markdown("#### 📊 Análise de Liquidez")
+            if grau_liquidez > 1:
+                st.success(f"O grau de {grau_liquidez:.2f} indica que para cada R$ 1,00 de saída, houve R$ {grau_liquidez:.2f} de entrada.")
+            elif grau_liquidez == 1:
+                st.warning("Ponto de equilíbrio: As entradas cobrem exatamente as saídas.")
+            else:
+                st.error(f"Déficit operacional: Entradas representam apenas {(grau_liquidez*100):.1f}% das saídas.")
+
+        with c2:
+            st.markdown("#### 💰 Resumo Financeiro")
+            liq_df = pd.DataFrame({
+                "Categoria": ["Total Entradas", "Total Saídas", "Saldo do Período"],
+                "Valor (R$)": [entradas_per, saidas_per, liquidez_periodo]
+            })
+            st.table(liq_df.style.format({"Valor (R$)": "R$ {:,.2f}"}))
             
         st.write("---")
         st.markdown("#### 📋 Histórico de Movimentações (Entrada/Saída)")
