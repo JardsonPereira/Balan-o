@@ -23,23 +23,23 @@ if 'form_count' not in st.session_state: st.session_state.form_count = 0
 if 'menu_opcao' not in st.session_state: st.session_state.menu_opcao = "📊 Razonetes"
 if 'confirm_reset' not in st.session_state: st.session_state.confirm_reset = False
 
-# --- FUNÇÃO PARA GERAR PDF ---
+# --- FUNÇÃO PARA GERAR PDF (CORRIGIDA) ---
 def gerar_pdf(df_periodo, data_ini, data_fim, user_email):
     pdf = FPDF()
     pdf.add_page()
-    pdf.set_font("Arial", "B", 16)
+    pdf.set_font("Helvetica", "B", 16)
     
     # Cabeçalho
     pdf.cell(190, 10, "Relatorio Contabil Consolidado", ln=True, align="C")
-    pdf.set_font("Arial", "", 10)
+    pdf.set_font("Helvetica", "", 10)
     pdf.cell(190, 10, f"Periodo: {data_ini} ate {data_fim} | Usuario: {user_email}", ln=True, align="C")
     pdf.line(10, 30, 200, 30)
     pdf.ln(10)
 
     # 1. Resumo DRE
-    pdf.set_font("Arial", "B", 12)
+    pdf.set_font("Helvetica", "B", 12)
     pdf.cell(190, 10, "1. Demonstracao do Resultado (DRE)", ln=True)
-    pdf.set_font("Arial", "", 10)
+    pdf.set_font("Helvetica", "", 10)
     
     def calc_dre_pdf(nat, tipo_base):
         sub = df_periodo[df_periodo['natureza'] == nat]
@@ -55,29 +55,29 @@ def gerar_pdf(df_periodo, data_ini, data_fim, user_email):
 
     pdf.cell(100, 8, f"Receita Bruta: R$ {receitas:,.2f}", ln=True)
     pdf.cell(100, 8, f"Despesas Operacionais: R$ {despesas:,.2f}", ln=True)
-    pdf.set_font("Arial", "B", 10)
+    pdf.set_font("Helvetica", "B", 10)
     pdf.cell(100, 8, f"EBITDA: R$ {ebitda:,.2f}", ln=True)
-    pdf.set_font("Arial", "", 10)
+    pdf.set_font("Helvetica", "", 10)
     pdf.cell(100, 8, f"Encargos Financeiros: R$ {encargos:,.2f}", ln=True)
-    pdf.set_font("Arial", "B", 10)
+    pdf.set_font("Helvetica", "B", 10)
     pdf.cell(100, 8, f"LUCRO/PREJUIZO LIQUIDO: R$ {lucro:,.2f}", ln=True)
     pdf.ln(5)
 
     # 2. Fluxo de Caixa
-    pdf.set_font("Arial", "B", 12)
-    pdf.cell(190, 10, "2. Fluxo de Caixa (Movimentacao Real)", ln=True)
-    pdf.set_font("Arial", "", 10)
+    pdf.set_font("Helvetica", "B", 12)
+    pdf.cell(190, 10, "2. Fluxo de Caixa (Baseado no Status)", ln=True)
+    pdf.set_font("Helvetica", "", 10)
     entradas = df_periodo[df_periodo['status'] == 'Entrada']['valor'].sum()
     saidas = df_periodo[df_periodo['status'] == 'Pago']['valor'].sum()
-    pdf.cell(100, 8, f"Total de Entradas no Periodo: R$ {entradas:,.2f}", ln=True)
-    pdf.cell(100, 8, f"Total de Saidas no Periodo: R$ {saidas:,.2f}", ln=True)
+    pdf.cell(100, 8, f"Total de Entradas: R$ {entradas:,.2f}", ln=True)
+    pdf.cell(100, 8, f"Total de Saidas: R$ {saidas:,.2f}", ln=True)
     pdf.cell(100, 8, f"Variacao Liquida: R$ {entradas - saidas:,.2f}", ln=True)
     pdf.ln(5)
 
     # 3. Listagem de Lancamentos
-    pdf.set_font("Arial", "B", 12)
+    pdf.set_font("Helvetica", "B", 12)
     pdf.cell(190, 10, "3. Detalhamento de Lancamentos", ln=True)
-    pdf.set_font("Arial", "B", 8)
+    pdf.set_font("Helvetica", "B", 8)
     pdf.cell(25, 7, "Data", 1)
     pdf.cell(60, 7, "Conta", 1)
     pdf.cell(40, 7, "Grupo", 1)
@@ -85,16 +85,18 @@ def gerar_pdf(df_periodo, data_ini, data_fim, user_email):
     pdf.cell(40, 7, "Status", 1)
     pdf.ln()
     
-    pdf.set_font("Arial", "", 7)
+    pdf.set_font("Helvetica", "", 7)
     for _, row in df_periodo.sort_values('data_lancamento').iterrows():
+        # .encode('latin-1', 'replace').decode('latin-1') evita erros de caracteres especiais
         pdf.cell(25, 6, str(row['data_lancamento']), 1)
-        pdf.cell(60, 6, str(row['descricao'])[:35], 1)
-        pdf.cell(40, 6, str(row['natureza']), 1)
+        pdf.cell(60, 6, str(row['descricao'])[:35].encode('latin-1', 'replace').decode('latin-1'), 1)
+        pdf.cell(40, 6, str(row['natureza']).encode('latin-1', 'replace').decode('latin-1'), 1)
         pdf.cell(25, 6, f"{row['valor']:,.2f}", 1)
         pdf.cell(40, 6, str(row['status']), 1)
         pdf.ln()
 
-    return pdf.output(dest='S').encode('latin-1', 'replace')
+    # Retorno corrigido para compatibilidade com fpdf2
+    return pdf.output()
 
 # --- AUTENTICAÇÃO ---
 def gerenciar_acesso():
@@ -213,11 +215,14 @@ with f2: data_fim = st.date_input("Fim do Período", value=datetime.now().date()
 
 df_periodo = df[(df['data_lancamento'] >= data_ini) & (df['data_lancamento'] <= data_fim)] if not df.empty else df
 
-# BOTÃO PDF NA INTERFACE
+# BOTÃO PDF CORRIGIDO
 with f3:
     if not df_periodo.empty:
-        pdf_data = gerar_pdf(df_periodo, data_ini, data_fim, st.session_state.user.email)
-        st.download_button(label="📥 Baixar PDF", data=pdf_data, file_name=f"relatorio_{data_ini}_{data_fim}.pdf", mime="application/pdf", use_container_width=True)
+        try:
+            pdf_bytes = gerar_pdf(df_periodo, data_ini, data_fim, st.session_state.user.email)
+            st.download_button(label="📥 Baixar PDF", data=pdf_bytes, file_name=f"relatorio_{data_ini}_{data_fim}.pdf", mime="application/pdf", use_container_width=True)
+        except Exception as e:
+            st.error(f"Erro ao gerar PDF: {e}")
 
 if df.empty and st.session_state.menu_opcao != "⚙️ Gestão":
     st.info("Nenhum lançamento encontrado.")
