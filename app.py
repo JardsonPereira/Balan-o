@@ -298,15 +298,33 @@ else:
         st.metric("Resultado Líquido", f"R$ {ebitda - enc:,.2f}")
 
     elif st.session_state.menu_opcao == "💸 Fluxo de Caixa":
-        st.subheader("🌊 Fluxo (Saldo Carregado)")
+        st.subheader("🌊 Fluxo e Liquidez")
         def calc_caixa(limite):
             sub = df[df['data_lancamento'] <= limite]
             return sub[sub['status'] == "Entrada"]['valor'].sum() - sub[sub['status'] == "Pago"]['valor'].sum()
+        
         si, sf = calc_caixa(data_ini - timedelta(days=1)), calc_caixa(data_fim)
-        m1, m2, m3 = st.columns(3)
-        m1.metric("Saldo Inicial (Anterior)", f"R$ {si:,.2f}")
-        m2.metric("Variação", f"R$ {sf-si:,.2f}", delta=f"{sf-si:,.2f}")
-        m3.metric("Saldo Final", f"R$ {sf:,.2f}")
+        
+        # Cálculo de Liquidez (Entradas vs Saídas no período selecionado)
+        entradas_per = df_periodo[df_periodo['status'] == "Entrada"]['valor'].sum()
+        saidas_per = df_periodo[df_periodo['status'] == "Pago"]['valor'].sum()
+        liquidez = entradas_per - saidas_per
+        
+        m1, m2, m3, m4 = st.columns(4)
+        m1.metric("Saldo Inicial", f"R$ {si:,.2f}")
+        m2.metric("Saldo Final", f"R$ {sf:,.2f}")
+        m3.metric("Liquidez do Período", f"R$ {liquidez:,.2f}", delta=f"{liquidez:,.2f}")
+        
+        # Status de Liquidez
+        if sf > 0:
+            m4.success("✅ Liquidez Positiva")
+        elif sf == 0:
+            m4.warning("⚠️ Equilíbrio Crítico")
+        else:
+            m4.error("🚨 Déficit de Liquidez")
+            
+        st.write("---")
+        st.markdown("#### 📋 Histórico de Movimentações (Entrada/Saída)")
         st.dataframe(df_periodo[df_periodo['status'].isin(["Entrada", "Pago"])][['data_lancamento', 'descricao', 'valor', 'status', 'justificativa']], use_container_width=True)
 
     elif st.session_state.menu_opcao == "⚙️ Gestão":
