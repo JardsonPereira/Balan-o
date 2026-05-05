@@ -2,6 +2,8 @@ import streamlit as st
 import pandas as pd
 from supabase import create_client, Client
 from datetime import datetime, timedelta
+from fpdf import FPDF
+import io
 
 # --- CONFIGURAÇÃO ---
 st.set_page_config(page_title="ContabilApp - Sistema Integrado", layout="wide")
@@ -20,6 +22,79 @@ if 'edit_id' not in st.session_state: st.session_state.edit_id = None
 if 'form_count' not in st.session_state: st.session_state.form_count = 0
 if 'menu_opcao' not in st.session_state: st.session_state.menu_opcao = "📊 Razonetes"
 if 'confirm_reset' not in st.session_state: st.session_state.confirm_reset = False
+
+# --- FUNÇÃO PARA GERAR PDF ---
+def gerar_pdf(df_periodo, data_ini, data_fim, user_email):
+    pdf = FPDF()
+    pdf.add_page()
+    pdf.set_font("Arial", "B", 16)
+    
+    # Cabeçalho
+    pdf.cell(190, 10, "Relatorio Contabil Consolidado", ln=True, align="C")
+    pdf.set_font("Arial", "", 10)
+    pdf.cell(190, 10, f"Periodo: {data_ini} ate {data_fim} | Usuario: {user_email}", ln=True, align="C")
+    pdf.line(10, 30, 200, 30)
+    pdf.ln(10)
+
+    # 1. Resumo DRE
+    pdf.set_font("Arial", "B", 12)
+    pdf.cell(190, 10, "1. Demonstracao do Resultado (DRE)", ln=True)
+    pdf.set_font("Arial", "", 10)
+    
+    def calc_dre_pdf(nat, tipo_base):
+        sub = df_periodo[df_periodo['natureza'] == nat]
+        if tipo_base == 'Crédito':
+            return sub[sub['tipo'] == 'Crédito']['valor'].sum() - sub[sub['tipo'] == 'Débito']['valor'].sum()
+        return sub[sub['tipo'] == 'Débito']['valor'].sum() - sub[sub['tipo'] == 'Crédito']['valor'].sum()
+
+    receitas = calc_dre_pdf('Receita', 'Crédito')
+    despesas = calc_dre_pdf('Despesa', 'Débito')
+    encargos = calc_dre_pdf('Encargos Financeiros', 'Débito')
+    ebitda = receitas - despesas
+    lucro = ebitda - encargos
+
+    pdf.cell(100, 8, f"Receita Bruta: R$ {receitas:,.2f}", ln=True)
+    pdf.cell(100, 8, f"Despesas Operacionais: R$ {despesas:,.2f}", ln=True)
+    pdf.set_font("Arial", "B", 10)
+    pdf.cell(100, 8, f"EBITDA: R$ {ebitda:,.2f}", ln=True)
+    pdf.set_font("Arial", "", 10)
+    pdf.cell(100, 8, f"Encargos Financeiros: R$ {encargos:,.2f}", ln=True)
+    pdf.set_font("Arial", "B", 10)
+    pdf.cell(100, 8, f"LUCRO/PREJUIZO LIQUIDO: R$ {lucro:,.2f}", ln=True)
+    pdf.ln(5)
+
+    # 2. Fluxo de Caixa
+    pdf.set_font("Arial", "B", 12)
+    pdf.cell(190, 10, "2. Fluxo de Caixa (Movimentacao Real)", ln=True)
+    pdf.set_font("Arial", "", 10)
+    entradas = df_periodo[df_periodo['status'] == 'Entrada']['valor'].sum()
+    saidas = df_periodo[df_periodo['status'] == 'Pago']['valor'].sum()
+    pdf.cell(100, 8, f"Total de Entradas no Periodo: R$ {entradas:,.2f}", ln=True)
+    pdf.cell(100, 8, f"Total de Saidas no Periodo: R$ {saidas:,.2f}", ln=True)
+    pdf.cell(100, 8, f"Variacao Liquida: R$ {entradas - saidas:,.2f}", ln=True)
+    pdf.ln(5)
+
+    # 3. Listagem de Lancamentos
+    pdf.set_font("Arial", "B", 12)
+    pdf.cell(190, 10, "3. Detalhamento de Lancamentos", ln=True)
+    pdf.set_font("Arial", "B", 8)
+    pdf.cell(25, 7, "Data", 1)
+    pdf.cell(60, 7, "Conta", 1)
+    pdf.cell(40, 7, "Grupo", 1)
+    pdf.cell(25, 7, "Valor", 1)
+    pdf.cell(40, 7, "Status", 1)
+    pdf.ln()
+    
+    pdf.set_font("Arial", "", 7)
+    for _, row in df_periodo.sort_values('data_lancamento').iterrows():
+        pdf.cell(25, 6, str(row['data_lancamento']), 1)
+        pdf.cell(60, 6, str(row['descricao'])[:35], 1)
+        pdf.cell(40, 6, str(row['natureza']), 1)
+        pdf.cell(25, 6, f"{row['valor']:,.2f}", 1)
+        pdf.cell(40, 6, str(row['status']), 1)
+        pdf.ln()
+
+    return pdf.output(dest='S').encode('latin-1', 'replace')
 
 # --- AUTENTICAÇÃO ---
 def gerenciar_acesso():
@@ -132,11 +207,17 @@ for i, op in enumerate(opcoes_menu):
     if col_nav[i].button(op, use_container_width=True): st.session_state.menu_opcao = op
 
 st.divider()
-f1, f2 = st.columns(2)
+f1, f2, f3 = st.columns([2, 2, 1])
 with f1: data_ini = st.date_input("Início do Período", value=datetime.now().date().replace(day=1))
 with f2: data_fim = st.date_input("Fim do Período", value=datetime.now().date())
 
 df_periodo = df[(df['data_lancamento'] >= data_ini) & (df['data_lancamento'] <= data_fim)] if not df.empty else df
+
+# BOTÃO PDF NA INTERFACE
+with f3:
+    if not df_periodo.empty:
+        pdf_data = gerar_pdf(df_periodo, data_ini, data_fim, st.session_state.user.email)
+        st.download_button(label="📥 Baixar PDF", data=pdf_data, file_name=f"relatorio_{data_ini}_{data_fim}.pdf", mime="application/pdf", use_container_width=True)
 
 if df.empty and st.session_state.menu_opcao != "⚙️ Gestão":
     st.info("Nenhum lançamento encontrado.")
@@ -144,7 +225,7 @@ else:
     # --- 1. RAZONETES ---
     if st.session_state.menu_opcao == "📊 Razonetes":
         for grupo in ["Ativo", "Passivo", "Patrimônio Líquido", "Receita", "Despesa", "Encargos Financeiros"]:
-            df_g = df[df['natureza'] == grupo]
+            df_g = df_periodo[df_periodo['natureza'] == grupo]
             if not df_g.empty:
                 st.markdown(f"### {grupo}")
                 cols = st.columns(3)
@@ -236,7 +317,7 @@ else:
         cor = "green" if lucro >= 0 else "red"
         st.markdown(f"## Lucro/Prejuízo Líquido: :{cor}[R$ {lucro:,.2f}]")
 
-    # --- 4. FLUXO DE CAIXA (LÓGICA BASEADA NO STATUS) ---
+    # --- 4. FLUXO DE CAIXA ---
     elif st.session_state.menu_opcao == "💸 Fluxo de Caixa":
         st.subheader("🌊 Fluxo de Caixa (Baseado no Status)")
         
@@ -245,12 +326,10 @@ else:
             sub = df[mask]
             saldo = 0.0
             for _, row in sub.iterrows():
-                # Lógica simplificada: Status define o movimento independente da natureza contabil
                 if row['status'] == "Entrada":
                     saldo += row['valor']
                 elif row['status'] == "Pago":
                     saldo -= row['valor']
-                # Transferência Interna, Pendente e Investimento não alteram o saldo líquido total aqui
             return saldo
 
         si = calc_saldo_acumulado(data_ini - timedelta(days=1))
@@ -272,7 +351,6 @@ else:
         
         st.divider()
         st.write("### 📄 Detalhamento de Movimentações (Entradas e Saídas)")
-        # Mostra apenas o que de fato movimentou caixa (Entrada e Pago)
         df_f = df_periodo[df_periodo['status'].isin(["Entrada", "Pago"])]
         if not df_f.empty:
             st.dataframe(df_f[['data_lancamento', 'descricao', 'natureza', 'valor', 'status', 'justificativa']], use_container_width=True, hide_index=True)
@@ -285,7 +363,7 @@ else:
         with col_tit:
             st.subheader("⚙️ Gestão de Lançamentos")
         with col_reset:
-            if st.button("🚨 Resetar Banco", use_container_width=True, help="Apaga todos os seus lançamentos permanentemente"):
+            if st.button("🚨 Resetar Banco", use_container_width=True):
                 st.session_state.confirm_reset = True
             
             if st.session_state.confirm_reset:
