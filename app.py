@@ -134,7 +134,7 @@ def carregar_dados(u_id):
 
 df = carregar_dados(user_id)
 
-# --- FORMULÁRIO LATERAL ---
+# --- FORMULÁRIO LATERAL (LOGICA DE INSERÇÃO E EDIÇÃO) ---
 with st.sidebar:
     st.write(f"👤 **{st.session_state.user.email}**")
     if st.button("Sair"):
@@ -143,38 +143,73 @@ with st.sidebar:
         st.rerun()
     st.divider()
     
+    # Identificar se estamos editando
     if st.session_state.edit_id and not df.empty:
         st.header("📝 Editar Lançamento")
-        item_edit = df[df['id'] == st.session_state.edit_id].iloc[0]
+        # Localiza o registro no DataFrame original
+        reg = df[df['id'] == st.session_state.edit_id].iloc[0]
+        if st.button("Cancelar Edição"):
+            st.session_state.edit_id = None
+            st.rerun()
     else:
         st.header("➕ Novo Lançamento")
-        item_edit = {"descricao": "", "natureza": "Ativo", "tipo": "Débito", "valor": 0.0, "justificativa": "", "status": "Pago", "data_lancamento": datetime.now().date()}
+        reg = {"descricao": "", "natureza": "Ativo", "tipo": "Débito", "valor": 0.0, "justificativa": "", "status": "Pago", "data_lancamento": datetime.now().date()}
 
     with st.form(key=f"contabil_form_{st.session_state.form_count}"):
         contas_existentes = sorted(df['descricao'].unique().tolist()) if not df.empty else []
         opcoes_conta = ["+ Adicionar Nova Conta"] + contas_existentes
-        idx_conta = opcoes_conta.index(item_edit['descricao']) if st.session_state.edit_id and item_edit['descricao'] in contas_existentes else 0
-        conta_sel = st.selectbox("Selecione a Conta", opcoes_conta, index=idx_conta)
-        desc = st.text_input("Nome da Nova Conta", value="").upper().strip() if conta_sel == "+ Adicionar Nova Conta" else conta_sel
-        data_f = st.date_input("Data do Lançamento", value=item_edit.get('data_lancamento', datetime.now().date()))
-        nat_list = ["Ativo", "Passivo", "Patrimônio Líquido", "Receita", "Despesa", "Encargos Financeiros"]
-        nat = st.selectbox("Grupo", nat_list, index=nat_list.index(item_edit['natureza']))
-        tipo = st.radio("Operação", ["Débito", "Crédito"], index=0 if item_edit['tipo'] == "Débito" else 1, horizontal=True)
-        valor = st.number_input("Valor", min_value=0.0, value=float(item_edit['valor']))
-        opcoes_status = ["Pago", "Entrada", "Pendente", "Investimento", "Transferência Interna"]
-        status_pag = st.selectbox("Status Financeiro", opcoes_status, index=opcoes_status.index(item_edit['status']) if item_edit['status'] in opcoes_status else 0)
-        just = st.text_area("Justificativa", value=item_edit['justificativa'])
         
-        if st.form_submit_button("Confirmar Lançamento"):
-            payload = {"user_id": user_id, "descricao": desc, "natureza": nat, "tipo": tipo, "valor": valor, "justificativa": just, "status": status_pag, "data_lancamento": str(data_f)}
-            if st.session_state.edit_id:
-                supabase.table("lancamentos").update(payload).eq("id", st.session_state.edit_id).execute()
-                st.session_state.edit_id = None
+        # Define o index da conta no selectbox
+        idx_conta = 0
+        if reg['descricao'] in contas_existentes:
+            idx_conta = opcoes_conta.index(reg['descricao'])
+        
+        conta_sel = st.selectbox("Selecione a Conta", opcoes_conta, index=idx_conta)
+        
+        # Se for nova conta ou campo texto
+        desc_input = st.text_input("Nome da Conta", value=reg['descricao']).upper().strip() if conta_sel == "+ Adicionar Nova Conta" else conta_sel
+        
+        data_f = st.date_input("Data", value=reg.get('data_lancamento', datetime.now().date()))
+        
+        nat_list = ["Ativo", "Passivo", "Patrimônio Líquido", "Receita", "Despesa", "Encargos Financeiros"]
+        nat = st.selectbox("Grupo", nat_list, index=nat_list.index(reg['natureza']))
+        
+        tipo = st.radio("Operação", ["Débito", "Crédito"], index=0 if reg['tipo'] == "Débito" else 1, horizontal=True)
+        valor = st.number_input("Valor", min_value=0.0, value=float(reg['valor']))
+        
+        opcoes_status = ["Pago", "Entrada", "Pendente", "Investimento", "Transferência Interna"]
+        status_pag = st.selectbox("Status Financeiro", opcoes_status, index=opcoes_status.index(reg['status']) if reg['status'] in opcoes_status else 0)
+        
+        just = st.text_area("Justificativa", value=reg['justificativa'])
+        
+        submit = st.form_submit_button("Confirmar" if not st.session_state.edit_id else "Atualizar")
+        
+        if submit:
+            if not desc_input or desc_input == "+ ADICIONAR NOVA CONTA":
+                st.error("Informe o nome da conta.")
             else:
-                supabase.table("lancamentos").insert(payload).execute()
-            st.cache_data.clear()
-            st.session_state.form_count += 1
-            st.rerun()
+                payload = {
+                    "user_id": user_id, 
+                    "descricao": desc_input, 
+                    "natureza": nat, 
+                    "tipo": tipo, 
+                    "valor": valor, 
+                    "justificativa": just, 
+                    "status": status_pag, 
+                    "data_lancamento": str(data_f)
+                }
+                
+                if st.session_state.edit_id:
+                    supabase.table("lancamentos").update(payload).eq("id", st.session_state.edit_id).execute()
+                    st.session_state.edit_id = None
+                    st.success("Lançamento atualizado!")
+                else:
+                    supabase.table("lancamentos").insert(payload).execute()
+                    st.success("Lançamento inserido!")
+                
+                st.cache_data.clear()
+                st.session_state.form_count += 1
+                st.rerun()
 
 # --- CSS ---
 st.markdown("""<style>
@@ -229,8 +264,6 @@ else:
 
     elif st.session_state.menu_opcao == "🧾 Balancete":
         st.subheader("🧾 Balancete de Verificação")
-        
-        # Tabela de Contas com saldos individuais
         bal_data = []
         for conta in sorted(df_periodo['descricao'].unique()):
             df_c = df_periodo[df_periodo['descricao'] == conta]
@@ -242,28 +275,15 @@ else:
         df_balancete = pd.DataFrame(bal_data)
         st.table(df_balancete.style.format(precision=2))
 
-        # --- TOTAIS DO BALANCETE (REQUISITO SOLICITADO) ---
         st.markdown("#### 📊 Totais das Colunas")
-        t_debito = df_balancete["Débito"].sum()
-        t_credito = df_balancete["Crédito"].sum()
-        t_s_devedor = df_balancete["Saldo Devedor"].sum()
-        t_s_credor = df_balancete["Saldo Credor"].sum()
-
         tc1, tc2, tc3, tc4 = st.columns(4)
-        tc1.metric("Soma Débitos", f"R$ {t_debito:,.2f}")
-        tc2.metric("Soma Créditos", f"R$ {t_credito:,.2f}")
-        tc3.metric("Total Devedor", f"R$ {t_s_devedor:,.2f}")
-        tc4.metric("Total Credor", f"R$ {t_s_credor:,.2f}")
+        tc1.metric("Soma Débitos", f"R$ {df_balancete['Débito'].sum():,.2f}")
+        tc2.metric("Soma Créditos", f"R$ {df_balancete['Crédito'].sum():,.2f}")
+        tc3.metric("Total Devedor", f"R$ {df_balancete['Saldo Devedor'].sum():,.2f}")
+        tc4.metric("Total Credor", f"R$ {df_balancete['Saldo Credor'].sum():,.2f}")
 
-        # Conferência de Igualdade
-        if abs(t_debito - t_credito) < 0.01 and abs(t_s_devedor - t_s_credor) < 0.01:
-            st.success("✅ Balancete validado: As somas das colunas são iguais.")
-        else:
-            st.error("⚠️ Atenção: Há divergência entre as somas das colunas.")
-
-        # --- LÓGICA DE EQUILÍBRIO PATRIMONIAL ---
         st.markdown("---")
-        st.markdown("#### ⚖️ Equilíbrio Patrimonial (Integração com DRE)")
+        st.markdown("#### ⚖️ Equilíbrio Patrimonial")
         rec = df_periodo[(df_periodo['natureza'] == 'Receita') & (df_periodo['tipo'] == 'Crédito')]['valor'].sum() - df_periodo[(df_periodo['natureza'] == 'Receita') & (df_periodo['tipo'] == 'Débito')]['valor'].sum()
         desp = df_periodo[(df_periodo['natureza'] == 'Despesa') & (df_periodo['tipo'] == 'Débito')]['valor'].sum() - df_periodo[(df_periodo['natureza'] == 'Despesa') & (df_periodo['tipo'] == 'Crédito')]['valor'].sum()
         enc = df_periodo[(df_periodo['natureza'] == 'Encargos Financeiros') & (df_periodo['tipo'] == 'Débito')]['valor'].sum()
@@ -312,7 +332,13 @@ else:
         for _, row in df.sort_values('data_lancamento', ascending=False).iterrows():
             with st.expander(f"{row['data_lancamento']} - {row['descricao']} - R$ {row['valor']} ({row['status']})"):
                 st.write(f"Natureza: {row['natureza']} | Justificativa: {row['justificativa']}")
-                if st.button("Excluir", key=f"del_{row['id']}"):
+                
+                # BOTÕES DE AÇÃO NA GESTÃO
+                g_col1, g_col2 = st.columns(2)
+                if g_col1.button("✏️ Editar", key=f"edit_btn_{row['id']}"):
+                    st.session_state.edit_id = row['id']
+                    st.rerun()
+                if g_col2.button("🗑️ Excluir", key=f"del_btn_{row['id']}"):
                     supabase.table("lancamentos").delete().eq("id", row['id']).execute()
                     st.cache_data.clear()
                     st.rerun()
