@@ -205,7 +205,6 @@ else:
         df_d, tot_d = calcular_total_por_conta(df_periodo[df_periodo['natureza'] == 'Despesa'], 'Despesa')
         df_e, tot_e = calcular_total_por_conta(df_periodo[df_periodo['natureza'] == 'Encargos Financeiros'], 'Encargos Financeiros')
         
-        # Lógica EBITDA: Receitas - Despesas (Não inclui encargos financeiros/juros)
         ebitda = tot_r - tot_d
         lucro = ebitda - tot_e
 
@@ -220,7 +219,6 @@ else:
             for _, r in df_d.iterrows(): st.write(f"    (-) {r['descricao']}: R$ {r['Total']:,.2f}")
         st.write(f"**(=) TOTAL DESPESAS: R$ {tot_d:,.2f}**")
         
-        # Destaque do EBITDA
         st.markdown(f"""
             <div style="background-color: #f8fafc; padding: 15px; border-radius: 10px; border: 1px solid #1e293b; margin: 15px 0;">
                 <h4 style="margin:0; color: #1e293b;">⚡ EBITDA: R$ {ebitda:,.2f}</h4>
@@ -244,15 +242,19 @@ else:
         contas_fin = ['CAIXA', 'BANCO', 'GIRO']
         
         def calc_saldo_acumulado(data_lim):
+            # Status que influenciam o caixa: Pago e Entrada (mantido Investimento por segurança financeira)
             status_efetivos = ["Pago", "Entrada", "Investimento"]
             mask = (df['data_lancamento'] <= data_lim) & (df['status'].isin(status_efetivos))
             sub = df[mask]
             saldo = 0.0
             for _, row in sub.iterrows():
+                # Entradas de dinheiro (Crédito em Receita, PL ou Passivo)
                 if row['tipo'] == 'Crédito' and row['natureza'] in ['Receita', 'Patrimônio Líquido', 'Passivo']:
                     saldo += row['valor']
+                # Saídas de dinheiro (Débito em Despesa, Encargos, PL ou Passivo)
                 elif row['tipo'] == 'Débito' and row['natureza'] in ['Despesa', 'Encargos Financeiros', 'Patrimônio Líquido', 'Passivo']:
                     saldo -= row['valor']
+                # Saídas por compra de ativos financeiros (Crédito em Ativo Circulante/Disponível)
                 elif row['tipo'] == 'Crédito' and row['natureza'] == 'Ativo' and any(c in row['descricao'].upper() for c in contas_fin):
                     saldo -= row['valor']
             return saldo
@@ -275,6 +277,7 @@ else:
         
         st.divider()
         st.write("### 📄 Detalhamento de Movimentações Financeiras")
+        # Filtro visual para a tabela também refletir Pago e Entrada
         df_f = df_periodo[df_periodo['status'].isin(["Pago", "Entrada", "Investimento"])]
         df_f = df_f[~((df_f['natureza'] == 'Ativo') & (df_f['tipo'] == 'Débito'))]
         if not df_f.empty:
