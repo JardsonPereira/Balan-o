@@ -21,7 +21,7 @@ if 'edit_id' not in st.session_state: st.session_state.edit_id = None
 if 'form_count' not in st.session_state: st.session_state.form_count = 0
 if 'menu_opcao' not in st.session_state: st.session_state.menu_opcao = "📊 Razonetes"
 
-# --- FUNÇÃO PARA GERAR PDF ---
+# --- FUNÇÃO PARA GERAR PDF (DRE + BALANCETE) ---
 def gerar_pdf(df_periodo, data_ini, data_fim, user_email):
     pdf = FPDF()
     pdf.add_page()
@@ -52,8 +52,7 @@ def gerar_pdf(df_periodo, data_ini, data_fim, user_email):
     pdf.cell(100, 7, f"Encargos Financeiros: R$ {enc:,.2f}", ln=True)
     pdf.set_font("Helvetica", "B", 10)
     pdf.cell(100, 7, f"LUCRO LIQUIDO: R$ {lucro:,.2f}", ln=True)
-    pdf.ln(10)
-
+    
     return bytes(pdf.output())
 
 # --- AUTENTICAÇÃO ---
@@ -144,10 +143,10 @@ with st.sidebar:
 
 # --- CSS ---
 st.markdown("""<style>
-    .metric-card { background: #f8fafc; padding: 15px; border-radius: 10px; border-left: 5px solid #3b82f6; box-shadow: 0 2px 4px rgba(0,0,0,0.05); }
     .conta-card { background: white; border-radius: 12px; box-shadow: 0 4px 12px rgba(0,0,0,0.05); margin-bottom: 20px; border: 1px solid #e2e8f0; }
     .conta-titulo { background: #1e293b; color: white; padding: 10px; text-align: center; font-weight: 700; border-radius: 12px 12px 0 0; }
     .conta-rodape { padding: 8px; background: #f8fafc; text-align: center; font-weight: 700; border-top: 1px solid #e2e8f0; border-radius: 0 0 12px 12px; }
+    .metric-card { background: #f8fafc; padding: 15px; border-radius: 10px; border-left: 5px solid #3b82f6; box-shadow: 0 2px 4px rgba(0,0,0,0.05); }
     .liquidez-label { font-size: 0.85rem; font-weight: bold; color: #64748b; margin-bottom: 5px; }
 </style>""", unsafe_allow_html=True)
 
@@ -166,77 +165,101 @@ with f2: data_fim = st.date_input("Fim do Período", value=datetime.now().date()
 
 df_periodo = df[(df['data_lancamento'] >= data_ini) & (df['data_lancamento'] <= data_fim)] if not df.empty else pd.DataFrame()
 
-# --- ABA FLUXO DE CAIXA (LÓGICA DE TRANSPORTE DE SALDO) ---
+# --- ABA FLUXO DE CAIXA (RESTAURADA E ATUALIZADA COM SALDO TRANSPORTADO) ---
 if st.session_state.menu_opcao == "💸 Fluxo de Caixa":
     st.subheader("🌊 Fluxo e Grau de Liquidez (Acumulado)")
     
-    # FUNÇÃO DE SALDO CARREGADO: Soma tudo antes da data de início
-    def calc_saldo_carregado(limite_data):
+    # Lógica de Saldos Acumulados (Transporte de Saldo)
+    def calc_acumulado(limite_data, natureza=None):
         if df.empty: return 0.0
-        # Filtra tudo ANTES da data de início do filtro atual
-        sub = df[df['data_lancamento'] < limite_data]
-        entradas = sub[sub['status'] == "Entrada"]['valor'].sum()
-        saidas = sub[sub['status'] == "Pago"]['valor'].sum()
-        return entradas - saidas
+        sub = df[df['data_lancamento'] <= limite_data]
+        if natureza: sub = sub[sub['natureza'] == natureza]
+        
+        if natureza == "Ativo" or natureza is None:
+            entradas = sub[sub['status'] == "Entrada"]['valor'].sum()
+            saidas = sub[sub['status'] == "Pago"]['valor'].sum()
+            return entradas - saidas
+        
+        if natureza == "Passivo":
+            c = sub[sub['tipo'] == "Crédito"]['valor'].sum()
+            d = sub[sub['tipo'] == "Débito"]['valor'].sum()
+            return c - d
+        return 0.0
 
-    saldo_inicial_carregado = calc_saldo_carregado(data_ini)
+    si = calc_acumulado(data_ini - timedelta(days=1))
+    sf = calc_acumulado(data_fim)
+
+    # Lógica de Captura por Palavras-Chave (Ativo e Passivo)
+    def filtrar_saldo_desc(natureza, keywords, limite):
+        if df.empty: return 0.0
+        sub = df[(df['data_lancamento'] <= limite) & (df['natureza'] == natureza)]
+        mask = sub['descricao'].str.contains('|'.join(keywords), case=False, na=False)
+        df_f = sub[mask]
+        if natureza == 'Ativo':
+            return df_f[df_f['tipo'] == 'Débito'].valor.sum() - df_f[df_f['tipo'] == 'Crédito'].valor.sum()
+        else:
+            return df_f[df_f['tipo'] == 'Crédito'].valor.sum() - df_f[df_f['tipo'] == 'Débito'].valor.sum()
+
+    # ATIVO
+    disponivel = filtrar_saldo_desc('Ativo', ['CAIXA', 'BANCO', 'NUBANK', 'POUPANCA'], data_fim)
+    estoques = filtrar_saldo_desc('Ativo', ['ESTOQUE', 'MERCADORIA'], data_fim)
+    recebeis = filtrar_saldo_desc('Ativo', ['CLIENTES', 'RECEBER'], data_fim)
     
-    # Entradas e Saídas do período atual
-    entradas_mes = df_periodo[df_periodo['status'] == "Entrada"]['valor'].sum()
-    saidas_mes = df_periodo[df_periodo['status'] == "Pago"]['valor'].sum()
-    saldo_final_periodo = saldo_inicial_carregado + entradas_mes - saidas_mes
+    # PASSIVO (DÍVIDAS)
+    fornecedores = filtrar_saldo_desc('Passivo', ['FORNECEDOR', 'BOLETO', 'COMPRA'], data_fim)
+    emprestimos = filtrar_saldo_desc('Passivo', ['EMPRESTIMO', 'FINANCIAMENTO', 'BANCO'], data_fim)
+    tributos = filtrar_saldo_desc('Passivo', ['IMPOSTO', 'TRIBUTO', 'DAS'], data_fim)
+    
+    at_circulante = disponivel + estoques + recebeis
+    pa_total = calc_acumulado(data_fim, "Passivo")
+    outros_pa = pa_total - (fornecedores + emprestimos + tributos)
 
+    # --- MÉTRICAS ---
     m1, m2, m3 = st.columns(3)
-    m1.metric("Saldo Inicial (Vindo do Mês Anterior)", f"R$ {saldo_inicial_carregado:,.2f}")
-    m2.metric("Saldo Final (Carrega para o Próximo)", f"R$ {saldo_final_periodo:,.2f}", delta=f"{entradas_mes - saidas_mes:,.2f}")
-    
-    # Cálculo de Dívidas Acumuladas (Passivo)
-    pa_total = 0.0
-    if not df.empty:
-        sub_pa = df[df['data_lancamento'] <= data_fim]
-        pa_total = sub_pa[sub_pa['natureza'] == "Passivo"][sub_pa['tipo'] == "Crédito"]['valor'].sum() - \
-                   sub_pa[sub_pa['natureza'] == "Passivo"][sub_pa['tipo'] == "Débito"]['valor'].sum()
-    
+    m1.metric("Saldo Inicial (Vindo do Mês Anterior)", f"R$ {si:,.2f}")
+    m2.metric("Saldo Final (Carrega para o Próximo)", f"R$ {sf:,.2f}", delta=f"{sf-si:,.2f}")
     m3.metric("Passivo Total Acumulado", f"R$ {pa_total:,.2f}")
 
     st.write("---")
-    
-    # Lógica de Detalhe do Passivo (Dívidas)
-    def saldo_grupo_pa(keywords):
-        if df.empty: return 0.0
-        sub = df[(df['data_lancamento'] <= data_fim) & (df['natureza'] == "Passivo")]
-        mask = sub['descricao'].str.contains('|'.join(keywords), case=False, na=False)
-        final = sub[mask]
-        return final[final['tipo'] == 'Crédito']['valor'].sum() - final[final['tipo'] == 'Débito']['valor'].sum()
+    st.markdown("#### 📏 Índices de Liquidez Acumulada")
+    c1, c2, c3 = st.columns(3)
+    with c1:
+        l_corrente = at_circulante / pa_total if pa_total > 0 else at_circulante
+        st.markdown(f"<div class='metric-card'><p class='liquidez-label'>Liquidez Corrente</p><h3>{l_corrente:.2f}</h3><small>Ativo Total / Dívida Total</small></div>", unsafe_allow_html=True)
+    with c2:
+        l_seca = (at_circulante - estoques) / pa_total if pa_total > 0 else (at_circulante - estoques)
+        st.markdown(f"<div class='metric-card' style='border-left-color: #f59e0b'><p class='liquidez-label'>Liquidez Seca</p><h3>{l_seca:.2f}</h3><small>Excluindo Estoques</small></div>", unsafe_allow_html=True)
+    with c3:
+        l_imediata = disponivel / pa_total if pa_total > 0 else disponivel
+        st.markdown(f"<div class='metric-card' style='border-left-color: #10b981'><p class='liquidez-label'>Liquidez Imediata</p><h3>{l_imediata:.2f}</h3><small>Dinheiro em Mão / Dívida</small></div>", unsafe_allow_html=True)
 
-    fornecedores = saldo_grupo_pa(['FORNECEDOR', 'BOLETO', 'COMPRA'])
-    emprestimos = saldo_grupo_pa(['EMPRESTIMO', 'FINANCIAMENTO', 'BANCO'])
-    tributos = saldo_grupo_pa(['IMPOSTO', 'TRIBUTO', 'DAS', 'ICMS'])
-    
+    st.divider()
     col_at, col_pa = st.columns(2)
     with col_at:
-        st.markdown("#### 💰 Resumo de Caixa do Período")
-        resumo_caixa = pd.DataFrame([
-            {"Descrição": "Saldo Inicial", "Valor": saldo_inicial_carregado},
-            {"Descrição": "(+) Entradas do Período", "Valor": entradas_mes},
-            {"Descrição": "(-) Saídas do Período", "Valor": saidas_mes},
-            {"Descrição": "Saldo Final Atual", "Valor": saldo_final_periodo}
+        st.markdown("#### 💰 Detalhe do Ativo (Conversíveis)")
+        df_at_vis = pd.DataFrame([
+            {"Item": "💵 Disponibilidade Imediata", "Valor": disponivel},
+            {"Item": "📦 Estoques (Mercadorias)", "Valor": estoques},
+            {"Item": "⏳ Recebíveis (Futuros)", "Valor": recebeis},
+            {"Item": "🏛️ Total Ativo Circulante", "Valor": at_circulante}
         ])
-        st.table(resumo_caixa.style.format({"Valor": "R$ {:,.2f}"}))
-        
+        st.table(df_at_vis.style.format({"Valor": "R$ {:,.2f}"}))
+    
     with col_pa:
         st.markdown("#### 💸 Detalhe do Passivo (Dívidas)")
-        dados_pa = [
+        df_pa_vis = pd.DataFrame([
             {"Item": "🤝 Fornecedores / Boletos", "Valor": fornecedores},
             {"Item": "🏦 Empréstimos / Bancos", "Valor": emprestimos},
             {"Item": "⚖️ Tributos / Impostos", "Valor": tributos},
-            {"Item": "📉 Total Passivo Acumulado", "Valor": pa_total}
-        ]
-        st.table(pd.DataFrame(dados_pa).style.format({"Valor": "R$ {:,.2f}"}))
+            {"Item": "📋 Outras Obrigações", "Valor": outros_pa},
+            {"Item": "📉 TOTAL PASSIVO", "Valor": pa_total}
+        ])
+        st.table(df_pa_vis.style.format({"Valor": "R$ {:,.2f}"}))
 
-# --- DEMAIS ABAS (RAZONETES, DRE, ETC) ---
+# --- ABA RAZONETES ---
 elif st.session_state.menu_opcao == "📊 Razonetes":
-    if not df_periodo.empty:
+    if df_periodo.empty: st.info("Sem dados no período.")
+    else:
         for grupo in ["Ativo", "Passivo", "Patrimônio Líquido", "Receita", "Despesa"]:
             df_g = df_periodo[df_periodo['natureza'] == grupo]
             if not df_g.empty:
@@ -244,15 +267,23 @@ elif st.session_state.menu_opcao == "📊 Razonetes":
                 cols = st.columns(3)
                 for i, conta in enumerate(sorted(df_g['descricao'].unique())):
                     df_c = df_g[df_g['descricao'] == conta]
-                    v_d, v_c = df_c[df_c['tipo'] == 'Débito']['valor'].sum(), df_c[df_c['tipo'] == 'Crédito']['valor'].sum()
+                    v_d, v_c = df_c[df_c['tipo'] == 'Débito'].valor.sum(), df_c[df_c['tipo'] == 'Crédito'].valor.sum()
                     saldo = (v_d - v_c) if grupo in ["Ativo", "Despesa"] else (v_c - v_d)
                     with cols[i % 3]:
                         st.markdown(f'<div class="conta-card"><div class="conta-titulo">{conta}</div>', unsafe_allow_html=True)
-                        st.write(f"Débito: R$ {v_d:,.2f} | Crédito: R$ {v_c:,.2f}")
+                        st.write(f"D: R$ {v_d:,.2f} | C: R$ {v_c:,.2f}")
                         st.markdown(f'<div class="conta-rodape">Saldo: R$ {saldo:,.2f}</div></div>', unsafe_allow_html=True)
 
+# --- OUTRAS FUNCIONALIDADES (GESTÃO, PDF) ---
 elif st.session_state.menu_opcao == "⚙️ Gestão":
-    if st.button("🚨 Resetar Todos Lançamentos", type="primary"):
+    if st.button("🚨 Resetar Todos Lançamentos"):
         supabase.table("lancamentos").delete().eq("user_id", user_id).execute()
         st.cache_data.clear()
         st.rerun()
+
+with f3:
+    if not df_periodo.empty:
+        try:
+            pdf_bytes = gerar_pdf(df_periodo, data_ini, data_fim, st.session_state.user.email)
+            st.download_button(label="📥 Baixar PDF", data=pdf_bytes, file_name=f"relatorio.pdf", mime="application/pdf", use_container_width=True)
+        except Exception as e: st.error(f"Erro PDF: {e}")
