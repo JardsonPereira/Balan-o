@@ -20,77 +20,65 @@ if 'user' not in st.session_state: st.session_state.user = None
 if 'edit_id' not in st.session_state: st.session_state.edit_id = None
 if 'form_count' not in st.session_state: st.session_state.form_count = 0
 if 'menu_opcao' not in st.session_state: st.session_state.menu_opcao = "📊 Razonetes"
-if 'confirm_reset' not in st.session_state: st.session_state.confirm_reset = False
 
-# --- FUNÇÃO PARA GERAR PDF COMPLETO ---
+# --- FUNÇÃO PARA GERAR PDF COMPLETO (COM JUSTIFICATIVAS DETALHADAS) ---
 def gerar_pdf(df_periodo, data_ini, data_fim, user_email):
     pdf = FPDF()
     pdf.add_page()
     pdf.set_font("Helvetica", "B", 16)
     
+    # Cabeçalho
     pdf.cell(190, 10, "Relatorio Contabil Consolidado", ln=True, align="C")
     pdf.set_font("Helvetica", "", 10)
     pdf.cell(190, 10, f"Periodo: {data_ini} ate {data_fim} | Usuario: {user_email}", ln=True, align="C")
     pdf.line(10, 30, 200, 30)
     pdf.ln(10)
 
-    # 1. DRE
+    # 1. DRE resumida
     pdf.set_font("Helvetica", "B", 12)
     pdf.cell(190, 10, "1. Demonstracao do Resultado (DRE)", ln=True)
     pdf.set_font("Helvetica", "", 10)
     
-    def calc_valor_pdf(nat, tipo_dev=True):
-        sub = df_periodo[df_periodo['natureza'] == nat]
-        d = sub[sub['tipo'] == 'Débito']['valor'].sum()
-        c = sub[sub['tipo'] == 'Crédito']['valor'].sum()
-        return (d - c) if tipo_dev else (c - d)
+    rec = df_periodo[(df_periodo['natureza'] == 'Receita') & (df_periodo['tipo'] == 'Crédito')]['valor'].sum() - df_periodo[(df_periodo['natureza'] == 'Receita') & (df_periodo['tipo'] == 'Débito')]['valor'].sum()
+    desp = df_periodo[(df_periodo['natureza'] == 'Despesa') & (df_periodo['tipo'] == 'Débito')]['valor'].sum() - df_periodo[(df_periodo['natureza'] == 'Despesa') & (df_periodo['tipo'] == 'Crédito')]['valor'].sum()
+    enc = df_periodo[(df_periodo['natureza'] == 'Encargos Financeiros') & (df_periodo['tipo'] == 'Débito')]['valor'].sum()
+    ebitda = rec - desp
+    lucro = ebitda - enc
 
-    receitas = calc_valor_pdf('Receita', False)
-    despesas = calc_valor_pdf('Despesa', True)
-    encargos = calc_valor_pdf('Encargos Financeiros', True)
-    ebitda = receitas - despesas
-    lucro = ebitda - encargos
-
-    pdf.cell(100, 7, f"Receita Bruta: R$ {receitas:,.2f}", ln=True)
-    pdf.cell(100, 7, f"Despesas Operacionais: R$ {despesas:,.2f}", ln=True)
+    pdf.cell(100, 7, f"Receita Bruta: R$ {rec:,.2f}", ln=True)
+    pdf.cell(100, 7, f"Despesas Operacionais: R$ {desp:,.2f}", ln=True)
+    pdf.set_font("Helvetica", "B", 10)
     pdf.cell(100, 7, f"EBITDA: R$ {ebitda:,.2f}", ln=True)
-    pdf.cell(100, 7, f"Encargos Financeiros: R$ {encargos:,.2f}", ln=True)
+    pdf.set_font("Helvetica", "", 10)
+    pdf.cell(100, 7, f"Encargos Financeiros: R$ {enc:,.2f}", ln=True)
     pdf.set_font("Helvetica", "B", 10)
     pdf.cell(100, 7, f"LUCRO LIQUIDO: R$ {lucro:,.2f}", ln=True)
-    pdf.ln(5)
+    pdf.ln(10)
 
-    # 2. Balancete Patrimonial
+    # 2. Listagem Detalhada com Justificativas
     pdf.set_font("Helvetica", "B", 12)
-    pdf.cell(190, 10, "2. Balancete Patrimonial", ln=True)
+    pdf.cell(190, 10, "2. Listagem Detalhada de Lancamentos", ln=True)
+    pdf.set_font("Helvetica", "B", 8)
+    pdf.cell(20, 7, "Data", 1)
+    pdf.cell(35, 7, "Conta", 1)
+    pdf.cell(20, 7, "Valor", 1)
+    pdf.cell(25, 7, "Status", 1)
+    pdf.cell(90, 7, "Justificativa", 1)
+    pdf.ln()
     
-    def render_secao_pdf(titulo, nat, tipo_dev):
-        pdf.set_font("Helvetica", "B", 10)
-        pdf.cell(190, 8, titulo, ln=True)
-        pdf.set_font("Helvetica", "", 9)
-        total = 0
-        contas = sorted(df_periodo[df_periodo['natureza'] == nat]['descricao'].unique())
-        for conta in contas:
-            df_c = df_periodo[(df_periodo['natureza'] == nat) & (df_periodo['descricao'] == conta)]
-            saldo = (df_c[df_c['tipo']=='Débito']['valor'].sum() - df_c[df_c['tipo']=='Crédito']['valor'].sum()) if tipo_dev else (df_c[df_c['tipo']=='Crédito']['valor'].sum() - df_c[df_c['tipo']=='Débito']['valor'].sum())
-            pdf.cell(140, 6, f"  {conta}", border="B")
-            pdf.cell(50, 6, f"R$ {saldo:,.2f}", border="B", ln=True, align="R")
-            total += saldo
-        return total
-
-    t_at = render_secao_pdf("ATIVO", "Ativo", True)
-    t_pa = render_secao_pdf("PASSIVO", "Passivo", False)
-    t_pl = render_secao_pdf("PATRIMONIO LIQUIDO", "Patrimônio Líquido", False)
-    
-    pdf.set_font("Helvetica", "I", 9)
-    pdf.cell(140, 6, "  (+) Resultado do Periodo", border="B")
-    pdf.cell(50, 6, f"R$ {lucro:,.2f}", border="B", ln=True, align="R")
-    
-    pdf.set_font("Helvetica", "B", 10)
-    pdf.cell(140, 8, "TOTAL ATIVO")
-    pdf.cell(50, 8, f"R$ {t_at:,.2f}", ln=True, align="R")
-    pdf.cell(140, 8, "TOTAL PASSIVO + PL")
-    pdf.cell(50, 8, f"R$ {t_pa + t_pl + lucro:,.2f}", ln=True, align="R")
-    pdf.ln(5)
+    pdf.set_font("Helvetica", "", 7)
+    for _, row in df_periodo.sort_values('data_lancamento').iterrows():
+        # Tratamento de caracteres latinos para evitar erros no FPDF
+        desc = str(row['descricao'])[:25].encode('latin-1', 'replace').decode('latin-1')
+        stat = str(row['status']).encode('latin-1', 'replace').decode('latin-1')
+        just = str(row['justificativa']).encode('latin-1', 'replace').decode('latin-1')
+        
+        pdf.cell(20, 6, str(row['data_lancamento']), 1)
+        pdf.cell(35, 6, desc, 1)
+        pdf.cell(20, 6, f"{row['valor']:,.2f}", 1)
+        pdf.cell(25, 6, stat, 1)
+        pdf.cell(90, 6, just[:75], 1)
+        pdf.ln()
 
     return bytes(pdf.output())
 
@@ -134,7 +122,7 @@ def carregar_dados(u_id):
 
 df = carregar_dados(user_id)
 
-# --- FORMULÁRIO LATERAL (LOGICA DE INSERÇÃO E EDIÇÃO) ---
+# --- FORMULÁRIO LATERAL (INSERÇÃO E EDIÇÃO) ---
 with st.sidebar:
     st.write(f"👤 **{st.session_state.user.email}**")
     if st.button("Sair"):
@@ -143,10 +131,8 @@ with st.sidebar:
         st.rerun()
     st.divider()
     
-    # Identificar se estamos editando
     if st.session_state.edit_id and not df.empty:
         st.header("📝 Editar Lançamento")
-        # Localiza o registro no DataFrame original
         reg = df[df['id'] == st.session_state.edit_id].iloc[0]
         if st.button("Cancelar Edição"):
             st.session_state.edit_id = None
@@ -158,66 +144,38 @@ with st.sidebar:
     with st.form(key=f"contabil_form_{st.session_state.form_count}"):
         contas_existentes = sorted(df['descricao'].unique().tolist()) if not df.empty else []
         opcoes_conta = ["+ Adicionar Nova Conta"] + contas_existentes
-        
-        # Define o index da conta no selectbox
-        idx_conta = 0
-        if reg['descricao'] in contas_existentes:
-            idx_conta = opcoes_conta.index(reg['descricao'])
+        idx_conta = opcoes_conta.index(reg['descricao']) if reg['descricao'] in contas_existentes else 0
         
         conta_sel = st.selectbox("Selecione a Conta", opcoes_conta, index=idx_conta)
-        
-        # Se for nova conta ou campo texto
         desc_input = st.text_input("Nome da Conta", value=reg['descricao']).upper().strip() if conta_sel == "+ Adicionar Nova Conta" else conta_sel
-        
-        data_f = st.date_input("Data", value=reg.get('data_lancamento', datetime.now().date()))
-        
+        data_f = st.date_input("Data", value=reg['data_lancamento'])
         nat_list = ["Ativo", "Passivo", "Patrimônio Líquido", "Receita", "Despesa", "Encargos Financeiros"]
         nat = st.selectbox("Grupo", nat_list, index=nat_list.index(reg['natureza']))
-        
         tipo = st.radio("Operação", ["Débito", "Crédito"], index=0 if reg['tipo'] == "Débito" else 1, horizontal=True)
         valor = st.number_input("Valor", min_value=0.0, value=float(reg['valor']))
-        
         opcoes_status = ["Pago", "Entrada", "Pendente", "Investimento", "Transferência Interna"]
         status_pag = st.selectbox("Status Financeiro", opcoes_status, index=opcoes_status.index(reg['status']) if reg['status'] in opcoes_status else 0)
-        
         just = st.text_area("Justificativa", value=reg['justificativa'])
         
-        submit = st.form_submit_button("Confirmar" if not st.session_state.edit_id else "Atualizar")
-        
-        if submit:
-            if not desc_input or desc_input == "+ ADICIONAR NOVA CONTA":
-                st.error("Informe o nome da conta.")
+        if st.form_submit_button("Confirmar"):
+            payload = {"user_id": user_id, "descricao": desc_input, "natureza": nat, "tipo": tipo, "valor": valor, "justificativa": just, "status": status_pag, "data_lancamento": str(data_f)}
+            if st.session_state.edit_id:
+                supabase.table("lancamentos").update(payload).eq("id", st.session_state.edit_id).execute()
+                st.session_state.edit_id = None
             else:
-                payload = {
-                    "user_id": user_id, 
-                    "descricao": desc_input, 
-                    "natureza": nat, 
-                    "tipo": tipo, 
-                    "valor": valor, 
-                    "justificativa": just, 
-                    "status": status_pag, 
-                    "data_lancamento": str(data_f)
-                }
-                
-                if st.session_state.edit_id:
-                    supabase.table("lancamentos").update(payload).eq("id", st.session_state.edit_id).execute()
-                    st.session_state.edit_id = None
-                    st.success("Lançamento atualizado!")
-                else:
-                    supabase.table("lancamentos").insert(payload).execute()
-                    st.success("Lançamento inserido!")
-                
-                st.cache_data.clear()
-                st.session_state.form_count += 1
-                st.rerun()
+                supabase.table("lancamentos").insert(payload).execute()
+            st.cache_data.clear()
+            st.session_state.form_count += 1
+            st.rerun()
 
 # --- CSS ---
 st.markdown("""<style>
     .conta-card { background: white; border-radius: 12px; box-shadow: 0 4px 12px rgba(0,0,0,0.05); margin-bottom: 20px; border: 1px solid #e2e8f0; }
     .conta-titulo { background: #1e293b; color: white; padding: 10px; text-align: center; font-weight: 700; border-radius: 12px 12px 0 0; }
     .conta-rodape { padding: 8px; background: #f8fafc; text-align: center; font-weight: 700; border-top: 1px solid #e2e8f0; border-radius: 0 0 12px 12px; }
-    .valor-deb { color: #059669; font-size: 0.8rem; padding: 2px 10px; }
-    .valor-cre { color: #dc2626; font-size: 0.8rem; text-align: right; padding: 2px 10px; }
+    .valor-deb { color: #059669; font-size: 0.8rem; padding: 2px 10px; font-weight: 600; }
+    .valor-cre { color: #dc2626; font-size: 0.8rem; text-align: right; padding: 2px 10px; font-weight: 600; }
+    .just-box { font-size: 0.65rem; color: #64748b; font-style: italic; padding: 0 10px 5px 10px; line-height: 1.1; }
 </style>""", unsafe_allow_html=True)
 
 st.title("📑 Sistema Contábil Digital")
@@ -238,7 +196,7 @@ with f3:
     if not df_periodo.empty:
         try:
             pdf_bytes = gerar_pdf(df_periodo, data_ini, data_fim, st.session_state.user.email)
-            st.download_button(label="📥 Baixar PDF", data=pdf_bytes, file_name=f"relatorio.pdf", mime="application/pdf", use_container_width=True)
+            st.download_button(label="📥 Baixar PDF", data=pdf_bytes, file_name=f"relatorio_contabil.pdf", mime="application/pdf", use_container_width=True)
         except Exception as e: st.error(f"Erro PDF: {e}")
 
 # --- ABAS ---
@@ -258,88 +216,62 @@ else:
                     with cols[i % 3]:
                         st.markdown(f'<div class="conta-card"><div class="conta-titulo">{conta}</div>', unsafe_allow_html=True)
                         c_deb, c_cre = st.columns(2)
-                        for _, r in df_c[df_c['tipo']=='Débito'].iterrows(): c_deb.markdown(f'<div class="valor-deb">D: {r["valor"]:,.2f}</div>', unsafe_allow_html=True)
-                        for _, r in df_c[df_c['tipo']=='Crédito'].iterrows(): c_cre.markdown(f'<div class="valor-cre">C: {r["valor"]:,.2f}</div>', unsafe_allow_html=True)
+                        with c_deb:
+                            for _, r in df_c[df_c['tipo']=='Débito'].iterrows():
+                                st.markdown(f'<div class="valor-deb">D: {r["valor"]:,.2f}</div><div class="just-box">{r["justificativa"]}</div>', unsafe_allow_html=True)
+                        with c_cre:
+                            for _, r in df_c[df_c['tipo']=='Crédito'].iterrows():
+                                st.markdown(f'<div class="valor-cre">C: {r["valor"]:,.2f}</div><div class="just-box">{r["justificativa"]}</div>', unsafe_allow_html=True)
                         st.markdown(f'<div class="conta-rodape">Saldo: R$ {saldo:,.2f}</div></div>', unsafe_allow_html=True)
 
     elif st.session_state.menu_opcao == "🧾 Balancete":
-        st.subheader("🧾 Balancete de Verificação")
+        st.subheader("🧾 Balancete e Totais")
         bal_data = []
         for conta in sorted(df_periodo['descricao'].unique()):
             df_c = df_periodo[df_periodo['descricao'] == conta]
             d, c = df_c[df_c['tipo'] == 'Débito']['valor'].sum(), df_c[df_c['tipo'] == 'Crédito']['valor'].sum()
-            sd = d - c if d > c else 0
-            sc = c - d if c > d else 0
-            bal_data.append({"Conta": conta, "Débito": d, "Crédito": c, "Saldo Devedor": sd, "Saldo Credor": sc})
+            bal_data.append({"Conta": conta, "Débito": d, "Crédito": c, "S. Devedor": d-c if d>c else 0, "S. Credor": c-d if c>d else 0})
+        df_bal = pd.DataFrame(bal_data)
+        st.table(df_bal.style.format(precision=2))
         
-        df_balancete = pd.DataFrame(bal_data)
-        st.table(df_balancete.style.format(precision=2))
-
-        st.markdown("#### 📊 Totais das Colunas")
         tc1, tc2, tc3, tc4 = st.columns(4)
-        tc1.metric("Soma Débitos", f"R$ {df_balancete['Débito'].sum():,.2f}")
-        tc2.metric("Soma Créditos", f"R$ {df_balancete['Crédito'].sum():,.2f}")
-        tc3.metric("Total Devedor", f"R$ {df_balancete['Saldo Devedor'].sum():,.2f}")
-        tc4.metric("Total Credor", f"R$ {df_balancete['Saldo Credor'].sum():,.2f}")
-
-        st.markdown("---")
-        st.markdown("#### ⚖️ Equilíbrio Patrimonial")
-        rec = df_periodo[(df_periodo['natureza'] == 'Receita') & (df_periodo['tipo'] == 'Crédito')]['valor'].sum() - df_periodo[(df_periodo['natureza'] == 'Receita') & (df_periodo['tipo'] == 'Débito')]['valor'].sum()
-        desp = df_periodo[(df_periodo['natureza'] == 'Despesa') & (df_periodo['tipo'] == 'Débito')]['valor'].sum() - df_periodo[(df_periodo['natureza'] == 'Despesa') & (df_periodo['tipo'] == 'Crédito')]['valor'].sum()
-        enc = df_periodo[(df_periodo['natureza'] == 'Encargos Financeiros') & (df_periodo['tipo'] == 'Débito')]['valor'].sum()
-        lucro_periodo = rec - desp - enc
-
-        t_at = df_periodo[df_periodo['natureza'] == 'Ativo'][df_periodo['tipo'] == 'Débito']['valor'].sum() - df_periodo[df_periodo['natureza'] == 'Ativo'][df_periodo['tipo'] == 'Crédito']['valor'].sum()
-        t_pa = df_periodo[df_periodo['natureza'] == 'Passivo'][df_periodo['tipo'] == 'Crédito']['valor'].sum() - df_periodo[df_periodo['natureza'] == 'Passivo'][df_periodo['tipo'] == 'Débito']['valor'].sum()
-        t_pl = df_periodo[df_periodo['natureza'] == 'Patrimônio Líquido'][df_periodo['tipo'] == 'Crédito']['valor'].sum() - df_periodo[df_periodo['natureza'] == 'Patrimônio Líquido'][df_periodo['tipo'] == 'Débito']['valor'].sum()
-
-        col1, col2, col3 = st.columns(3)
-        col1.metric("Total Ativo", f"R$ {t_at:,.2f}")
-        col2.metric("Passivo + PL (Base)", f"R$ {t_pa + t_pl:,.2f}")
-        col3.metric("Resultado (DRE)", f"R$ {lucro_periodo:,.2f}", delta=f"{lucro_periodo:,.2f}")
+        tc1.metric("Soma Débitos", f"R$ {df_bal['Débito'].sum():,.2f}")
+        tc2.metric("Soma Créditos", f"R$ {df_bal['Crédito'].sum():,.2f}")
+        tc3.metric("Total Devedor", f"R$ {df_bal['S. Devedor'].sum():,.2f}")
+        tc4.metric("Total Credor", f"R$ {df_bal['S. Credor'].sum():,.2f}")
 
     elif st.session_state.menu_opcao == "📈 DRE":
-        st.subheader("📈 Demonstração do Resultado (DRE)")
+        st.subheader("📈 DRE")
         rec = df_periodo[(df_periodo['natureza'] == 'Receita') & (df_periodo['tipo'] == 'Crédito')]['valor'].sum() - df_periodo[(df_periodo['natureza'] == 'Receita') & (df_periodo['tipo'] == 'Débito')]['valor'].sum()
         desp = df_periodo[(df_periodo['natureza'] == 'Despesa') & (df_periodo['tipo'] == 'Débito')]['valor'].sum() - df_periodo[(df_periodo['natureza'] == 'Despesa') & (df_periodo['tipo'] == 'Crédito')]['valor'].sum()
         enc = df_periodo[(df_periodo['natureza'] == 'Encargos Financeiros') & (df_periodo['tipo'] == 'Débito')]['valor'].sum()
         ebitda = rec - desp
-        
         st.metric("Receita Bruta", f"R$ {rec:,.2f}")
         st.metric("Despesas Operacionais", f"R$ {desp:,.2f}")
         st.info(f"⚡ EBITDA: R$ {ebitda:,.2f}")
-        st.metric("Encargos Financeiros", f"R$ {enc:,.2f}")
         st.metric("Resultado Líquido", f"R$ {ebitda - enc:,.2f}")
 
     elif st.session_state.menu_opcao == "💸 Fluxo de Caixa":
-        st.subheader("🌊 Fluxo de Caixa (Saldo Carregado)")
+        st.subheader("🌊 Fluxo (Saldo Carregado)")
         def calc_caixa(limite):
             sub = df[df['data_lancamento'] <= limite]
             return sub[sub['status'] == "Entrada"]['valor'].sum() - sub[sub['status'] == "Pago"]['valor'].sum()
-        si = calc_caixa(data_ini - timedelta(days=1))
-        sf = calc_caixa(data_fim)
+        si, sf = calc_caixa(data_ini - timedelta(days=1)), calc_caixa(data_fim)
         m1, m2, m3 = st.columns(3)
-        m1.metric("Saldo Inicial (Carregado)", f"R$ {si:,.2f}")
-        m2.metric("Variação do Período", f"R$ {sf-si:,.2f}", delta=f"{sf-si:,.2f}")
+        m1.metric("Saldo Inicial", f"R$ {si:,.2f}")
+        m2.metric("Variação", f"R$ {sf-si:,.2f}", delta=f"{sf-si:,.2f}")
         m3.metric("Saldo Final", f"R$ {sf:,.2f}")
         st.dataframe(df_periodo[df_periodo['status'].isin(["Entrada", "Pago"])][['data_lancamento', 'descricao', 'valor', 'status', 'justificativa']], use_container_width=True)
 
     elif st.session_state.menu_opcao == "⚙️ Gestão":
-        if st.button("🚨 Reset Total"):
-            supabase.table("lancamentos").delete().eq("user_id", user_id).execute()
-            st.cache_data.clear()
-            st.rerun()
         for _, row in df.sort_values('data_lancamento', ascending=False).iterrows():
             with st.expander(f"{row['data_lancamento']} - {row['descricao']} - R$ {row['valor']} ({row['status']})"):
-                st.write(f"Natureza: {row['natureza']} | Justificativa: {row['justificativa']}")
-                
-                # BOTÕES DE AÇÃO NA GESTÃO
-                g_col1, g_col2 = st.columns(2)
-                if g_col1.button("✏️ Editar", key=f"edit_btn_{row['id']}"):
+                st.write(f"Justificativa: {row['justificativa']}")
+                c_edit, c_del = st.columns(2)
+                if c_edit.button("✏️ Editar", key=f"ed_{row['id']}"):
                     st.session_state.edit_id = row['id']
                     st.rerun()
-                if g_col2.button("🗑️ Excluir", key=f"del_btn_{row['id']}"):
+                if c_del.button("🗑️ Excluir", key=f"del_{row['id']}"):
                     supabase.table("lancamentos").delete().eq("id", row['id']).execute()
                     st.cache_data.clear()
                     st.rerun()
-                st.markdown("---")
