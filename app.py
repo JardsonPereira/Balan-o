@@ -21,7 +21,7 @@ if 'edit_id' not in st.session_state: st.session_state.edit_id = None
 if 'form_count' not in st.session_state: st.session_state.form_count = 0
 if 'menu_opcao' not in st.session_state: st.session_state.menu_opcao = "📊 Razonetes"
 
-# --- FUNÇÃO PARA GERAR PDF ---
+# --- FUNÇÃO PARA GERAR PDF (DRE + BALANÇO PATRIMONIAL DETALHADO) ---
 def gerar_pdf(df_periodo, data_ini, data_fim, user_email):
     pdf = FPDF()
     pdf.add_page()
@@ -32,6 +32,7 @@ def gerar_pdf(df_periodo, data_ini, data_fim, user_email):
     pdf.line(10, 30, 200, 30)
     pdf.ln(10)
 
+    # Lógica de cálculo para DRE
     def calc_valor_pdf(nat, tipo_dev=True):
         sub = df_periodo[df_periodo['natureza'] == nat]
         d, c = sub[sub['tipo'] == 'Débito']['valor'].sum(), sub[sub['tipo'] == 'Crédito']['valor'].sum()
@@ -43,6 +44,7 @@ def gerar_pdf(df_periodo, data_ini, data_fim, user_email):
     ebitda = rec - desp
     lucro = ebitda - enc
 
+    # 1. DRE
     pdf.set_font("Helvetica", "B", 12)
     pdf.cell(190, 10, "1. Demonstracao do Resultado (DRE)", ln=True)
     pdf.set_font("Helvetica", "", 10)
@@ -54,16 +56,38 @@ def gerar_pdf(df_periodo, data_ini, data_fim, user_email):
     pdf.cell(100, 7, f"LUCRO LIQUIDO: R$ {lucro:,.2f}", ln=True)
     pdf.ln(10)
 
-    t_at = calc_valor_pdf("Ativo", True)
-    t_pa = calc_valor_pdf("Passivo", False)
-    t_pl = calc_valor_pdf("Patrimônio Líquido", False)
-
+    # 2. BALANÇO PATRIMONIAL DETALHADO (Restauração da Seção)
     pdf.set_font("Helvetica", "B", 12)
-    pdf.cell(190, 10, "2. Balancete Patrimonial", ln=True)
-    pdf.set_font("Helvetica", "", 10)
-    pdf.cell(100, 7, f"Total Ativo: R$ {t_at:,.2f}", ln=True)
-    pdf.cell(100, 7, f"Total Passivo: R$ {t_pa:,.2f}", ln=True)
-    pdf.cell(100, 7, f"Total Patrimonio Liquido: R$ {t_pl:,.2f}", ln=True)
+    pdf.cell(190, 10, "2. Balanco Patrimonial", ln=True)
+    
+    def render_secao_pdf(titulo, nat, tipo_dev):
+        pdf.set_font("Helvetica", "B", 10)
+        pdf.cell(190, 8, titulo, ln=True)
+        pdf.set_font("Helvetica", "", 9)
+        total = 0
+        contas = sorted(df_periodo[df_periodo['natureza'] == nat]['descricao'].unique())
+        for conta in contas:
+            df_c = df_periodo[(df_periodo['natureza'] == nat) & (df_periodo['descricao'] == conta)]
+            saldo = (df_c[df_c['tipo']=='Débito']['valor'].sum() - df_c[df_c['tipo']=='Crédito']['valor'].sum()) if tipo_dev else (df_c[df_c['tipo']=='Crédito']['valor'].sum() - df_c[df_c['tipo']=='Débito']['valor'].sum())
+            pdf.cell(140, 6, f"  {conta}", border="B")
+            pdf.cell(50, 6, f"R$ {saldo:,.2f}", border="B", ln=True, align="R")
+            total += saldo
+        return total
+
+    t_at = render_secao_pdf("ATIVO", "Ativo", True)
+    t_pa = render_secao_pdf("PASSIVO", "Passivo", False)
+    t_pl = render_secao_pdf("PATRIMONIO LIQUIDO", "Patrimônio Líquido", False)
+    
+    pdf.set_font("Helvetica", "I", 9)
+    pdf.cell(140, 6, "  (+) Resultado do Periodo (Lucro/Prejuizo)", border="B")
+    pdf.cell(50, 6, f"R$ {lucro:,.2f}", border="B", ln=True, align="R")
+    
+    pdf.ln(2)
+    pdf.set_font("Helvetica", "B", 10)
+    pdf.cell(140, 8, "TOTAL ATIVO", border=1)
+    pdf.cell(50, 8, f"R$ {t_at:,.2f}", border=1, ln=True, align="R")
+    pdf.cell(140, 8, "TOTAL PASSIVO + PL + RESULTADO", border=1)
+    pdf.cell(50, 8, f"R$ {t_pa + t_pl + lucro:,.2f}", border=1, ln=True, align="R")
 
     return bytes(pdf.output())
 
@@ -184,7 +208,7 @@ with f3:
     if not df_periodo.empty:
         try:
             pdf_bytes = gerar_pdf(df_periodo, data_ini, data_fim, st.session_state.user.email)
-            st.download_button(label="📥 Baixar PDF", data=pdf_bytes, file_name=f"relatorio_completo.pdf", mime="application/pdf", use_container_width=True)
+            st.download_button(label="📥 Baixar PDF Completo", data=pdf_bytes, file_name=f"relatorio_completo.pdf", mime="application/pdf", use_container_width=True)
         except Exception as e: st.error(f"Erro PDF: {e}")
 
 # --- CONTEÚDO DAS ABAS ---
@@ -301,42 +325,22 @@ else:
         col_at, col_pa = st.columns(2)
         with col_at:
             st.markdown("#### 💰 Detalhe do Ativo (Conversíveis)")
-            dados_at = [
-                {"Item": "💵 Disponibilidade Imediata", "Valor": disponivel},
-                {"Item": "📦 Estoques (Mercadorias)", "Valor": estoques},
-                {"Item": "⏳ Recebíveis (Futuros)", "Valor": recebeis},
-                {"Item": "🏛️ Total Ativo Circulante", "Valor": at_circulante}
-            ]
+            dados_at = [{"Item": "💵 Disponibilidade Imediata", "Valor": disponivel}, {"Item": "📦 Estoques", "Valor": estoques}, {"Item": "⏳ Recebíveis", "Valor": recebeis}, {"Item": "🏛️ Total Ativo Circulante", "Valor": at_circulante}]
             st.table(pd.DataFrame(dados_at).style.format({"Valor": "R$ {:,.2f}"}))
         with col_pa:
             st.markdown("#### 💸 Detalhe do Passivo (Dívidas)")
-            dados_pa = [
-                {"Item": "🤝 Fornecedores / Boletos", "Valor": fornecedores},
-                {"Item": "🏦 Empréstimos / Bancos", "Valor": emprestimos},
-                {"Item": "⚖️ Tributos / Impostos", "Valor": tributos},
-                {"Item": "📉 Total Passivo Acumulado", "Valor": pa_circulante}
-            ]
+            dados_pa = [{"Item": "🤝 Fornecedores", "Valor": fornecedores}, {"Item": "🏦 Empréstimos", "Valor": emprestimos}, {"Item": "⚖️ Tributos", "Valor": tributos}, {"Item": "📉 Total Passivo Acumulado", "Valor": pa_circulante}]
             st.table(pd.DataFrame(dados_pa).style.format({"Valor": "R$ {:,.2f}"}))
 
     elif st.session_state.menu_opcao == "⚙️ Gestão":
-        col_res, _ = st.columns([1, 4])
-        if col_res.button("🚨 Resetar Todos Lançamentos", type="primary", use_container_width=True):
-            try:
-                supabase.table("lancamentos").delete().eq("user_id", user_id).execute()
-                st.cache_data.clear()
-                st.success("Todos os lançamentos foram excluídos.")
-                st.rerun()
-            except Exception as e: st.error(f"Erro: {e}")
+        if st.button("🚨 Resetar Todos Lançamentos", type="primary"):
+            supabase.table("lancamentos").delete().eq("user_id", user_id).execute()
+            st.cache_data.clear(); st.rerun()
         st.divider()
         if not df.empty:
             for _, row in df.sort_values('data_lancamento', ascending=False).iterrows():
-                with st.expander(f"{row['data_lancamento']} - {row['descricao']} - R$ {row['valor']} ({row['status']})"):
+                with st.expander(f"{row['data_lancamento']} - {row['descricao']} - R$ {row['valor']}"):
                     st.write(f"Justificativa: {row['justificativa']}")
-                    c_edit, c_del = st.columns(2)
-                    if c_edit.button("✏️ Editar", key=f"ed_{row['id']}"):
-                        st.session_state.edit_id = row['id']
-                        st.rerun()
-                    if c_del.button("🗑️ Excluir", key=f"del_{row['id']}"):
-                        supabase.table("lancamentos").delete().eq("id", row['id']).execute()
-                        st.cache_data.clear()
-                        st.rerun()
+                    c1, c2 = st.columns(2)
+                    if c1.button("✏️ Editar", key=f"e_{row['id']}"): st.session_state.edit_id = row['id']; st.rerun()
+                    if c2.button("🗑️ Excluir", key=f"d_{row['id']}"): supabase.table("lancamentos").delete().eq("id", row['id']).execute(); st.cache_data.clear(); st.rerun()
