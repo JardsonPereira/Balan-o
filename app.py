@@ -28,7 +28,6 @@ def gerar_pdf(df_periodo, data_ini, data_fim, user_email):
     pdf.add_page()
     pdf.set_font("Helvetica", "B", 16)
     
-    # Cabeçalho
     pdf.cell(190, 10, "Relatorio Contabil Consolidado", ln=True, align="C")
     pdf.set_font("Helvetica", "", 10)
     pdf.cell(190, 10, f"Periodo: {data_ini} ate {data_fim} | Usuario: {user_email}", ln=True, align="C")
@@ -54,9 +53,7 @@ def gerar_pdf(df_periodo, data_ini, data_fim, user_email):
 
     pdf.cell(100, 7, f"Receita Bruta: R$ {receitas:,.2f}", ln=True)
     pdf.cell(100, 7, f"Despesas Operacionais: R$ {despesas:,.2f}", ln=True)
-    pdf.set_font("Helvetica", "B", 10)
     pdf.cell(100, 7, f"EBITDA: R$ {ebitda:,.2f}", ln=True)
-    pdf.set_font("Helvetica", "", 10)
     pdf.cell(100, 7, f"Encargos Financeiros: R$ {encargos:,.2f}", ln=True)
     pdf.set_font("Helvetica", "B", 10)
     pdf.cell(100, 7, f"LUCRO LIQUIDO: R$ {lucro:,.2f}", ln=True)
@@ -94,25 +91,6 @@ def gerar_pdf(df_periodo, data_ini, data_fim, user_email):
     pdf.cell(140, 8, "TOTAL PASSIVO + PL")
     pdf.cell(50, 8, f"R$ {t_pa + t_pl + lucro:,.2f}", ln=True, align="R")
     pdf.ln(5)
-
-    # 3. Listagem com Justificativas
-    pdf.set_font("Helvetica", "B", 12)
-    pdf.cell(190, 10, "3. Detalhamento de Lancamentos", ln=True)
-    pdf.set_font("Helvetica", "B", 7)
-    pdf.cell(20, 7, "Data", 1)
-    pdf.cell(35, 7, "Conta", 1)
-    pdf.cell(20, 7, "Valor", 1)
-    pdf.cell(25, 7, "Status", 1)
-    pdf.cell(90, 7, "Justificativa", 1)
-    pdf.ln()
-    pdf.set_font("Helvetica", "", 6)
-    for _, row in df_periodo.sort_values('data_lancamento').iterrows():
-        pdf.cell(20, 6, str(row['data_lancamento']), 1)
-        pdf.cell(35, 6, str(row['descricao'])[:25].encode('latin-1', 'replace').decode('latin-1'), 1)
-        pdf.cell(20, 6, f"{row['valor']:,.2f}", 1)
-        pdf.cell(25, 6, str(row['status']), 1)
-        pdf.cell(90, 6, str(row['justificativa'])[:70].encode('latin-1', 'replace').decode('latin-1'), 1)
-        pdf.ln()
 
     return bytes(pdf.output())
 
@@ -250,13 +228,43 @@ else:
                         st.markdown(f'<div class="conta-rodape">Saldo: R$ {saldo:,.2f}</div></div>', unsafe_allow_html=True)
 
     elif st.session_state.menu_opcao == "🧾 Balancete":
-        st.subheader("🧾 Balancete de Verificação")
+        st.subheader("🧾 Balancete de Verificação e Resultados")
+        
+        # Lógica de Resultados para o Balancete
+        rec = df_periodo[(df_periodo['natureza'] == 'Receita') & (df_periodo['tipo'] == 'Crédito')]['valor'].sum() - df_periodo[(df_periodo['natureza'] == 'Receita') & (df_periodo['tipo'] == 'Débito')]['valor'].sum()
+        desp = df_periodo[(df_periodo['natureza'] == 'Despesa') & (df_periodo['tipo'] == 'Débito')]['valor'].sum() - df_periodo[(df_periodo['natureza'] == 'Despesa') & (df_periodo['tipo'] == 'Crédito')]['valor'].sum()
+        enc = df_periodo[(df_periodo['natureza'] == 'Encargos Financeiros') & (df_periodo['tipo'] == 'Débito')]['valor'].sum()
+        lucro_periodo = rec - desp - enc
+
+        # Tabela de Contas
         bal_data = []
         for conta in sorted(df_periodo['descricao'].unique()):
             df_c = df_periodo[df_periodo['descricao'] == conta]
             d, c = df_c[df_c['tipo'] == 'Débito']['valor'].sum(), df_c[df_c['tipo'] == 'Crédito']['valor'].sum()
-            bal_data.append({"Conta": conta, "Débito": d, "Crédito": c, "Saldo Devedor": d-c if d>c else 0, "Saldo Credor": c-d if c>d else 0})
+            sd = d-c if d > c else 0
+            sc = c-d if c > d else 0
+            bal_data.append({"Conta": conta, "Débito": d, "Crédito": c, "Saldo Devedor": sd, "Saldo Credor": sc})
+        
         st.table(pd.DataFrame(bal_data).style.format(precision=2))
+
+        # Resultados Consolidados
+        st.markdown("---")
+        st.markdown("#### ⚖️ Equilíbrio Patrimonial (Integrando Resultados)")
+        
+        t_at = df_periodo[df_periodo['natureza'] == 'Ativo'][df_periodo['tipo'] == 'Débito']['valor'].sum() - df_periodo[df_periodo['natureza'] == 'Ativo'][df_periodo['tipo'] == 'Crédito']['valor'].sum()
+        t_pa = df_periodo[df_periodo['natureza'] == 'Passivo'][df_periodo['tipo'] == 'Crédito']['valor'].sum() - df_periodo[df_periodo['natureza'] == 'Passivo'][df_periodo['tipo'] == 'Débito']['valor'].sum()
+        t_pl = df_periodo[df_periodo['natureza'] == 'Patrimônio Líquido'][df_periodo['tipo'] == 'Crédito']['valor'].sum() - df_periodo[df_periodo['natureza'] == 'Patrimônio Líquido'][df_periodo['tipo'] == 'Débito']['valor'].sum()
+
+        col1, col2, col3 = st.columns(3)
+        col1.metric("Total Ativo", f"R$ {t_at:,.2f}")
+        col2.metric("Passivo + PL (Base)", f"R$ {t_pa + t_pl:,.2f}")
+        col3.metric("Resultado do Período", f"R$ {lucro_periodo:,.2f}", delta=f"{lucro_periodo:,.2f}")
+
+        total_direito = t_pa + t_pl + lucro_periodo
+        if abs(t_at - total_direito) < 0.01:
+            st.success(f"✅ Balancete Equilibrado: Ativo ({t_at:,.2f}) = Passivo + PL + Resultado ({total_direito:,.2f})")
+        else:
+            st.error(f"⚠️ Desequilíbrio Detectado: Diferença de R$ {abs(t_at - total_direito):,.2f}")
 
     elif st.session_state.menu_opcao == "📈 DRE":
         st.subheader("📈 Demonstração do Resultado (DRE)")
@@ -264,9 +272,11 @@ else:
         desp = df_periodo[(df_periodo['natureza'] == 'Despesa') & (df_periodo['tipo'] == 'Débito')]['valor'].sum() - df_periodo[(df_periodo['natureza'] == 'Despesa') & (df_periodo['tipo'] == 'Crédito')]['valor'].sum()
         enc = df_periodo[(df_periodo['natureza'] == 'Encargos Financeiros') & (df_periodo['tipo'] == 'Débito')]['valor'].sum()
         ebitda = rec - desp
+        
         st.metric("Receita Bruta", f"R$ {rec:,.2f}")
         st.metric("Despesas Operacionais", f"R$ {desp:,.2f}")
         st.info(f"⚡ EBITDA: R$ {ebitda:,.2f}")
+        st.metric("Encargos Financeiros", f"R$ {enc:,.2f}")
         st.metric("Resultado Líquido", f"R$ {ebitda - enc:,.2f}")
 
     elif st.session_state.menu_opcao == "💸 Fluxo de Caixa":
@@ -277,9 +287,9 @@ else:
         si = calc_caixa(data_ini - timedelta(days=1))
         sf = calc_caixa(data_fim)
         m1, m2, m3 = st.columns(3)
-        m1.metric("Saldo Inicial (Anterior)", f"R$ {si:,.2f}")
+        m1.metric("Saldo Inicial (Carregado)", f"R$ {si:,.2f}")
         m2.metric("Variação do Período", f"R$ {sf-si:,.2f}", delta=f"{sf-si:,.2f}")
-        m3.metric("Saldo Final (Atual)", f"R$ {sf:,.2f}")
+        m3.metric("Saldo Final", f"R$ {sf:,.2f}")
         st.dataframe(df_periodo[df_periodo['status'].isin(["Entrada", "Pago"])][['data_lancamento', 'descricao', 'valor', 'status', 'justificativa']], use_container_width=True)
 
     elif st.session_state.menu_opcao == "⚙️ Gestão":
@@ -289,8 +299,9 @@ else:
             st.rerun()
         for _, row in df.sort_values('data_lancamento', ascending=False).iterrows():
             with st.expander(f"{row['data_lancamento']} - {row['descricao']} - R$ {row['valor']} ({row['status']})"):
-                st.write(f"Justificativa: {row['justificativa']}")
+                st.write(f"Natureza: {row['natureza']} | Justificativa: {row['justificativa']}")
                 if st.button("Excluir", key=f"del_{row['id']}"):
                     supabase.table("lancamentos").delete().eq("id", row['id']).execute()
                     st.cache_data.clear()
                     st.rerun()
+                st.markdown("---")
