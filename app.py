@@ -2,7 +2,6 @@ import streamlit as st
 import pandas as pd
 from supabase import create_client, Client
 from datetime import datetime, timedelta
-from fpdf import FPDF
 
 # --- CONFIGURAÇÃO ---
 st.set_page_config(page_title="ContabilApp - Sistema Integrado", layout="wide")
@@ -176,17 +175,49 @@ else:
         st.info(f"⚡ Resultado Líquido: R$ {rec - desp:,.2f}")
 
     elif st.session_state.menu_opcao == "💸 Fluxo de Caixa":
-        st.subheader("💸 Fluxo de Caixa (Saldos Transportados)")
+        st.subheader("💸 Fluxo de Caixa Detalhado")
+        
+        # Função para calcular saldo histórico (acumulado até o início do período)
         def calc_caixa(limite):
             if df_base.empty: return 0.0
             sub = df_base[df_base['data_lancamento'] <= limite]
             return sub[sub['status'] == "Entrada"]['valor'].sum() - sub[sub['status'] == "Pago"]['valor'].sum()
+        
         s_ini = calc_caixa(data_ini - timedelta(days=1))
-        s_fin = calc_caixa(data_fim)
-        mc1, mc2, mc3 = st.columns(3)
-        mc1.metric("Saldo Inicial (Anterior)", f"R$ {s_ini:,.2f}")
-        mc2.metric("Saldo Final (Atual)", f"R$ {s_fin:,.2f}")
-        mc3.metric("Variação", f"R$ {s_fin - s_ini:,.2f}", delta=f"{s_fin - s_ini:,.2f}")
+        
+        # Filtrar movimentações específicas do período que afetam o caixa diretamente
+        df_fluxo = df_periodo[df_periodo['status'].isin(["Entrada", "Pago"])].copy()
+        df_fluxo = df_fluxo.sort_values(by='data_lancamento')
+        
+        # Métricas Principais
+        m1, m2, m3 = st.columns(3)
+        total_ent = df_fluxo[df_fluxo['status'] == "Entrada"]['valor'].sum()
+        total_sai = df_fluxo[df_fluxo['status'] == "Pago"]['valor'].sum()
+        s_fin = s_ini + total_ent - total_sai
+        
+        m1.metric("Saldo Inicial", f"R$ {s_ini:,.2f}")
+        m2.metric("Saldo Final", f"R$ {s_fin:,.2f}")
+        m3.metric("Fluxo Líquido", f"R$ {total_ent - total_sai:,.2f}", delta=f"{total_ent - total_sai:,.2f}")
+        
+        st.divider()
+        
+        # Detalhamento das Entradas e Saídas
+        if not df_fluxo.empty:
+            st.markdown("### 📋 Histórico de Movimentações (Caixa)")
+            
+            # Criar colunas para exibição limpa
+            df_display = df_fluxo[['data_lancamento', 'descricao', 'status', 'valor', 'justificativa']].copy()
+            df_display.columns = ['Data', 'Conta', 'Tipo', 'Valor (R$)', 'Justificativa']
+            
+            # Formatação visual da tabela
+            def color_status(val):
+                color = '#059669' if val == 'Entrada' else '#dc2626'
+                return f'color: {color}; font-weight: bold'
+            
+            st.table(df_display.style.format({'Valor (R$)': "{:,.2f}"}).applymap(color_status, subset=['Tipo']))
+            st.caption(f"Exibindo {len(df_fluxo)} lançamentos que afetaram o caixa no período.")
+        else:
+            st.info("Não houve movimentações de Entrada ou Pagamento neste intervalo de datas.")
 
     elif st.session_state.menu_opcao == "⚙️ Gestão":
         if st.button("🚨 Resetar Tudo"):
