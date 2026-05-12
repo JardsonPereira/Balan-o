@@ -7,7 +7,7 @@ from fpdf import FPDF
 # --- CONFIGURAÇÃO ---
 st.set_page_config(page_title="ContabilApp - Sistema Integrado", layout="wide")
 
-# Limpeza de cache para garantir que os dados novos apareçam imediatamente
+# Limpeza total de cache para garantir que o lançamento apareça na hora
 st.cache_data.clear()
 
 try:
@@ -25,13 +25,13 @@ if 'form_count' not in st.session_state: st.session_state.form_count = 0
 if 'menu_opcao' not in st.session_state: st.session_state.menu_opcao = "📊 Razonetes"
 
 # --- FUNÇÃO PARA GERAR PDF (MANTIDA) ---
-def gerar_pdf(df_periodo, data_ini, data_fim, user_email, s_ini, s_fin):
+def gerar_pdf(df_p, d_ini, d_fim, user_email, s_ini, s_fin):
     pdf = FPDF()
     pdf.add_page()
     pdf.set_font("Helvetica", "B", 16)
     pdf.cell(190, 10, "Relatorio Contabil Consolidado", ln=True, align="C")
     pdf.set_font("Helvetica", "", 10)
-    pdf.cell(190, 10, f"Periodo: {data_ini} ate {data_fim} | Usuario: {user_email}", ln=True, align="C")
+    pdf.cell(190, 10, f"Periodo: {d_ini} ate {d_fim} | Usuario: {user_email}", ln=True, align="C")
     pdf.line(10, 30, 200, 30)
     pdf.ln(10)
     pdf.cell(190, 10, f"Saldo Inicial Transportado: R$ {s_ini:,.2f}", ln=True)
@@ -62,9 +62,7 @@ if st.session_state.user is None:
     gerenciar_acesso()
     st.stop()
 
-user_id = st.session_state.user.id
-
-# CARGA DE DADOS SEM CACHE PARA ATUALIZAÇÃO REAL-TIME
+# --- CARREGA DADOS EM TEMPO REAL ---
 def carregar_dados(u_id):
     try:
         res = supabase.table("lancamentos").select("*").eq("user_id", u_id).execute()
@@ -76,7 +74,7 @@ def carregar_dados(u_id):
         return temp_df
     except Exception: return pd.DataFrame()
 
-df = carregar_dados(user_id)
+df = carregar_dados(st.session_state.user.id)
 
 # --- LOGICA DE SALDO TRANSPORTADO ---
 def calc_saldo_caixa_ate(data_limite):
@@ -86,7 +84,7 @@ def calc_saldo_caixa_ate(data_limite):
     saidas = sub[sub['status'] == "Pago"]['valor'].sum()
     return entradas - saidas
 
-# --- FORMULÁRIO LATERAL (MANTIDO) ---
+# --- FORMULÁRIO LATERAL ---
 with st.sidebar:
     st.write(f"👤 **{st.session_state.user.email}**")
     if st.button("Sair"):
@@ -121,7 +119,7 @@ with st.sidebar:
         just = st.text_area("Justificativa", value=reg['justificativa'])
         
         if st.form_submit_button("Confirmar"):
-            payload = {"user_id": user_id, "descricao": desc_input, "natureza": nat, "tipo": tipo, "valor": valor, "justificativa": just, "status": status_pag, "data_lancamento": str(data_f)}
+            payload = {"user_id": st.session_state.user.id, "descricao": desc_input, "natureza": nat, "tipo": tipo, "valor": valor, "justificativa": just, "status": status_pag, "data_lancamento": str(data_f)}
             if st.session_state.edit_id:
                 supabase.table("lancamentos").update(payload).eq("id", st.session_state.edit_id).execute()
                 st.session_state.edit_id = None
@@ -130,7 +128,7 @@ with st.sidebar:
             st.session_state.form_count += 1
             st.rerun()
 
-# --- CSS (MANTIDO) ---
+# --- CSS ---
 st.markdown("""<style>
     .conta-card { background: white; border-radius: 12px; box-shadow: 0 4px 12px rgba(0,0,0,0.05); margin-bottom: 20px; border: 1px solid #e2e8f0; }
     .conta-titulo { background: #1e293b; color: white; padding: 10px; text-align: center; font-weight: 700; border-radius: 12px 12px 0 0; }
@@ -145,38 +143,30 @@ st.title("📑 Sistema Contábil Digital")
 col_nav = st.columns(5)
 opcoes_menu = ["📊 Razonetes", "🧾 Balancete", "📈 DRE", "💸 Fluxo de Caixa", "⚙️ Gestão"]
 for i, op in enumerate(opcoes_menu):
-    if col_nav[i].button(op, use_container_width=True): 
-        st.session_state.menu_opcao = op
+    if col_nav[i].button(op, use_container_width=True): st.session_state.menu_opcao = op
 
 st.divider()
 
-# --- SELEÇÃO DE DATAS E FILTRAGEM ---
+# --- DATAS E FILTRAGEM ---
 f1, f2, f3 = st.columns([2, 2, 1])
-with f1: 
-    data_ini = st.date_input("Início do Período", value=datetime.now().date().replace(day=1))
-with f2: 
-    data_fim = st.date_input("Fim do Período", value=datetime.now().date())
+with f1: data_ini = st.date_input("Início", value=datetime.now().date().replace(day=1))
+with f2: data_fim = st.date_input("Fim", value=datetime.now().date())
 
-# IMPORTANTE: Recalculamos o saldo e o dataframe do período explicitamente a cada execução
-saldo_inicial_transporte = calc_saldo_caixa_ate(data_ini - timedelta(days=1))
-saldo_final_periodo = calc_saldo_caixa_ate(data_fim)
-
-# Filtragem forçada
-if not df.empty:
-    df_periodo = df[(df['data_lancamento'] >= data_ini) & (df['data_lancamento'] <= data_fim)]
-else:
-    df_periodo = pd.DataFrame()
+# Lógica de Saldos Forçada (Recalcula antes de renderizar as abas)
+saldo_inicial = calc_saldo_caixa_ate(data_ini - timedelta(days=1))
+saldo_final = calc_saldo_caixa_ate(data_fim)
+df_periodo = df[(df['data_lancamento'] >= data_ini) & (df['data_lancamento'] <= data_fim)].copy()
 
 with f3:
     if not df_periodo.empty:
         try:
-            pdf_bytes = gerar_pdf(df_periodo, data_ini, data_fim, st.session_state.user.email, saldo_inicial_transporte, saldo_final_periodo)
+            pdf_bytes = gerar_pdf(df_periodo, data_ini, data_fim, st.session_state.user.email, saldo_inicial, saldo_final)
             st.download_button(label="📥 Baixar PDF", data=pdf_bytes, file_name="relatorio.pdf", mime="application/pdf", use_container_width=True)
         except Exception as e: st.error(f"Erro PDF: {e}")
 
 # --- CONTEÚDO DAS ABAS ---
 if df_periodo.empty and st.session_state.menu_opcao != "⚙️ Gestão":
-    st.info(f"Nenhum lançamento no período selecionado. Saldo inicial: R$ {saldo_inicial_transporte:,.2f}")
+    st.info(f"Nenhum lançamento no período. Saldo transportado: R$ {saldo_inicial:,.2f}")
 else:
     if st.session_state.menu_opcao == "📊 Razonetes":
         for grupo in ["Ativo", "Passivo", "Patrimônio Líquido", "Receita", "Despesa", "Encargos Financeiros"]:
@@ -210,12 +200,11 @@ else:
         df_bal = pd.DataFrame(bal_data)
         st.table(df_bal.style.format(precision=2))
         
-        # Métricas de fechamento (MANTIDAS)
-        tc1, tc2, tc3, tc4 = st.columns(4)
-        tc1.metric("Soma Débitos", f"R$ {df_bal['Débito'].sum():,.2f}")
-        tc2.metric("Soma Créditos", f"R$ {df_bal['Crédito'].sum():,.2f}")
-        tc3.metric("Total Devedor (SD)", f"R$ {df_bal['SD'].sum():,.2f}")
-        tc4.metric("Total Credor (SC)", f"R$ {df_bal['SC'].sum():,.2f}")
+        c1, c2, c3, c4 = st.columns(4)
+        c1.metric("Soma Débitos", f"R$ {df_bal['Débito'].sum():,.2f}")
+        c2.metric("Soma Créditos", f"R$ {df_bal['Crédito'].sum():,.2f}")
+        c3.metric("Total Devedor (SD)", f"R$ {df_bal['SD'].sum():,.2f}")
+        c4.metric("Total Credor (SC)", f"R$ {df_bal['SC'].sum():,.2f}")
 
     elif st.session_state.menu_opcao == "📈 DRE":
         st.subheader("📈 DRE")
@@ -226,25 +215,25 @@ else:
         st.info(f"⚡ Resultado Líquido: R$ {rec - desp:,.2f}")
 
     elif st.session_state.menu_opcao == "💸 Fluxo de Caixa":
-        st.subheader("💸 Fluxo de Caixa (Saldo Transportado)")
-        c1, c2, c3 = st.columns(3)
-        c1.metric("Saldo Inicial (do mês anterior)", f"R$ {saldo_inicial_transporte:,.2f}")
-        c2.metric("Saldo Final (este mês)", f"R$ {saldo_final_periodo:,.2f}")
-        c3.metric("Variação", f"R$ {saldo_final_periodo - saldo_inicial_transporte:,.2f}", delta=f"{saldo_final_periodo - saldo_inicial_transporte:,.2f}")
+        st.subheader("💸 Fluxo de Caixa (Saldos Transportados)")
+        mc1, mc2, mc3 = st.columns(3)
+        mc1.metric("Saldo Inicial (do mês anterior)", f"R$ {saldo_inicial:,.2f}")
+        mc2.metric("Saldo Final (acumulado)", f"R$ {saldo_final:,.2f}")
+        mc3.metric("Variação Líquida", f"R$ {saldo_final - saldo_inicial:,.2f}", delta=f"{saldo_final - saldo_inicial:,.2f}")
 
     elif st.session_state.menu_opcao == "⚙️ Gestão":
         st.subheader("⚙️ Gestão")
         if st.button("🚨 Resetar Todos Lançamentos", type="primary"):
-            supabase.table("lancamentos").delete().eq("user_id", user_id).execute()
+            supabase.table("lancamentos").delete().eq("user_id", st.session_state.user.id).execute()
             st.rerun()
         st.divider()
         if not df.empty:
             for _, row in df.sort_values(by='data_lancamento', ascending=False).iterrows():
                 with st.expander(f"📅 {row['data_lancamento']} | {row['descricao']} | R$ {row['valor']:,.2f}"):
-                    c1, c2 = st.columns(2)
-                    if c1.button("✏️ Editar", key=f"ed_{row['id']}"):
+                    ce, cx = st.columns(2)
+                    if ce.button("✏️ Editar", key=f"e_{row['id']}"):
                         st.session_state.edit_id = row['id']
                         st.rerun()
-                    if c2.button("🗑️ Excluir", key=f"ex_{row['id']}"):
+                    if cx.button("🗑️ Excluir", key=f"x_{row['id']}"):
                         supabase.table("lancamentos").delete().eq("id", row['id']).execute()
                         st.rerun()
