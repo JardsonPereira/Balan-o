@@ -7,7 +7,7 @@ from fpdf import FPDF
 # --- CONFIGURAÇÃO ---
 st.set_page_config(page_title="ContabilApp - Sistema Integrado", layout="wide")
 
-# Limpeza de cache para garantir que o lançamento apareça na hora
+# Limpeza total de cache para garantir que os dados apareçam imediatamente após o clique
 st.cache_data.clear()
 
 try:
@@ -24,7 +24,7 @@ if 'edit_id' not in st.session_state: st.session_state.edit_id = None
 if 'form_count' not in st.session_state: st.session_state.form_count = 0
 if 'menu_opcao' not in st.session_state: st.session_state.menu_opcao = "📊 Razonetes"
 
-# --- FUNÇÃO CARREGAR DADOS ---
+# --- CARREGA DADOS EM TEMPO REAL ---
 def carregar_dados(u_id):
     try:
         res = supabase.table("lancamentos").select("*").eq("user_id", u_id).execute()
@@ -36,37 +36,22 @@ def carregar_dados(u_id):
         return temp_df
     except Exception: return pd.DataFrame()
 
-df = carregar_dados(st.session_state.user.id if st.session_state.user else "")
-
-# --- LOGICA DE SALDO DE CAIXA ---
-def calc_saldo_caixa_ate(data_limite):
-    if df.empty: return 0.0
-    sub = df[df['data_lancamento'] <= data_limite]
-    entradas = sub[sub['status'] == "Entrada"]['valor'].sum()
-    saidas = sub[sub['status'] == "Pago"]['valor'].sum()
-    return entradas - saidas
-
-# --- AUTENTICAÇÃO ---
-def gerenciar_acesso():
+# Autenticação e Carga Inicial
+if st.session_state.user is None:
     st.sidebar.title("🔐 Acesso")
     menu = st.sidebar.radio("Escolha", ["Login", "Criar Conta"])
     email = st.sidebar.text_input("E-mail").lower().strip()
     senha = st.sidebar.text_input("Senha", type="password")
     if menu == "Login" and st.sidebar.button("Entrar"):
-        try:
-            res = supabase.auth.sign_in_with_password({"email": email, "password": senha})
-            st.session_state.user = res.user
-            st.rerun()
-        except: st.sidebar.error("Erro no login.")
+        res = supabase.auth.sign_in_with_password({"email": email, "password": senha})
+        st.session_state.user = res.user
+        st.rerun()
     elif menu == "Criar Conta" and st.sidebar.button("Cadastrar"):
-        try:
-            supabase.auth.sign_up({"email": email, "password": senha})
-            st.sidebar.success("Conta criada!")
-        except Exception as e: st.sidebar.error(f"Erro: {e}")
-
-if st.session_state.user is None:
-    gerenciar_acesso()
+        supabase.auth.sign_up({"email": email, "password": senha})
+        st.sidebar.success("Conta criada!")
     st.stop()
+
+df = carregar_dados(st.session_state.user.id)
 
 # --- FORMULÁRIO LATERAL ---
 with st.sidebar:
@@ -112,7 +97,7 @@ with st.sidebar:
             st.session_state.form_count += 1
             st.rerun()
 
-# --- CSS ORIGINAL DOS RAZONETES ---
+# --- CSS RAZONETES (MANTIDO INTACTO) ---
 st.markdown("""<style>
     .conta-card { background: white; border-radius: 12px; box-shadow: 0 4px 12px rgba(0,0,0,0.05); margin-bottom: 20px; border: 1px solid #e2e8f0; }
     .conta-titulo { background: #1e293b; color: white; padding: 10px; text-align: center; font-weight: 700; border-radius: 12px 12px 0 0; }
@@ -134,14 +119,12 @@ f1, f2 = st.columns(2)
 with f1: data_ini = st.date_input("Início do Período", value=datetime.now().date().replace(day=1))
 with f2: data_fim = st.date_input("Fim do Período", value=datetime.now().date())
 
-# Processamento de Dados
-saldo_ini_caixa = calc_saldo_caixa_ate(data_ini - timedelta(days=1))
-saldo_fin_caixa = calc_saldo_caixa_ate(data_fim)
+# FILTRAGEM DOS DADOS (CRÍTICO PARA O BALANCETE NÃO SUMIR)
 df_periodo = df[(df['data_lancamento'] >= data_ini) & (df['data_lancamento'] <= data_fim)].copy()
 
 # --- CONTEÚDO DAS ABAS ---
 if df_periodo.empty and st.session_state.menu_opcao != "⚙️ Gestão":
-    st.info(f"Nenhum lançamento no período. Saldo transportado: R$ {saldo_ini_caixa:,.2f}")
+    st.info("Nenhum lançamento no período selecionado.")
 else:
     if st.session_state.menu_opcao == "📊 Razonetes":
         for grupo in ["Ativo", "Passivo", "Patrimônio Líquido", "Receita", "Despesa", "Encargos Financeiros"]:
@@ -166,19 +149,27 @@ else:
 
     elif st.session_state.menu_opcao == "🧾 Balancete":
         st.subheader("🧾 Balancete de Verificação")
+        # Lógica PURA de balancete: Débito e Crédito por Conta
         bal_data = []
         for conta in sorted(df_periodo['descricao'].unique()):
             df_c = df_periodo[df_periodo['descricao'] == conta]
             d, c = df_c[df_c['tipo'] == 'Débito']['valor'].sum(), df_c[df_c['tipo'] == 'Crédito']['valor'].sum()
-            bal_data.append({"Conta": conta, "Débito": d, "Crédito": c, "SD": d-c if d>c else 0, "SC": c-d if c>d else 0})
+            bal_data.append({
+                "Conta": conta, 
+                "Débito": d, 
+                "Crédito": c, 
+                "Saldo Devedor (SD)": d-c if d>c else 0, 
+                "Saldo Credor (SC)": c-d if c>d else 0
+            })
         df_bal = pd.DataFrame(bal_data)
         st.table(df_bal.style.format(precision=2))
         
+        # Métricas de Fechamento (MANTIDAS)
         c1, c2, c3, c4 = st.columns(4)
         c1.metric("Soma Débitos", f"R$ {df_bal['Débito'].sum():,.2f}")
         c2.metric("Soma Créditos", f"R$ {df_bal['Crédito'].sum():,.2f}")
-        c3.metric("Total Devedor (SD)", f"R$ {df_bal['SD'].sum():,.2f}")
-        c4.metric("Total Credor (SC)", f"R$ {df_bal['SC'].sum():,.2f}")
+        c3.metric("Total Devedor (SD)", f"R$ {df_bal['Saldo Devedor (SD)'].sum():,.2f}")
+        c4.metric("Total Credor (SC)", f"R$ {df_bal['Saldo Credor (SC)'].sum():,.2f}")
 
     elif st.session_state.menu_opcao == "📈 DRE":
         st.subheader("📈 DRE")
@@ -190,10 +181,19 @@ else:
 
     elif st.session_state.menu_opcao == "💸 Fluxo de Caixa":
         st.subheader("💸 Fluxo de Caixa (Saldos Transportados)")
+        # Aqui, e SOMENTE AQUI, entra a lógica de transporte de saldo
+        def calc_caixa(limite):
+            if df.empty: return 0.0
+            sub = df[df['data_lancamento'] <= limite]
+            return sub[sub['status'] == "Entrada"]['valor'].sum() - sub[sub['status'] == "Pago"]['valor'].sum()
+        
+        s_ini = calc_caixa(data_ini - timedelta(days=1))
+        s_fin = calc_caixa(data_fim)
+        
         mc1, mc2, mc3 = st.columns(3)
-        mc1.metric("Saldo Inicial (do mês anterior)", f"R$ {saldo_ini_caixa:,.2f}")
-        mc2.metric("Saldo Final (este mês)", f"R$ {saldo_fin_caixa:,.2f}")
-        mc3.metric("Variação Líquida", f"R$ {saldo_fin_caixa - saldo_ini_caixa:,.2f}", delta=f"{saldo_fin_caixa - saldo_ini_caixa:,.2f}")
+        mc1.metric("Saldo Inicial (do mês anterior)", f"R$ {s_ini:,.2f}")
+        mc2.metric("Saldo Final (este mês)", f"R$ {s_fin:,.2f}")
+        mc3.metric("Variação Líquida", f"R$ {s_fin - s_ini:,.2f}", delta=f"{s_fin - s_ini:,.2f}")
 
     elif st.session_state.menu_opcao == "⚙️ Gestão":
         st.subheader("⚙️ Gestão")
