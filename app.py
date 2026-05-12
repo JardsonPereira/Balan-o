@@ -7,7 +7,7 @@ from fpdf import FPDF
 # --- CONFIGURAÇÃO ---
 st.set_page_config(page_title="ContabilApp - Sistema Integrado", layout="wide")
 
-# Limpeza de cache para garantir que os dados apareçam imediatamente após o lançamento
+# Força a limpeza de cache para evitar que dados antigos ou vazios fiquem travados
 st.cache_data.clear()
 
 try:
@@ -25,14 +25,13 @@ if 'form_count' not in st.session_state: st.session_state.form_count = 0
 if 'menu_opcao' not in st.session_state: st.session_state.menu_opcao = "📊 Razonetes"
 
 # --- FUNÇÃO CARREGAR DADOS ---
-def carregar_dados(u_id):
+def carregar_dados_frescos(u_id):
     try:
         res = supabase.table("lancamentos").select("*").eq("user_id", u_id).execute()
         temp_df = pd.DataFrame(res.data)
         if not temp_df.empty:
             temp_df['data_lancamento'] = pd.to_datetime(temp_df['data_lancamento']).dt.date
             if 'status' not in temp_df.columns: temp_df['status'] = 'Pago'
-            if 'justificativa' not in temp_df.columns: temp_df['justificativa'] = ''
         return temp_df
     except Exception: return pd.DataFrame()
 
@@ -43,16 +42,18 @@ if st.session_state.user is None:
     email = st.sidebar.text_input("E-mail").lower().strip()
     senha = st.sidebar.text_input("Senha", type="password")
     if menu == "Login" and st.sidebar.button("Entrar"):
-        res = supabase.auth.sign_in_with_password({"email": email, "password": senha})
-        st.session_state.user = res.user
-        st.rerun()
+        try:
+            res = supabase.auth.sign_in_with_password({"email": email, "password": senha})
+            st.session_state.user = res.user
+            st.rerun()
+        except: st.sidebar.error("E-mail ou senha incorretos.")
     elif menu == "Criar Conta" and st.sidebar.button("Cadastrar"):
         supabase.auth.sign_up({"email": email, "password": senha})
         st.sidebar.success("Conta criada!")
     st.stop()
 
-# Carregamento Base
-df_base = carregar_dados(st.session_state.user.id)
+# Carregamento Base Global
+df_global = carregar_dados_frescos(st.session_state.user.id)
 
 # --- FORMULÁRIO LATERAL ---
 with st.sidebar:
@@ -62,18 +63,18 @@ with st.sidebar:
         st.rerun()
     st.divider()
     
-    if st.session_state.edit_id and not df_base.empty:
+    if st.session_state.edit_id and not df_global.empty:
         st.header("📝 Editar Lançamento")
-        reg = df_base[df_base['id'] == st.session_state.edit_id].iloc[0]
+        reg = df_global[df_global['id'] == st.session_state.edit_id].iloc[0]
         if st.button("Cancelar Edição"):
             st.session_state.edit_id = None
             st.rerun()
     else:
         st.header("➕ Novo Lançamento")
-        reg = {"descricao": "", "natureza": "Ativo", "tipo": "Débito", "valor": 0.0, "justificativa": "", "status": "Pago", "data_lancamento": datetime.now().date()}
+        reg = {"descricao": "", "natureza": "Ativo", "tipo": "Débito", "valor": 0.0, "status": "Pago", "data_lancamento": datetime.now().date()}
 
     with st.form(key=f"contabil_form_{st.session_state.form_count}"):
-        contas_existentes = sorted(df_base['descricao'].unique().tolist()) if not df_base.empty else []
+        contas_existentes = sorted(df_global['descricao'].unique().tolist()) if not df_global.empty else []
         opcoes_conta = ["+ Adicionar Nova Conta"] + contas_existentes
         idx_conta = opcoes_conta.index(reg['descricao']) if reg['descricao'] in contas_existentes else 0
         
@@ -84,7 +85,7 @@ with st.sidebar:
         tipo = st.radio("Operação", ["Débito", "Crédito"], horizontal=True)
         valor = st.number_input("Valor", min_value=0.0, value=float(reg['valor']))
         status_pag = st.selectbox("Status Financeiro", ["Pago", "Entrada", "Pendente", "Investimento", "Transferência Interna"])
-        just = st.text_area("Justificativa", value=reg['justificativa'])
+        just = st.text_area("Justificativa")
         
         if st.form_submit_button("Confirmar"):
             payload = {"user_id": st.session_state.user.id, "descricao": desc_input, "natureza": nat, "tipo": tipo, "valor": valor, "justificativa": just, "status": status_pag, "data_lancamento": str(data_f)}
@@ -105,7 +106,7 @@ st.markdown("""<style>
     .valor-cre { color: #dc2626; font-size: 0.8rem; text-align: right; padding: 2px 10px; font-weight: 600; }
 </style>""", unsafe_allow_html=True)
 
-# --- NAVEGAÇÃO ---
+# --- INTERFACE PRINCIPAL ---
 st.title("📑 Sistema Contábil Digital")
 col_nav = st.columns(5)
 opcoes_menu = ["📊 Razonetes", "🧾 Balancete", "📈 DRE", "💸 Fluxo de Caixa", "⚙️ Gestão"]
@@ -114,13 +115,13 @@ for i, op in enumerate(opcoes_menu):
 
 st.divider()
 
-# --- FILTROS DE DATA (EXECUÇÃO IMEDIATA) ---
+# --- FILTROS DE DATA (ESTRUTURA DE ATUALIZAÇÃO FORÇADA) ---
 f1, f2 = st.columns(2)
-with f1: data_ini = st.date_input("Início do Período", value=datetime.now().date().replace(day=1))
-with f2: data_fim = st.date_input("Fim do Período", value=datetime.now().date())
+with f1: data_ini = st.date_input("Início do Período", value=datetime.now().date().replace(day=1), key="d_ini")
+with f2: data_fim = st.date_input("Fim do Período", value=datetime.now().date(), key="d_fim")
 
-# Filtragem forçada após a definição das datas
-df_periodo = df_base[(df_base['data_lancamento'] >= data_ini) & (df_base['data_lancamento'] <= data_fim)].copy()
+# Sincronização: Filtramos o DF GLOBAL apenas agora, garantindo que ele reflita as datas selecionadas
+df_periodo = df_global[(df_global['data_lancamento'] >= data_ini) & (df_global['data_lancamento'] <= data_fim)].copy()
 
 # --- CONTEÚDO DAS ABAS ---
 if df_periodo.empty and st.session_state.menu_opcao != "⚙️ Gestão":
@@ -174,13 +175,12 @@ else:
     elif st.session_state.menu_opcao == "💸 Fluxo de Caixa":
         st.subheader("💸 Fluxo de Caixa (Saldos Transportados)")
         def calc_caixa(limite):
-            if df_base.empty: return 0.0
-            sub = df_base[df_base['data_lancamento'] <= limite]
+            if df_global.empty: return 0.0
+            sub = df_global[df_global['data_lancamento'] <= limite]
             return sub[sub['status'] == "Entrada"]['valor'].sum() - sub[sub['status'] == "Pago"]['valor'].sum()
         
         s_ini = calc_caixa(data_ini - timedelta(days=1))
         s_fin = calc_caixa(data_fim)
-        
         mc1, mc2, mc3 = st.columns(3)
         mc1.metric("Saldo Inicial (Anterior)", f"R$ {s_ini:,.2f}")
         mc2.metric("Saldo Final (Atual)", f"R$ {s_fin:,.2f}")
@@ -192,8 +192,8 @@ else:
             supabase.table("lancamentos").delete().eq("user_id", st.session_state.user.id).execute()
             st.rerun()
         st.divider()
-        if not df_base.empty:
-            for _, row in df_base.sort_values(by='data_lancamento', ascending=False).iterrows():
+        if not df_global.empty:
+            for _, row in df_global.sort_values(by='data_lancamento', ascending=False).iterrows():
                 with st.expander(f"{row['data_lancamento']} | {row['descricao']} | R$ {row['valor']}"):
                     ce, cx = st.columns(2)
                     if ce.button("✏️ Editar", key=f"e_{row['id']}"):
