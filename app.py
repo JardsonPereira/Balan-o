@@ -7,7 +7,7 @@ from fpdf import FPDF
 # --- CONFIGURAÇÃO ---
 st.set_page_config(page_title="ContabilApp - Sistema Integrado", layout="wide")
 
-# Força a limpeza de cache do Streamlit para garantir atualização imediata
+# Limpeza de cache para garantir que os dados novos apareçam imediatamente
 st.cache_data.clear()
 
 try:
@@ -38,7 +38,7 @@ def gerar_pdf(df_periodo, data_ini, data_fim, user_email, s_ini, s_fin):
     pdf.cell(190, 10, f"Saldo Final em Caixa: R$ {s_fin:,.2f}", ln=True)
     return bytes(pdf.output())
 
-# --- AUTENTICAÇÃO (MANTIDA) ---
+# --- AUTENTICAÇÃO ---
 def gerenciar_acesso():
     st.sidebar.title("🔐 Acesso")
     menu = st.sidebar.radio("Escolha", ["Login", "Criar Conta"])
@@ -64,7 +64,7 @@ if st.session_state.user is None:
 
 user_id = st.session_state.user.id
 
-# FUNÇÃO DE CARGA SEM CACHE PARA ATUALIZAÇÃO EM TEMPO REAL
+# CARGA DE DADOS SEM CACHE PARA ATUALIZAÇÃO REAL-TIME
 def carregar_dados(u_id):
     try:
         res = supabase.table("lancamentos").select("*").eq("user_id", u_id).execute()
@@ -76,7 +76,6 @@ def carregar_dados(u_id):
         return temp_df
     except Exception: return pd.DataFrame()
 
-# Carrega os dados frescos a cada interação
 df = carregar_dados(user_id)
 
 # --- LOGICA DE SALDO TRANSPORTADO ---
@@ -87,7 +86,7 @@ def calc_saldo_caixa_ate(data_limite):
     saidas = sub[sub['status'] == "Pago"]['valor'].sum()
     return entradas - saidas
 
-# --- FORMULÁRIO LATERAL ---
+# --- FORMULÁRIO LATERAL (MANTIDO) ---
 with st.sidebar:
     st.write(f"👤 **{st.session_state.user.email}**")
     if st.button("Sair"):
@@ -150,14 +149,23 @@ for i, op in enumerate(opcoes_menu):
         st.session_state.menu_opcao = op
 
 st.divider()
-f1, f2, f3 = st.columns([2, 2, 1])
-with f1: data_ini = st.date_input("Início do Período", value=datetime.now().date().replace(day=1))
-with f2: data_fim = st.date_input("Fim do Período", value=datetime.now().date())
 
-# CÁLCULOS TOTAIS (FORÇADOS)
+# --- SELEÇÃO DE DATAS E FILTRAGEM ---
+f1, f2, f3 = st.columns([2, 2, 1])
+with f1: 
+    data_ini = st.date_input("Início do Período", value=datetime.now().date().replace(day=1))
+with f2: 
+    data_fim = st.date_input("Fim do Período", value=datetime.now().date())
+
+# IMPORTANTE: Recalculamos o saldo e o dataframe do período explicitamente a cada execução
 saldo_inicial_transporte = calc_saldo_caixa_ate(data_ini - timedelta(days=1))
 saldo_final_periodo = calc_saldo_caixa_ate(data_fim)
-df_periodo = df[(df['data_lancamento'] >= data_ini) & (df['data_lancamento'] <= data_fim)]
+
+# Filtragem forçada
+if not df.empty:
+    df_periodo = df[(df['data_lancamento'] >= data_ini) & (df['data_lancamento'] <= data_fim)]
+else:
+    df_periodo = pd.DataFrame()
 
 with f3:
     if not df_periodo.empty:
@@ -166,9 +174,9 @@ with f3:
             st.download_button(label="📥 Baixar PDF", data=pdf_bytes, file_name="relatorio.pdf", mime="application/pdf", use_container_width=True)
         except Exception as e: st.error(f"Erro PDF: {e}")
 
-# --- CONTEÚDO DAS ABAS (COM TOTAIS RESTAURADOS) ---
+# --- CONTEÚDO DAS ABAS ---
 if df_periodo.empty and st.session_state.menu_opcao != "⚙️ Gestão":
-    st.info(f"Nenhum lançamento no período. Saldo transportado disponível: R$ {saldo_inicial_transporte:,.2f}")
+    st.info(f"Nenhum lançamento no período selecionado. Saldo inicial: R$ {saldo_inicial_transporte:,.2f}")
 else:
     if st.session_state.menu_opcao == "📊 Razonetes":
         for grupo in ["Ativo", "Passivo", "Patrimônio Líquido", "Receita", "Despesa", "Encargos Financeiros"]:
@@ -198,9 +206,11 @@ else:
             df_c = df_periodo[df_periodo['descricao'] == conta]
             d, c = df_c[df_c['tipo'] == 'Débito']['valor'].sum(), df_c[df_c['tipo'] == 'Crédito']['valor'].sum()
             bal_data.append({"Conta": conta, "Débito": d, "Crédito": c, "SD": d-c if d>c else 0, "SC": c-d if c>d else 0})
+        
         df_bal = pd.DataFrame(bal_data)
         st.table(df_bal.style.format(precision=2))
         
+        # Métricas de fechamento (MANTIDAS)
         tc1, tc2, tc3, tc4 = st.columns(4)
         tc1.metric("Soma Débitos", f"R$ {df_bal['Débito'].sum():,.2f}")
         tc2.metric("Soma Créditos", f"R$ {df_bal['Crédito'].sum():,.2f}")
@@ -216,11 +226,11 @@ else:
         st.info(f"⚡ Resultado Líquido: R$ {rec - desp:,.2f}")
 
     elif st.session_state.menu_opcao == "💸 Fluxo de Caixa":
-        st.subheader("💸 Fluxo de Caixa")
+        st.subheader("💸 Fluxo de Caixa (Saldo Transportado)")
         c1, c2, c3 = st.columns(3)
         c1.metric("Saldo Inicial (do mês anterior)", f"R$ {saldo_inicial_transporte:,.2f}")
         c2.metric("Saldo Final (este mês)", f"R$ {saldo_final_periodo:,.2f}")
-        c3.metric("Variação Líquida", f"R$ {saldo_final_periodo - saldo_inicial_transporte:,.2f}", delta=f"{saldo_final_periodo - saldo_inicial_transporte:,.2f}")
+        c3.metric("Variação", f"R$ {saldo_final_periodo - saldo_inicial_transporte:,.2f}", delta=f"{saldo_final_periodo - saldo_inicial_transporte:,.2f}")
 
     elif st.session_state.menu_opcao == "⚙️ Gestão":
         st.subheader("⚙️ Gestão")
