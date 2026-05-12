@@ -21,7 +21,7 @@ if 'edit_id' not in st.session_state: st.session_state.edit_id = None
 if 'form_count' not in st.session_state: st.session_state.form_count = 0
 if 'menu_opcao' not in st.session_state: st.session_state.menu_opcao = "📊 Razonetes"
 
-# --- FUNÇÃO PARA GERAR PDF (DRE + BALANÇO + FLUXO) ---
+# --- FUNÇÃO PARA GERAR PDF ---
 def gerar_pdf(df_periodo, data_ini, data_fim, user_email, s_ini, s_fin):
     pdf = FPDF()
     pdf.add_page()
@@ -31,38 +31,11 @@ def gerar_pdf(df_periodo, data_ini, data_fim, user_email, s_ini, s_fin):
     pdf.cell(190, 10, f"Periodo: {data_ini} ate {data_fim} | Usuario: {user_email}", ln=True, align="C")
     pdf.line(10, 30, 200, 30)
     pdf.ln(10)
-
-    # 1. FLUXO DE CAIXA NO TOPO
+    
     pdf.set_font("Helvetica", "B", 12)
-    pdf.cell(190, 10, "1. Resumo de Caixa (Saldos Transportados)", ln=True)
-    pdf.set_font("Helvetica", "", 10)
-    pdf.cell(100, 7, f"Saldo Inicial Transportado: R$ {s_ini:,.2f}", ln=True)
-    pdf.cell(100, 7, f"Saldo Final no Periodo: R$ {s_fin:,.2f}", ln=True)
-    pdf.ln(5)
-
-    # Lógica de cálculo para DRE
-    def calc_valor_pdf(nat, tipo_dev=True):
-        sub = df_periodo[df_periodo['natureza'] == nat]
-        d, c = sub[sub['tipo'] == 'Débito']['valor'].sum(), sub[sub['tipo'] == 'Crédito']['valor'].sum()
-        return (d - c) if tipo_dev else (c - d)
-
-    rec = calc_valor_pdf('Receita', False)
-    desp = calc_valor_pdf('Despesa', True)
-    enc = calc_valor_pdf('Encargos Financeiros', True)
-    ebitda = rec - desp
-    lucro = ebitda - enc
-
-    # 2. DRE
-    pdf.set_font("Helvetica", "B", 12)
-    pdf.cell(190, 10, "2. Demonstracao do Resultado (DRE)", ln=True)
-    pdf.set_font("Helvetica", "", 10)
-    pdf.cell(100, 7, f"Receita Bruta: R$ {rec:,.2f}", ln=True)
-    pdf.cell(100, 7, f"Despesas Operacionais: R$ {desp:,.2f}", ln=True)
-    pdf.cell(100, 7, f"EBITDA: R$ {ebitda:,.2f}", ln=True)
-    pdf.set_font("Helvetica", "B", 10)
-    pdf.cell(100, 7, f"LUCRO LIQUIDO: R$ {lucro:,.2f}", ln=True)
-    pdf.ln(10)
-
+    pdf.cell(190, 10, f"Saldo Inicial Transportado: R$ {s_ini:,.2f}", ln=True)
+    pdf.cell(190, 10, f"Saldo Final em Caixa: R$ {s_fin:,.2f}", ln=True)
+    
     return bytes(pdf.output())
 
 # --- AUTENTICAÇÃO ---
@@ -105,17 +78,15 @@ def carregar_dados(u_id):
 
 df = carregar_dados(user_id)
 
-# --- LOGICA DE SALDO TRANSPORTADO ---
+# --- LÓGICA DE SALDO TRANSPORTADO ---
 def calc_saldo_caixa_ate(data_limite):
-    """Soma entradas e subtrai pagos de TODO o histórico até a data limite."""
     if df.empty: return 0.0
-    # Importante: considerar todos os dados (df), não apenas os do período (df_periodo)
     sub = df[df['data_lancamento'] <= data_limite]
     entradas = sub[sub['status'] == "Entrada"]['valor'].sum()
     saidas = sub[sub['status'] == "Pago"]['valor'].sum()
     return entradas - saidas
 
-# --- FORMULÁRIO LATERAL (MANTIDO) ---
+# --- FORMULÁRIO LATERAL ---
 with st.sidebar:
     st.write(f"👤 **{st.session_state.user.email}**")
     if st.button("Sair"):
@@ -161,19 +132,18 @@ with st.sidebar:
             st.session_state.form_count += 1
             st.rerun()
 
-# --- CSS (MANTIDO) ---
+# --- CSS ---
 st.markdown("""<style>
     .conta-card { background: white; border-radius: 12px; box-shadow: 0 4px 12px rgba(0,0,0,0.05); margin-bottom: 20px; border: 1px solid #e2e8f0; }
     .conta-titulo { background: #1e293b; color: white; padding: 10px; text-align: center; font-weight: 700; border-radius: 12px 12px 0 0; }
     .conta-rodape { padding: 8px; background: #f8fafc; text-align: center; font-weight: 700; border-top: 1px solid #e2e8f0; border-radius: 0 0 12px 12px; }
     .valor-deb { color: #059669; font-size: 0.8rem; padding: 2px 10px; font-weight: 600; }
     .valor-cre { color: #dc2626; font-size: 0.8rem; text-align: right; padding: 2px 10px; font-weight: 600; }
-    .metric-card { background: #f8fafc; padding: 15px; border-radius: 10px; border-left: 5px solid #3b82f6; box-shadow: 0 2px 4px rgba(0,0,0,0.05); }
 </style>""", unsafe_allow_html=True)
 
-st.title("📑 Painel Contábil com Transporte de Saldo")
+st.title("📑 Sistema Contábil Digital")
 
-# --- NAVEGAÇÃO E FILTROS ---
+# --- NAVEGAÇÃO ---
 col_nav = st.columns(5)
 opcoes_menu = ["📊 Razonetes", "🧾 Balancete", "📈 DRE", "💸 Fluxo de Caixa", "⚙️ Gestão"]
 for i, op in enumerate(opcoes_menu):
@@ -184,7 +154,7 @@ f1, f2, f3 = st.columns([2, 2, 1])
 with f1: data_ini = st.date_input("Início do Período", value=datetime.now().date().replace(day=1))
 with f2: data_fim = st.date_input("Fim do Período", value=datetime.now().date())
 
-# Cálculo dos Saldos Transportados
+# Cálculo de Saldo Transportado
 saldo_inicial_transporte = calc_saldo_caixa_ate(data_ini - timedelta(days=1))
 saldo_final_periodo = calc_saldo_caixa_ate(data_fim)
 
@@ -194,12 +164,12 @@ with f3:
     if not df_periodo.empty:
         try:
             pdf_bytes = gerar_pdf(df_periodo, data_ini, data_fim, st.session_state.user.email, saldo_inicial_transporte, saldo_final_periodo)
-            st.download_button(label="📥 Relatório Completo", data=pdf_bytes, file_name=f"relatorio_contabil.pdf", mime="application/pdf", use_container_width=True)
+            st.download_button(label="📥 Baixar PDF", data=pdf_bytes, file_name="relatorio.pdf", mime="application/pdf", use_container_width=True)
         except Exception as e: st.error(f"Erro PDF: {e}")
 
-# --- CONTEÚDO DAS ABAS ---
+# --- CONTEÚDO ---
 if df_periodo.empty and st.session_state.menu_opcao != "⚙️ Gestão":
-    st.info("Nenhum lançamento no período. Saldo transportado disponível em 'Fluxo de Caixa'.")
+    st.info("Nenhum lançamento encontrado para o período selecionado.")
 else:
     if st.session_state.menu_opcao == "📊 Razonetes":
         for grupo in ["Ativo", "Passivo", "Patrimônio Líquido", "Receita", "Despesa", "Encargos Financeiros"]:
@@ -237,24 +207,39 @@ else:
         desp = df_periodo[(df_periodo['natureza'] == 'Despesa') & (df_periodo['tipo'] == 'Débito')]['valor'].sum()
         st.metric("Receita Bruta", f"R$ {rec:,.2f}")
         st.metric("Despesas Operacionais", f"R$ {desp:,.2f}")
-        st.info(f"⚡ Lucro Líquido do Período: R$ {rec - desp:,.2f}")
+        st.info(f"⚡ EBITDA/Lucro: R$ {rec - desp:,.2f}")
 
     elif st.session_state.menu_opcao == "💸 Fluxo de Caixa":
-        st.subheader("🌊 Fluxo de Caixa Automático")
+        st.subheader("💸 Fluxo de Caixa (Transporte Automático)")
         c1, c2, c3 = st.columns(3)
         c1.metric("Saldo Inicial (do mês anterior)", f"R$ {saldo_inicial_transporte:,.2f}")
         c2.metric("Saldo Final (este mês)", f"R$ {saldo_final_periodo:,.2f}")
-        c3.metric("Variação Líquida", f"R$ {saldo_final_periodo - saldo_inicial_transporte:,.2f}", delta=f"{saldo_final_periodo - saldo_inicial_transporte:,.2f}")
-        
-        st.write("---")
-        st.info(f"💡 O Saldo Final de **R$ {saldo_final_periodo:,.2f}** será automaticamente o saldo inicial do próximo mês quando você alterar as datas no topo.")
+        c3.metric("Variação", f"R$ {saldo_final_periodo - saldo_inicial_transporte:,.2f}", delta=f"{saldo_final_periodo - saldo_inicial_transporte:,.2f}")
 
     elif st.session_state.menu_opcao == "⚙️ Gestão":
-        # ... lógica de exclusão e edição igual à anterior ...
-        st.write("Gerencie seus lançamentos aqui.")
+        st.subheader("⚙️ Gestão de Lançamentos")
+        
+        if st.button("🚨 Resetar Todos os Lançamentos", type="primary"):
+            supabase.table("lancamentos").delete().eq("user_id", user_id).execute()
+            st.cache_data.clear()
+            st.rerun()
+            
+        st.divider()
+        
         if not df.empty:
-            for _, row in df.sort_values('data_lancamento', ascending=False).iterrows():
-                with st.expander(f"{row['data_lancamento']} - {row['descricao']} - R$ {row['valor']}"):
-                    if st.button("🗑️ Excluir", key=f"d_{row['id']}"):
+            # Ordenar por data mais recente para facilitar a gestão
+            df_sorted = df.sort_values(by='data_lancamento', ascending=False)
+            for _, row in df_sorted.iterrows():
+                with st.expander(f"📅 {row['data_lancamento']} | {row['descricao']} | R$ {row['valor']:,.2f}"):
+                    st.write(f"**Grupo:** {row['natureza']} | **Tipo:** {row['tipo']} | **Status:** {row['status']}")
+                    st.write(f"**Justificativa:** {row['justificativa']}")
+                    
+                    col_ed, col_ex = st.columns(2)
+                    if col_ed.button("✏️ Editar", key=f"edit_{row['id']}"):
+                        st.session_state.edit_id = row['id']
+                        st.rerun()
+                    
+                    if col_ex.button("🗑️ Excluir", key=f"del_{row['id']}"):
                         supabase.table("lancamentos").delete().eq("id", row['id']).execute()
-                        st.cache_data.clear(); st.rerun()
+                        st.cache_data.clear()
+                        st.rerun()
