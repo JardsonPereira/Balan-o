@@ -141,4 +141,11 @@ else:
                     v_d, v_c = df_c[df_c['tipo'] == 'Débito']['valor'].sum(), df_c[df_c['tipo'] == 'Crédito']['valor'].sum()
                     saldo = (v_d - v_c) if grupo in ["Ativo", "Despesa", "Encargos Financeiros"] else (v_c - v_d)
                     with cols[i % 3]:
-                        st.markdown(f'<div class
+                        st.markdown(f'<div class="conta-card"><div class="conta-titulo">{conta}</div>', unsafe_allow_html=True)
+                        c_deb, c_cre = st.columns(2)
+                        with c_deb:
+                            for _, r in df_c[df_c['tipo']=='Débito'].iterrows():
+                                st.markdown(f'<div class="valor-deb">D: {r["valor"]:,.2f}</div><div class="just-box">{r["justificativa"]}</div>', unsafe_allow_html=True)
+                        with c_cre:
+                            for _, r in df_c[df_c['tipo']=='Crédito'].iterrows():
+                                st.markdown(f'<div class="valor-cre">C
