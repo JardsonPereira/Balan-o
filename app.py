@@ -7,6 +7,9 @@ from fpdf import FPDF
 # --- CONFIGURAÇÃO ---
 st.set_page_config(page_title="ContabilApp - Sistema Integrado", layout="wide")
 
+# Força a limpeza de cache do Streamlit para garantir atualização imediata
+st.cache_data.clear()
+
 try:
     url: str = st.secrets["SUPABASE_URL"]
     key: str = st.secrets["SUPABASE_KEY"]
@@ -21,7 +24,7 @@ if 'edit_id' not in st.session_state: st.session_state.edit_id = None
 if 'form_count' not in st.session_state: st.session_state.form_count = 0
 if 'menu_opcao' not in st.session_state: st.session_state.menu_opcao = "📊 Razonetes"
 
-# --- FUNÇÃO PARA GERAR PDF ---
+# --- FUNÇÃO PARA GERAR PDF (MANTIDA) ---
 def gerar_pdf(df_periodo, data_ini, data_fim, user_email, s_ini, s_fin):
     pdf = FPDF()
     pdf.add_page()
@@ -35,7 +38,7 @@ def gerar_pdf(df_periodo, data_ini, data_fim, user_email, s_ini, s_fin):
     pdf.cell(190, 10, f"Saldo Final em Caixa: R$ {s_fin:,.2f}", ln=True)
     return bytes(pdf.output())
 
-# --- AUTENTICAÇÃO ---
+# --- AUTENTICAÇÃO (MANTIDA) ---
 def gerenciar_acesso():
     st.sidebar.title("🔐 Acesso")
     menu = st.sidebar.radio("Escolha", ["Login", "Criar Conta"])
@@ -61,7 +64,7 @@ if st.session_state.user is None:
 
 user_id = st.session_state.user.id
 
-# REMOVIDO @st.cache_data PARA GARANTIR ATUALIZAÇÃO IMEDIATA
+# FUNÇÃO DE CARGA SEM CACHE PARA ATUALIZAÇÃO EM TEMPO REAL
 def carregar_dados(u_id):
     try:
         res = supabase.table("lancamentos").select("*").eq("user_id", u_id).execute()
@@ -73,6 +76,7 @@ def carregar_dados(u_id):
         return temp_df
     except Exception: return pd.DataFrame()
 
+# Carrega os dados frescos a cada interação
 df = carregar_dados(user_id)
 
 # --- LOGICA DE SALDO TRANSPORTADO ---
@@ -127,7 +131,7 @@ with st.sidebar:
             st.session_state.form_count += 1
             st.rerun()
 
-# --- CSS ---
+# --- CSS (MANTIDO) ---
 st.markdown("""<style>
     .conta-card { background: white; border-radius: 12px; box-shadow: 0 4px 12px rgba(0,0,0,0.05); margin-bottom: 20px; border: 1px solid #e2e8f0; }
     .conta-titulo { background: #1e293b; color: white; padding: 10px; text-align: center; font-weight: 700; border-radius: 12px 12px 0 0; }
@@ -142,7 +146,7 @@ st.title("📑 Sistema Contábil Digital")
 col_nav = st.columns(5)
 opcoes_menu = ["📊 Razonetes", "🧾 Balancete", "📈 DRE", "💸 Fluxo de Caixa", "⚙️ Gestão"]
 for i, op in enumerate(opcoes_menu):
-    if col_nav[i].button(op, key=f"btn_{i}", use_container_width=True): 
+    if col_nav[i].button(op, use_container_width=True): 
         st.session_state.menu_opcao = op
 
 st.divider()
@@ -150,10 +154,10 @@ f1, f2, f3 = st.columns([2, 2, 1])
 with f1: data_ini = st.date_input("Início do Período", value=datetime.now().date().replace(day=1))
 with f2: data_fim = st.date_input("Fim do Período", value=datetime.now().date())
 
-# Cálculo de Saldo Transportado
+# CÁLCULOS TOTAIS (FORÇADOS)
 saldo_inicial_transporte = calc_saldo_caixa_ate(data_ini - timedelta(days=1))
 saldo_final_periodo = calc_saldo_caixa_ate(data_fim)
-df_periodo = df[(df['data_lancamento'] >= data_ini) & (df['data_lancamento'] <= data_fim)] if not df.empty else pd.DataFrame()
+df_periodo = df[(df['data_lancamento'] >= data_ini) & (df['data_lancamento'] <= data_fim)]
 
 with f3:
     if not df_periodo.empty:
@@ -162,9 +166,9 @@ with f3:
             st.download_button(label="📥 Baixar PDF", data=pdf_bytes, file_name="relatorio.pdf", mime="application/pdf", use_container_width=True)
         except Exception as e: st.error(f"Erro PDF: {e}")
 
-# --- CONTEÚDO DAS ABAS ---
+# --- CONTEÚDO DAS ABAS (COM TOTAIS RESTAURADOS) ---
 if df_periodo.empty and st.session_state.menu_opcao != "⚙️ Gestão":
-    st.info(f"Nenhum lançamento no período. Saldo transportado: R$ {saldo_inicial_transporte:,.2f}")
+    st.info(f"Nenhum lançamento no período. Saldo transportado disponível: R$ {saldo_inicial_transporte:,.2f}")
 else:
     if st.session_state.menu_opcao == "📊 Razonetes":
         for grupo in ["Ativo", "Passivo", "Patrimônio Líquido", "Receita", "Despesa", "Encargos Financeiros"]:
@@ -216,7 +220,7 @@ else:
         c1, c2, c3 = st.columns(3)
         c1.metric("Saldo Inicial (do mês anterior)", f"R$ {saldo_inicial_transporte:,.2f}")
         c2.metric("Saldo Final (este mês)", f"R$ {saldo_final_periodo:,.2f}")
-        c3.metric("Variação", f"R$ {saldo_final_periodo - saldo_inicial_transporte:,.2f}", delta=f"{saldo_final_periodo - saldo_inicial_transporte:,.2f}")
+        c3.metric("Variação Líquida", f"R$ {saldo_final_periodo - saldo_inicial_transporte:,.2f}", delta=f"{saldo_final_periodo - saldo_inicial_transporte:,.2f}")
 
     elif st.session_state.menu_opcao == "⚙️ Gestão":
         st.subheader("⚙️ Gestão")
