@@ -107,6 +107,8 @@ st.markdown("""<style>
     .valor-deb { color: #059669; font-size: 0.8rem; padding: 2px 10px; font-weight: 600; }
     .valor-cre { color: #dc2626; font-size: 0.8rem; text-align: right; padding: 2px 10px; font-weight: 600; }
     .just-box { font-size: 0.65rem; color: #64748b; font-style: italic; padding: 0 10px 5px 10px; line-height: 1.1; }
+    .dre-row { display: flex; justify-content: space-between; padding: 5px 0; border-bottom: 1px solid #f1f5f9; }
+    .dre-total { font-weight: bold; border-top: 2px solid #1e293b; margin-top: 10px; padding-top: 5px; }
 </style>""", unsafe_allow_html=True)
 
 # --- NAVEGAÇÃO ---
@@ -145,11 +147,9 @@ else:
                         c_deb, c_cre = st.columns(2)
                         with c_deb:
                             for _, r in df_c[df_c['tipo']=='Débito'].iterrows():
-                                # Correção de f-string protegendo as aspas do HTML
                                 st.markdown(f'<div class="valor-deb">D: {r["valor"]:,.2f}</div><div class="just-box">{r["justificativa"]}</div>', unsafe_allow_html=True)
                         with c_cre:
                             for _, r in df_c[df_c['tipo']=='Crédito'].iterrows():
-                                # Correção de f-string protegendo as aspas do HTML
                                 st.markdown(f'<div class="valor-cre">C: {r["valor"]:,.2f}</div><div class="just-box">{r["justificativa"]}</div>', unsafe_allow_html=True)
                         st.markdown(f'<div class="conta-rodape">Saldo: R$ {saldo:,.2f}</div></div>', unsafe_allow_html=True)
 
@@ -169,12 +169,50 @@ else:
         c4.metric("Total Credor (SC)", f"R$ {df_bal['SC'].sum():,.2f}")
 
     elif st.session_state.menu_opcao == "📈 DRE":
-        st.subheader("📈 DRE")
-        rec = df_periodo[(df_periodo['natureza'] == 'Receita') & (df_periodo['tipo'] == 'Crédito')]['valor'].sum()
-        desp = df_periodo[(df_periodo['natureza'] == 'Despesa') & (df_periodo['tipo'] == 'Débito')]['valor'].sum()
-        st.metric("Receita Bruta", f"R$ {rec:,.2f}")
-        st.metric("Despesas Operacionais", f"R$ {desp:,.2f}")
-        st.info(f"⚡ Resultado Líquido: R$ {rec - desp:,.2f}")
+        st.subheader("📈 Demonstração do Resultado do Exercício (DRE)")
+        
+        # Filtros de Receita e Despesas
+        df_rec = df_periodo[(df_periodo['natureza'] == 'Receita') & (df_periodo['tipo'] == 'Crédito')]
+        df_desp = df_periodo[(df_periodo['natureza'].isin(['Despesa', 'Encargos Financeiros'])) & (df_periodo['tipo'] == 'Débito')]
+        
+        total_rec = df_rec['valor'].sum()
+        total_desp = df_desp['valor'].sum()
+        resultado_liquido = total_rec - total_desp
+
+        col_dre, col_metric = st.columns([2, 1])
+
+        with col_dre:
+            st.markdown("### Estrutura Detalhada")
+            
+            # Seção de Receitas
+            st.markdown("**(+) RECEITAS OPERACIONAIS**")
+            rec_group = df_rec.groupby('descricao')['valor'].sum().reset_index()
+            for _, r in rec_group.iterrows():
+                st.markdown(f'<div class="dre-row"><span>{r["descricao"]}</span><span>R$ {r["valor"]:,.2f}</span></div>', unsafe_allow_html=True)
+            
+            st.markdown(f'<div class="dre-row" style="font-weight:bold; color:#059669;"><span>(=) RECEITA BRUTA LÍQUIDA</span><span>R$ {total_rec:,.2f}</span></div>', unsafe_allow_html=True)
+            st.write("")
+
+            # Seção de Despesas
+            st.markdown("**(-) CUSTOS E DESPESAS OPERACIONAIS**")
+            desp_group = df_desp.groupby('descricao')['valor'].sum().reset_index()
+            for _, r in desp_group.iterrows():
+                st.markdown(f'<div class="dre-row"><span>{r["descricao"]}</span><span>(R$ {r["valor"]:,.2f})</span></div>', unsafe_allow_html=True)
+            
+            st.markdown(f'<div class="dre-row" style="font-weight:bold; color:#dc2626;"><span>(=) TOTAL DE DESPESAS</span><span>(R$ {total_desp:,.2f})</span></div>', unsafe_allow_html=True)
+            
+            # Resultado Final
+            cor_res = "#059669" if resultado_liquido >= 0 else "#dc2626"
+            label_res = "LUCRO LÍQUIDO" if resultado_liquido >= 0 else "PREJUÍZO LÍQUIDO"
+            
+            st.markdown(f'<div class="dre-row dre-total" style="font-size:1.2rem; color:{cor_res};"><span>(=) {label_res} DO PERÍODO</span><span>R$ {resultado_liquido:,.2f}</span></div>', unsafe_allow_html=True)
+
+        with col_metric:
+            st.markdown("### Resumo Econômico")
+            st.metric("Faturamento", f"R$ {total_rec:,.2f}")
+            st.metric("Gastos Totais", f"R$ {total_desp:,.2f}", delta=f"-{total_desp:,.2f}", delta_color="inverse")
+            st.divider()
+            st.progress(min(max(total_rec / (total_desp + 0.01) / 2, 0.0), 1.0), text="Margem de Cobertura")
 
     elif st.session_state.menu_opcao == "💸 Fluxo de Caixa":
         st.subheader("💸 Fluxo de Caixa Detalhado")
