@@ -23,7 +23,7 @@ if 'edit_id' not in st.session_state: st.session_state.edit_id = None
 if 'form_count' not in st.session_state: st.session_state.form_count = 0
 if 'menu_opcao' not in st.session_state: st.session_state.menu_opcao = "📊 Razonetes"
 
-# --- FUNÇÕES ---
+# --- FUNÇÕES AUXILIARES ---
 def carregar_dados(u_id):
     try:
         res = supabase.table("lancamentos").select("*").eq("user_id", u_id).execute()
@@ -35,40 +35,78 @@ def carregar_dados(u_id):
         return temp_df
     except Exception: return pd.DataFrame()
 
-def gerar_pdf(user_email, df_per, data_i, data_f, s_ini, s_fin, ativos, passivos, lucro):
+def gerar_pdf(user_email, df_per, data_i, data_f, s_ini, s_fin, v_at, v_pas, v_pl, v_rec, v_desp, v_ebitda, v_finan, v_lucro):
     pdf = FPDF()
     pdf.add_page()
+    
+    # Cabeçalho
     pdf.set_font("Arial", "B", 16)
-    pdf.cell(190, 10, "RELATÓRIO CONTÁBIL PROFISSIONAL", ln=True, align="C")
+    pdf.cell(190, 10, "RELATÓRIO CONTÁBIL CONSOLIDADO", ln=True, align="C")
     pdf.set_font("Arial", "", 10)
     pdf.cell(190, 7, f"Usuário: {user_email}", ln=True, align="C")
     pdf.cell(190, 7, f"Período: {data_i} até {data_f} | Gerado em: {datetime.now().strftime('%d/%m/%Y %H:%M')}", ln=True, align="C")
     pdf.ln(10)
 
+    # 1. FLUXO DE CAIXA
     pdf.set_font("Arial", "B", 12)
-    pdf.cell(190, 10, "1. RESUMO FINANCEIRO E PATRIMONIAL", ln=True)
-    pdf.set_font("Arial", "", 11)
+    pdf.cell(190, 10, "1. FLUXO DE CAIXA", ln=True, fill=False)
+    pdf.set_font("Arial", "", 10)
     pdf.cell(95, 8, f"Saldo Inicial: R$ {s_ini:,.2f}", border=1)
     pdf.cell(95, 8, f"Saldo Final: R$ {s_fin:,.2f}", border=1, ln=True)
-    pdf.cell(95, 8, f"Ativos (Período): R$ {ativos:,.2f}", border=1)
-    pdf.cell(95, 8, f"Passivos (Período): R$ {passivos:,.2f}", border=1, ln=True)
-    pdf.cell(190, 8, f"Resultado Líquido: R$ {lucro:,.2f}", border=1, ln=True)
+    pdf.ln(5)
+
+    # 2. DEMONSTRAÇÃO DO RESULTADO (DRE)
+    pdf.set_font("Arial", "B", 12)
+    pdf.cell(190, 10, "2. DEMONSTRAÇÃO DO RESULTADO (DRE)", ln=True)
+    pdf.set_font("Arial", "", 10)
+    pdf.cell(140, 8, "(+) Receitas Brutas", border=1)
+    pdf.cell(50, 8, f"R$ {v_rec:,.2f}", border=1, ln=True, align="R")
+    pdf.cell(140, 8, "(-) Despesas Operacionais", border=1)
+    pdf.cell(50, 8, f"R$ ({v_desp:,.2f})", border=1, ln=True, align="R")
+    
+    pdf.set_font("Arial", "B", 10)
+    pdf.cell(140, 8, "(=) EBITDA", border=1)
+    pdf.cell(50, 8, f"R$ {v_ebitda:,.2f}", border=1, ln=True, align="R")
+    
+    pdf.set_font("Arial", "", 10)
+    pdf.cell(140, 8, "(-) Encargos Financeiros / Impostos", border=1)
+    pdf.cell(50, 8, f"R$ ({v_finan:,.2f})", border=1, ln=True, align="R")
+    
+    pdf.set_font("Arial", "B", 10)
+    pdf.cell(140, 8, "(=) LUCRO LÍQUIDO DO PERÍODO", border=1)
+    pdf.cell(50, 8, f"R$ {v_lucro:,.2f}", border=1, ln=True, align="R")
+    pdf.ln(5)
+
+    # 3. BALANÇO PATRIMONIAL RESUMIDO
+    pdf.set_font("Arial", "B", 12)
+    pdf.cell(190, 10, "3. BALANÇO PATRIMONIAL", ln=True)
+    pdf.set_font("Arial", "", 10)
+    pdf.cell(95, 8, f"ATIVOS TOTAIS: R$ {v_at:,.2f}", border=1)
+    pdf.cell(95, 8, f"PASSIVOS TOTAIS: R$ {v_pas:,.2f}", border=1, ln=True)
+    pdf.cell(95, 8, f"PATRIMÔNIO LÍQUIDO: R$ {v_pl:,.2f}", border=1)
+    pdf.cell(95, 8, f"LUCRO ACUMULADO: R$ {v_lucro:,.2f}", border=1, ln=True)
     pdf.ln(10)
 
+    # 4. LANÇAMENTOS DETALHADOS
     pdf.set_font("Arial", "B", 12)
-    pdf.cell(190, 10, "2. LANÇAMENTOS", ln=True)
+    pdf.cell(190, 10, "4. LANÇAMENTOS DO PERÍODO", ln=True)
     pdf.set_font("Arial", "B", 8)
-    cols = [("Data", 25), ("Conta", 55), ("Op", 20), ("Valor", 30), ("Natureza", 30), ("Status", 30)]
-    for txt, w in cols: pdf.cell(w, 8, txt, border=1)
-    pdf.ln()
+    pdf.cell(20, 8, "Data", border=1)
+    pdf.cell(50, 8, "Conta", border=1)
+    pdf.cell(20, 8, "Tipo", border=1)
+    pdf.cell(30, 8, "Valor", border=1)
+    pdf.cell(35, 8, "Natureza", border=1)
+    pdf.cell(35, 8, "Status", border=1, ln=True)
+    
     pdf.set_font("Arial", "", 7)
     for _, row in df_per.sort_values('data_lancamento').iterrows():
-        pdf.cell(25, 7, str(row['data_lancamento']), border=1)
-        pdf.cell(55, 7, str(row['descricao'])[:30], border=1)
+        pdf.cell(20, 7, str(row['data_lancamento']), border=1)
+        pdf.cell(50, 7, str(row['descricao'])[:28], border=1)
         pdf.cell(20, 7, str(row['tipo']), border=1)
         pdf.cell(30, 7, f"{row['valor']:,.2f}", border=1)
-        pdf.cell(30, 7, str(row['natureza']), border=1)
-        pdf.cell(30, 7, str(row['status']), border=1, ln=True)
+        pdf.cell(35, 7, str(row['natureza']), border=1)
+        pdf.cell(35, 7, str(row['status']), border=1, ln=True)
+
     return pdf.output()
 
 # --- AUTENTICAÇÃO ---
@@ -112,6 +150,7 @@ with st.sidebar:
         contas_existentes = sorted(df_base['descricao'].unique().tolist()) if not df_base.empty else []
         opcoes_conta = ["+ Adicionar Nova Conta"] + contas_existentes
         idx_conta = opcoes_conta.index(reg['descricao']) if reg['descricao'] in contas_existentes else 0
+        
         conta_sel = st.selectbox("Selecione a Conta", opcoes_conta, index=idx_conta)
         desc_input = st.text_input("Nome da Conta", value=reg['descricao']).upper().strip() if conta_sel == "+ Adicionar Nova Conta" else conta_sel
         data_f = st.date_input("Data", value=reg['data_lancamento'])
@@ -121,11 +160,14 @@ with st.sidebar:
         valor = st.number_input("Valor", min_value=0.0, value=float(reg['valor']))
         status_pag = st.selectbox("Status", ["Pago", "Entrada", "Pendente", "Investimento", "Transferência Interna"], index=0)
         just_input = st.text_area("Justificativa", value=reg['justificativa'])
+        
         if st.form_submit_button("Confirmar"):
             payload = {"user_id": st.session_state.user.id, "descricao": desc_input, "natureza": nat, "tipo": tipo, "valor": valor, "justificativa": just_input, "status": status_pag, "data_lancamento": str(data_f)}
-            if st.session_state.edit_id: supabase.table("lancamentos").update(payload).eq("id", st.session_state.edit_id).execute()
-            else: supabase.table("lancamentos").insert(payload).execute()
-            st.session_state.edit_id = None
+            if st.session_state.edit_id:
+                supabase.table("lancamentos").update(payload).eq("id", st.session_state.edit_id).execute()
+                st.session_state.edit_id = None
+            else:
+                supabase.table("lancamentos").insert(payload).execute()
             st.session_state.form_count += 1
             st.rerun()
 
@@ -156,7 +198,7 @@ with f1: data_ini = st.date_input("Início", value=datetime.now().date().replace
 with f2: data_fim = st.date_input("Fim", value=datetime.now().date())
 df_periodo = df_base[(df_base['data_lancamento'] >= data_ini) & (df_base['data_lancamento'] <= data_fim)].copy()
 
-# --- CÁLCULOS GLOBAIS ---
+# --- CÁLCULOS TÉCNICOS ---
 def get_caixa(data_limite):
     sub = df_base[df_base['data_lancamento'] <= data_limite]
     return sub[sub['status'] == "Entrada"]['valor'].sum() - sub[sub['status'] == "Pago"]['valor'].sum()
@@ -165,16 +207,24 @@ s_ini = get_caixa(data_ini - timedelta(days=1))
 t_ent = df_periodo[df_periodo['status'] == "Entrada"]['valor'].sum()
 t_sai = df_periodo[df_periodo['status'] == "Pago"]['valor'].sum()
 s_fin = s_ini + t_ent - t_sai
+
+# DRE
 v_rec = df_periodo[(df_periodo['natureza'] == 'Receita') & (df_periodo['tipo'] == 'Crédito')]['valor'].sum()
 v_desp_op = df_periodo[(df_periodo['natureza'] == 'Despesa') & (df_periodo['tipo'] == 'Débito')]['valor'].sum()
+ebitda = v_rec - v_desp_op
 v_finan = df_periodo[(df_periodo['natureza'] == 'Encargos Financeiros') & (df_periodo['tipo'] == 'Débito')]['valor'].sum()
-lucro_liq = v_rec - v_desp_op - v_finan
+v_lucro = ebitda - v_finan
+
+# Balanço
+v_at = df_periodo[df_periodo['natureza'] == 'Ativo']['valor'].sum() + s_fin
+v_pas = df_periodo[df_periodo['natureza'] == 'Passivo']['valor'].sum() + df_periodo[df_periodo['status'] == 'Pendente']['valor'].sum()
+v_pl = df_periodo[df_periodo['natureza'] == 'Patrimônio Líquido']['valor'].sum()
 
 # Botão Impressão
 col_imp, _ = st.columns([1, 4])
 with col_imp:
-    pdf_out = gerar_pdf(st.session_state.user.email, df_periodo, data_ini, data_fim, s_ini, s_fin, df_periodo[df_periodo['natureza']=='Ativo']['valor'].sum(), df_periodo[df_periodo['natureza']=='Passivo']['valor'].sum(), lucro_liq)
-    st.download_button("🖨️ Baixar PDF do Período", data=bytes(pdf_out), file_name="Relatorio.pdf", mime="application/pdf")
+    pdf_bytes = gerar_pdf(st.session_state.user.email, df_periodo, data_ini, data_fim, s_ini, s_fin, v_at, v_pas, v_pl, v_rec, v_desp_op, ebitda, v_finan, v_lucro)
+    st.download_button("🖨️ Baixar PDF do Período", data=bytes(pdf_bytes), file_name=f"Relatorio_{data_ini}.pdf", mime="application/pdf")
 
 # --- CONTEÚDO ---
 if df_periodo.empty and st.session_state.menu_opcao != "⚙️ Gestão":
@@ -208,7 +258,6 @@ else:
             bal_data.append({"Conta": conta, "Débito": d, "Crédito": c, "SD": d-c if d>c else 0, "SC": c-d if c>d else 0})
         df_bal = pd.DataFrame(bal_data)
         st.table(df_bal.style.format(precision=2))
-        # --- TOTAIS RESTAURADOS ---
         c1, c2, c3, c4 = st.columns(4)
         c1.metric("Soma Débitos", f"R$ {df_bal['Débito'].sum():,.2f}")
         c2.metric("Soma Créditos", f"R$ {df_bal['Crédito'].sum():,.2f}")
@@ -225,11 +274,11 @@ else:
             st.markdown("**(-) DESPESAS OPERACIONAIS**")
             for _, r in df_periodo[(df_periodo['natureza']=='Despesa') & (df_periodo['tipo']=='Débito')].groupby('descricao')['valor'].sum().reset_index().iterrows():
                 st.markdown(f'<div class="dre-row"><span>{r["descricao"]}</span><span>(R$ {r["valor"]:,.2f})</span></div>', unsafe_allow_html=True)
-            st.markdown(f'<div class="dre-total" style="color:#059669">(=) EBITDA: R$ {v_rec - v_desp_op:,.2f}</div>', unsafe_allow_html=True)
+            st.markdown(f'<div class="dre-total" style="color:#059669">(=) EBITDA: R$ {ebitda:,.2f}</div>', unsafe_allow_html=True)
             st.markdown("**(-) FINANCEIRO / IMPOSTOS**")
             for _, r in df_periodo[(df_periodo['natureza']=='Encargos Financeiros') & (df_periodo['tipo']=='Débito')].groupby('descricao')['valor'].sum().reset_index().iterrows():
                 st.markdown(f'<div class="dre-row"><span>{r["descricao"]}</span><span>(R$ {r["valor"]:,.2f})</span></div>', unsafe_allow_html=True)
-            st.markdown(f'<div class="dre-total" style="color:{"#059669" if lucro_liq >=0 else "#dc2626"}">(=) LUCRO LÍQUIDO: R$ {lucro_liq:,.2f}</div>', unsafe_allow_html=True)
+            st.markdown(f'<div class="dre-total" style="color:{"#059669" if v_lucro >=0 else "#dc2626"}">(=) LUCRO LÍQUIDO: R$ {v_lucro:,.2f}</div>', unsafe_allow_html=True)
 
     elif st.session_state.menu_opcao == "💸 Fluxo de Caixa":
         st.subheader("💸 Fluxo e Liquidez")
@@ -242,8 +291,6 @@ else:
         
         st.markdown("### Análise Patrimonial")
         c1, c2 = st.columns(2)
-        v_at = df_periodo[df_periodo['natureza']=='Ativo']['valor'].sum() + s_fin
-        v_pas = df_periodo[df_periodo['natureza']=='Passivo']['valor'].sum() + df_periodo[df_periodo['status']=='Pendente']['valor'].sum()
         c1.markdown(f'<div class="conta-card"><div class="conta-titulo" style="background:#0369a1">ATIVOS TOTAIS</div><div style="padding:20px; text-align:center; font-size:1.5rem; color:#0369a1; font-weight:bold;">R$ {v_at:,.2f}</div></div>', unsafe_allow_html=True)
         c2.markdown(f'<div class="conta-card"><div class="conta-titulo" style="background:#be123c">PASSIVOS TOTAIS</div><div style="padding:20px; text-align:center; font-size:1.5rem; color:#be123c; font-weight:bold;">R$ {v_pas:,.2f}</div></div>', unsafe_allow_html=True)
         st.dataframe(df_periodo[df_periodo['status'].isin(["Entrada", "Pago"])], use_container_width=True)
