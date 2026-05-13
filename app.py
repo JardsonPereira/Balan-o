@@ -77,14 +77,15 @@ def gerar_pdf(user_email, df_per, data_i, data_f, s_ini, s_fin, v_at, v_pas, v_p
     pdf.set_font("Arial", "B", 12)
     pdf.cell(190, 10, "3. BALANÇO PATRIMONIAL (RIGIDAMENTE PERÍODO)", ln=True)
     pdf.set_font("Arial", "", 10)
-    pl_com_lucro = v_pl + v_lucro
+    # Lógica Contábil: Ativo = Passivo + PL + Lucro(DRE)
+    pl_final = v_pl + v_lucro
     pdf.cell(95, 8, f"ATIVOS TOTAIS (A): R$ {v_at:,.2f}", border=1)
     pdf.cell(95, 8, f"PASSIVOS TOTAIS (P): R$ {v_pas:,.2f}", border=1, ln=True)
     pdf.cell(95, 8, f"PATRIMÔNIO LÍQUIDO: R$ {v_pl:,.2f}", border=1)
-    pdf.cell(95, 8, f"LUCRO DO PERÍODO: R$ {v_lucro:,.2f}", border=1, ln=True)
+    pdf.cell(95, 8, f"LUCRO/PREJUÍZO: R$ {v_lucro:,.2f}", border=1, ln=True)
     pdf.set_font("Arial", "B", 10)
     pdf.set_fill_color(240, 240, 240)
-    pdf.cell(190, 8, f"EQUAÇÃO: Ativo (R$ {v_at:,.2f}) = Passivo + PL + Lucro (R$ {v_pas + pl_com_lucro:,.2f})", border=1, ln=True, align="C", fill=True)
+    pdf.cell(190, 8, f"EQUAÇÃO: Ativo (R$ {v_at:,.2f}) = Passivo + PL + Lucro (R$ {v_pas + pl_final:,.2f})", border=1, ln=True, align="C", fill=True)
     pdf.ln(10)
 
     # 4. LANÇAMENTOS
@@ -162,7 +163,7 @@ with st.sidebar:
             st.session_state.form_count += 1
             st.rerun()
 
-# --- CSS (Cards, Razonetes, DRE) ---
+# --- CSS ---
 st.markdown("""<style>
     .conta-card { background: white; border-radius: 12px; box-shadow: 0 4px 12px rgba(0,0,0,0.05); margin-bottom: 20px; border: 1px solid #e2e8f0; }
     .conta-titulo { background: #1e293b; color: white; padding: 10px; text-align: center; font-weight: 700; border-radius: 12px 12px 0 0; }
@@ -188,22 +189,29 @@ with f1: data_ini = st.date_input("Início do Período", value=datetime.now().da
 with f2: data_fim = st.date_input("Fim do Período", value=datetime.now().date())
 df_periodo = df_base[(df_base['data_lancamento'] >= data_ini) & (df_base['data_lancamento'] <= data_fim)].copy()
 
-# --- CÁLCULOS ---
+# --- CÁLCULOS TÉCNICOS GLOBAIS (CORRIGINDO O NAMEERROR) ---
 def get_saldo(df, nat):
+    if df.empty: return 0.0
     d = df[(df['natureza'] == nat) & (df['tipo'] == 'Débito')]['valor'].sum()
     c = df[(df['natureza'] == nat) & (df['tipo'] == 'Crédito')]['valor'].sum()
     return (d - c) if nat in ['Ativo', 'Despesa', 'Encargos Financeiros'] else (c - d)
 
 def get_caixa(data_limite):
+    if df_base.empty: return 0.0
     sub = df_base[df_base['data_lancamento'] <= data_limite]
     return sub[sub['status'] == "Entrada"]['valor'].sum() - sub[sub['status'] == "Pago"]['valor'].sum()
 
+# Definição global das variáveis para evitar NameError
 s_ini = get_caixa(data_ini - timedelta(days=1))
 s_fin = get_caixa(data_fim)
+t_ent = df_periodo[df_periodo['status'] == "Entrada"]['valor'].sum()
+t_sai = df_periodo[df_periodo['status'] == "Pago"]['valor'].sum()
+
 v_rec = df_periodo[(df_periodo['natureza'] == 'Receita') & (df_periodo['tipo'] == 'Crédito')]['valor'].sum()
 v_desp_op = df_periodo[(df_periodo['natureza'] == 'Despesa') & (df_periodo['tipo'] == 'Débito')]['valor'].sum()
 v_finan = df_periodo[(df_periodo['natureza'] == 'Encargos Financeiros') & (df_periodo['tipo'] == 'Débito')]['valor'].sum()
 v_lucro = v_rec - v_desp_op - v_finan
+
 v_at_per = get_saldo(df_periodo, 'Ativo')
 v_pas_per = get_saldo(df_periodo, 'Passivo')
 v_pl_per = get_saldo(df_periodo, 'Patrimônio Líquido')
@@ -266,7 +274,9 @@ else:
         m1.metric("Saldo Inicial", f"R$ {s_ini:,.2f}")
         m2.metric("Saldo Final", f"R$ {s_fin:,.2f}")
         m3.metric("Fluxo Líquido", f"R$ {s_fin - s_ini:,.2f}")
-        liq = (s_ini + t_ent) / (t_sai + df_periodo[df_periodo['status']=='Pendente']['valor'].sum() + 1)
+        # Cálculo da Liquidez usando variáveis globais
+        pendentes = df_periodo[df_periodo['status']=='Pendente']['valor'].sum()
+        liq = (s_ini + t_ent) / (t_sai + pendentes + 1)
         m4.metric("Índice Liquidez", f"{liq:.2f}")
         st.markdown("### Análise Patrimonial")
         c1, c2 = st.columns(2)
