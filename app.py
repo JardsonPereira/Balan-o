@@ -47,12 +47,14 @@ def gerar_pdf(user_email, df_per, data_i, data_f, s_ini, s_fin, v_at, v_pas, v_p
     pdf.cell(190, 7, f"Período: {data_i} até {data_f} | Gerado em: {datetime.now().strftime('%d/%m/%Y %H:%M')}", ln=True, align="C")
     pdf.ln(10)
 
-    # 1. FLUXO DE CAIXA
+    # 1. FLUXO DE CAIXA E VARIAÇÃO
     pdf.set_font("Arial", "B", 12)
-    pdf.cell(190, 10, "1. FLUXO DE CAIXA", ln=True, fill=False)
+    pdf.cell(190, 10, "1. FLUXO DE CAIXA E VARIAÇÃO", ln=True)
     pdf.set_font("Arial", "", 10)
-    pdf.cell(95, 8, f"Saldo Inicial: R$ {s_ini:,.2f}", border=1)
-    pdf.cell(95, 8, f"Saldo Final: R$ {s_fin:,.2f}", border=1, ln=True)
+    pdf.cell(63, 8, f"Saldo Inicial: R$ {s_ini:,.2f}", border=1)
+    pdf.cell(63, 8, f"Saldo Final: R$ {s_fin:,.2f}", border=1)
+    pdf.set_font("Arial", "B", 10)
+    pdf.cell(64, 8, f"Variação Líquida: R$ {s_fin - s_ini:,.2f}", border=1, ln=True)
     pdf.ln(5)
 
     # 2. DEMONSTRAÇÃO DO RESULTADO (DRE)
@@ -63,28 +65,29 @@ def gerar_pdf(user_email, df_per, data_i, data_f, s_ini, s_fin, v_at, v_pas, v_p
     pdf.cell(50, 8, f"R$ {v_rec:,.2f}", border=1, ln=True, align="R")
     pdf.cell(140, 8, "(-) Despesas Operacionais", border=1)
     pdf.cell(50, 8, f"R$ ({v_desp:,.2f})", border=1, ln=True, align="R")
-    
     pdf.set_font("Arial", "B", 10)
     pdf.cell(140, 8, "(=) EBITDA", border=1)
     pdf.cell(50, 8, f"R$ {v_ebitda:,.2f}", border=1, ln=True, align="R")
-    
     pdf.set_font("Arial", "", 10)
     pdf.cell(140, 8, "(-) Encargos Financeiros / Impostos", border=1)
     pdf.cell(50, 8, f"R$ ({v_finan:,.2f})", border=1, ln=True, align="R")
-    
     pdf.set_font("Arial", "B", 10)
     pdf.cell(140, 8, "(=) LUCRO LÍQUIDO DO PERÍODO", border=1)
     pdf.cell(50, 8, f"R$ {v_lucro:,.2f}", border=1, ln=True, align="R")
     pdf.ln(5)
 
-    # 3. BALANÇO PATRIMONIAL RESUMIDO
+    # 3. BALANÇO PATRIMONIAL E EQUAÇÃO FUNDAMENTAL
     pdf.set_font("Arial", "B", 12)
-    pdf.cell(190, 10, "3. BALANÇO PATRIMONIAL", ln=True)
+    pdf.cell(190, 10, "3. BALANÇO PATRIMONIAL (EQUAÇÃO FUNDAMENTAL)", ln=True)
     pdf.set_font("Arial", "", 10)
-    pdf.cell(95, 8, f"ATIVOS TOTAIS: R$ {v_at:,.2f}", border=1)
-    pdf.cell(95, 8, f"PASSIVOS TOTAIS: R$ {v_pas:,.2f}", border=1, ln=True)
-    pdf.cell(95, 8, f"PATRIMÔNIO LÍQUIDO: R$ {v_pl:,.2f}", border=1)
-    pdf.cell(95, 8, f"LUCRO ACUMULADO: R$ {v_lucro:,.2f}", border=1, ln=True)
+    pdf.cell(95, 8, f"ATIVOS TOTAIS (A): R$ {v_at:,.2f}", border=1)
+    pdf.cell(95, 8, f"PASSIVOS TOTAIS (P): R$ {v_pas:,.2f}", border=1, ln=True)
+    pdf.cell(95, 8, f"PATRIMÔNIO LÍQUIDO (PL): R$ {v_pl:,.2f}", border=1)
+    pdf.cell(95, 8, f"LUCRO DO PERÍODO: R$ {v_lucro:,.2f}", border=1, ln=True)
+    
+    pdf.set_font("Arial", "B", 10)
+    pdf.set_fill_color(240, 240, 240)
+    pdf.cell(190, 8, f"EQUAÇÃO: Ativo (R$ {v_at:,.2f}) = Passivo + PL (R$ {v_pas + v_pl + v_lucro:,.2f})", border=1, ln=True, align="C", fill=True)
     pdf.ln(10)
 
     # 4. LANÇAMENTOS DETALHADOS
