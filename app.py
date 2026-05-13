@@ -44,7 +44,8 @@ def gerar_pdf(user_email, df_per, data_i, data_f, s_ini, s_fin, v_at, v_pas, v_p
     pdf.cell(190, 10, "RELATÓRIO CONTÁBIL CONSOLIDADO", ln=True, align="C")
     pdf.set_font("Arial", "", 10)
     pdf.cell(190, 7, f"Usuário: {user_email}", ln=True, align="C")
-    pdf.cell(190, 7, f"Período: {data_i} até {data_f} | Gerado em: {datetime.now().strftime('%d/%m/%Y %H:%M')}", ln=True, align="C")
+    pdf.cell(190, 7, f"Período Selecionado: {data_i} até {data_f}", ln=True, align="C")
+    pdf.cell(190, 7, f"Gerado em: {datetime.now().strftime('%d/%m/%Y %H:%M')}", ln=True, align="C")
     pdf.ln(10)
 
     # 1. FLUXO DE CAIXA E VARIAÇÃO
@@ -76,23 +77,26 @@ def gerar_pdf(user_email, df_per, data_i, data_f, s_ini, s_fin, v_at, v_pas, v_p
     pdf.cell(50, 8, f"R$ {v_lucro:,.2f}", border=1, ln=True, align="R")
     pdf.ln(5)
 
-    # 3. BALANÇO PATRIMONIAL E EQUAÇÃO FUNDAMENTAL
+    # 3. BALANÇO PATRIMONIAL (RIGIDAMENTE APENAS LANÇAMENTOS DO PERÍODO)
     pdf.set_font("Arial", "B", 12)
-    pdf.cell(190, 10, "3. BALANÇO PATRIMONIAL (EQUAÇÃO FUNDAMENTAL)", ln=True)
+    pdf.cell(190, 10, "3. BALANÇO PATRIMONIAL (DADOS DO PERÍODO SELECIONADO)", ln=True)
     pdf.set_font("Arial", "", 10)
-    pdf.cell(95, 8, f"ATIVOS TOTAIS (A): R$ {v_at:,.2f}", border=1)
-    pdf.cell(95, 8, f"PASSIVOS TOTAIS (P): R$ {v_pas:,.2f}", border=1, ln=True)
+    # Aqui v_at e v_pas já estão filtrados para o período na chamada da função
+    pdf.cell(95, 8, f"ATIVOS DO PERÍODO (A): R$ {v_at:,.2f}", border=1)
+    pdf.cell(95, 8, f"PASSIVOS DO PERÍODO (P): R$ {v_pas:,.2f}", border=1, ln=True)
     pdf.cell(95, 8, f"PATRIMÔNIO LÍQUIDO (PL): R$ {v_pl:,.2f}", border=1)
-    pdf.cell(95, 8, f"LUCRO DO PERÍODO: R$ {v_lucro:,.2f}", border=1, ln=True)
+    pdf.cell(95, 8, f"LUCRO DO PERÍODO (L): R$ {v_lucro:,.2f}", border=1, ln=True)
     
     pdf.set_font("Arial", "B", 10)
     pdf.set_fill_color(240, 240, 240)
-    pdf.cell(190, 8, f"EQUAÇÃO: Ativo (R$ {v_at:,.2f}) = Passivo + PL (R$ {v_pas + v_pl + v_lucro:,.2f})", border=1, ln=True, align="C", fill=True)
+    # Verificação da Equação Fundamental com os dados do período
+    total_direita = v_pas + v_pl + v_lucro
+    pdf.cell(190, 8, f"EQUAÇÃO: Ativo (R$ {v_at:,.2f}) = Passivo + PL + Lucro (R$ {total_direita:,.2f})", border=1, ln=True, align="C", fill=True)
     pdf.ln(10)
 
     # 4. LANÇAMENTOS DETALHADOS
     pdf.set_font("Arial", "B", 12)
-    pdf.cell(190, 10, "4. LANÇAMENTOS DO PERÍODO", ln=True)
+    pdf.cell(190, 10, "4. LANÇAMENTOS DETALHADOS DO PERÍODO", ln=True)
     pdf.set_font("Arial", "B", 8)
     pdf.cell(20, 8, "Data", border=1)
     pdf.cell(50, 8, "Conta", border=1)
@@ -206,27 +210,29 @@ def get_caixa(data_limite):
     sub = df_base[df_base['data_lancamento'] <= data_limite]
     return sub[sub['status'] == "Entrada"]['valor'].sum() - sub[sub['status'] == "Pago"]['valor'].sum()
 
+# Saldo inicial (antes do período) e final
 s_ini = get_caixa(data_ini - timedelta(days=1))
 t_ent = df_periodo[df_periodo['status'] == "Entrada"]['valor'].sum()
 t_sai = df_periodo[df_periodo['status'] == "Pago"]['valor'].sum()
 s_fin = s_ini + t_ent - t_sai
 
-# DRE
+# DRE (Baseado no Período Selecionado)
 v_rec = df_periodo[(df_periodo['natureza'] == 'Receita') & (df_periodo['tipo'] == 'Crédito')]['valor'].sum()
 v_desp_op = df_periodo[(df_periodo['natureza'] == 'Despesa') & (df_periodo['tipo'] == 'Débito')]['valor'].sum()
 ebitda = v_rec - v_desp_op
 v_finan = df_periodo[(df_periodo['natureza'] == 'Encargos Financeiros') & (df_periodo['tipo'] == 'Débito')]['valor'].sum()
 v_lucro = ebitda - v_finan
 
-# Balanço
-v_at = df_periodo[df_periodo['natureza'] == 'Ativo']['valor'].sum() + s_fin
-v_pas = df_periodo[df_periodo['natureza'] == 'Passivo']['valor'].sum() + df_periodo[df_periodo['status'] == 'Pendente']['valor'].sum()
-v_pl = df_periodo[df_periodo['natureza'] == 'Patrimônio Líquido']['valor'].sum()
+# Balanço (RIGIDAMENTE APENAS DO PERÍODO SELECIONADO)
+v_at_per = df_periodo[df_periodo['natureza'] == 'Ativo']['valor'].sum()
+v_pas_per = df_periodo[df_periodo['natureza'] == 'Passivo']['valor'].sum()
+v_pl_per = df_periodo[df_periodo['natureza'] == 'Patrimônio Líquido']['valor'].sum()
 
 # Botão Impressão
 col_imp, _ = st.columns([1, 4])
 with col_imp:
-    pdf_bytes = gerar_pdf(st.session_state.user.email, df_periodo, data_ini, data_fim, s_ini, s_fin, v_at, v_pas, v_pl, v_rec, v_desp_op, ebitda, v_finan, v_lucro)
+    # Passando os valores rigorosamente filtrados pelo período para o Balanço no PDF
+    pdf_bytes = gerar_pdf(st.session_state.user.email, df_periodo, data_ini, data_fim, s_ini, s_fin, v_at_per, v_pas_per, v_pl_per, v_rec, v_desp_op, ebitda, v_finan, v_lucro)
     st.download_button("🖨️ Baixar PDF do Período", data=bytes(pdf_bytes), file_name=f"Relatorio_{data_ini}.pdf", mime="application/pdf")
 
 # --- CONTEÚDO ---
@@ -289,13 +295,15 @@ else:
         m1.metric("Saldo Inicial", f"R$ {s_ini:,.2f}")
         m2.metric("Saldo Final", f"R$ {s_fin:,.2f}")
         m3.metric("Fluxo Líquido", f"R$ {t_ent - t_sai:,.2f}")
+        # Índice de Liquidez do período
         liq = (s_ini + t_ent) / (t_sai + df_periodo[df_periodo['status']=='Pendente']['valor'].sum() + 1)
         m4.metric("Índice Liquidez", f"{liq:.2f}")
         
-        st.markdown("### Análise Patrimonial")
+        st.markdown("### Análise Patrimonial (Período)")
         c1, c2 = st.columns(2)
-        c1.markdown(f'<div class="conta-card"><div class="conta-titulo" style="background:#0369a1">ATIVOS TOTAIS</div><div style="padding:20px; text-align:center; font-size:1.5rem; color:#0369a1; font-weight:bold;">R$ {v_at:,.2f}</div></div>', unsafe_allow_html=True)
-        c2.markdown(f'<div class="conta-card"><div class="conta-titulo" style="background:#be123c">PASSIVOS TOTAIS</div><div style="padding:20px; text-align:center; font-size:1.5rem; color:#be123c; font-weight:bold;">R$ {v_pas:,.2f}</div></div>', unsafe_allow_html=True)
+        # Exibição do Ativo/Passivo apenas do período na interface
+        c1.markdown(f'<div class="conta-card"><div class="conta-titulo" style="background:#0369a1">ATIVOS DO PERÍODO</div><div style="padding:20px; text-align:center; font-size:1.5rem; color:#0369a1; font-weight:bold;">R$ {v_at_per:,.2f}</div></div>', unsafe_allow_html=True)
+        c2.markdown(f'<div class="conta-card"><div class="conta-titulo" style="background:#be123c">PASSIVOS DO PERÍODO</div><div style="padding:20px; text-align:center; font-size:1.5rem; color:#be123c; font-weight:bold;">R$ {v_pas_per:,.2f}</div></div>', unsafe_allow_html=True)
         st.dataframe(df_periodo[df_periodo['status'].isin(["Entrada", "Pago"])], use_container_width=True)
 
     elif st.session_state.menu_opcao == "⚙️ Gestão":
