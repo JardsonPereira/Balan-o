@@ -108,7 +108,8 @@ st.markdown("""<style>
     .valor-cre { color: #dc2626; font-size: 0.8rem; text-align: right; padding: 2px 10px; font-weight: 600; }
     .just-box { font-size: 0.65rem; color: #64748b; font-style: italic; padding: 0 10px 5px 10px; line-height: 1.1; }
     .dre-row { display: flex; justify-content: space-between; padding: 5px 0; border-bottom: 1px solid #f1f5f9; }
-    .dre-total { font-weight: bold; border-top: 2px solid #1e293b; margin-top: 10px; padding-top: 5px; }
+    .dre-subtotal { font-weight: bold; background-color: #f8fafc; padding: 5px; border-radius: 4px; margin-top: 5px; }
+    .dre-total { font-weight: bold; border-top: 2px solid #1e293b; margin-top: 10px; padding-top: 5px; font-size: 1.1rem; }
 </style>""", unsafe_allow_html=True)
 
 # --- NAVEGAÇÃO ---
@@ -170,38 +171,70 @@ else:
 
     elif st.session_state.menu_opcao == "📈 DRE":
         st.subheader("📈 Demonstração do Resultado do Exercício (DRE)")
+        
+        # 1. Receitas
         df_rec = df_periodo[(df_periodo['natureza'] == 'Receita') & (df_periodo['tipo'] == 'Crédito')]
-        df_desp = df_periodo[(df_periodo['natureza'].isin(['Despesa', 'Encargos Financeiros'])) & (df_periodo['tipo'] == 'Débito')]
         total_rec = df_rec['valor'].sum()
-        total_desp = df_desp['valor'].sum()
-        resultado_liquido = total_rec - total_desp
+        
+        # 2. Despesas Operacionais (Exclui Encargos Financeiros para cálculo do EBITDA)
+        df_desp_op = df_periodo[(df_periodo['natureza'] == 'Despesa') & (df_periodo['tipo'] == 'Débito')]
+        total_desp_op = df_desp_op['valor'].sum()
+        
+        # 3. EBITDA (Receita - Despesas Operacionais)
+        ebitda = total_rec - total_desp_op
+        
+        # 4. Encargos Financeiros (Juros/Impostos)
+        df_finan = df_periodo[(df_periodo['natureza'] == 'Encargos Financeiros') & (df_periodo['tipo'] == 'Débito')]
+        total_finan = df_finan['valor'].sum()
+        
+        # 5. Lucro Líquido
+        lucro_liquido = ebitda - total_finan
+
         col_dre, col_metric = st.columns([2, 1])
+
         with col_dre:
             st.markdown("### Estrutura Detalhada")
+            
+            # Bloco Receita
             st.markdown("**(+) RECEITAS OPERACIONAIS**")
-            rec_group = df_rec.groupby('descricao')['valor'].sum().reset_index()
-            for _, r in rec_group.iterrows():
+            for _, r in df_rec.groupby('descricao')['valor'].sum().reset_index().iterrows():
                 st.markdown(f'<div class="dre-row"><span>{r["descricao"]}</span><span>R$ {r["valor"]:,.2f}</span></div>', unsafe_allow_html=True)
-            st.markdown(f'<div class="dre-row" style="font-weight:bold; color:#059669;"><span>(=) RECEITA BRUTA LÍQUIDA</span><span>R$ {total_rec:,.2f}</span></div>', unsafe_allow_html=True)
+            
+            # Bloco Despesas
             st.write("")
-            st.markdown("**(-) CUSTOS E DESPESAS OPERACIONAIS**")
-            desp_group = df_desp.groupby('descricao')['valor'].sum().reset_index()
-            for _, r in desp_group.iterrows():
+            st.markdown("**(-) DESPESAS OPERACIONAIS**")
+            for _, r in df_desp_op.groupby('descricao')['valor'].sum().reset_index().iterrows():
                 st.markdown(f'<div class="dre-row"><span>{r["descricao"]}</span><span>(R$ {r["valor"]:,.2f})</span></div>', unsafe_allow_html=True)
-            st.markdown(f'<div class="dre-row" style="font-weight:bold; color:#dc2626;"><span>(=) TOTAL DE DESPESAS</span><span>(R$ {total_desp:,.2f})</span></div>', unsafe_allow_html=True)
-            cor_res = "#059669" if resultado_liquido >= 0 else "#dc2626"
-            label_res = "LUCRO LÍQUIDO" if resultado_liquido >= 0 else "PREJUÍZO LÍQUIDO"
-            st.markdown(f'<div class="dre-row dre-total" style="font-size:1.2rem; color:{cor_res};"><span>(=) {label_res} DO PERÍODO</span><span>R$ {resultado_liquido:,.2f}</span></div>', unsafe_allow_html=True)
+            
+            # Subtotal EBITDA
+            cor_ebitda = "#059669" if ebitda >= 0 else "#dc2626"
+            st.markdown(f'<div class="dre-row dre-subtotal" style="color:{cor_ebitda}; border-left: 5px solid {cor_ebitda}"><span>(=) EBITDA (Resultado Operacional)</span><span>R$ {ebitda:,.2f}</span></div>', unsafe_allow_html=True)
+            
+            # Bloco Financeiro
+            st.write("")
+            st.markdown("**(-) ENCARGOS FINANCEIROS / IMPOSTOS**")
+            for _, r in df_finan.groupby('descricao')['valor'].sum().reset_index().iterrows():
+                st.markdown(f'<div class="dre-row"><span>{r["descricao"]}</span><span>(R$ {r["valor"]:,.2f})</span></div>', unsafe_allow_html=True)
+            
+            # Lucro Líquido
+            cor_liq = "#059669" if lucro_liquido >= 0 else "#dc2626"
+            st.markdown(f'<div class="dre-row dre-total" style="color:{cor_liq};"><span>(=) LUCRO LÍQUIDO DO PERÍODO</span><span>R$ {lucro_liquido:,.2f}</span></div>', unsafe_allow_html=True)
+
         with col_metric:
-            st.markdown("### Resumo Econômico")
-            st.metric("Faturamento", f"R$ {total_rec:,.2f}")
-            st.metric("Gastos Totais", f"R$ {total_desp:,.2f}", delta=f"-{total_desp:,.2f}", delta_color="inverse")
+            st.markdown("### Performance")
+            st.metric("EBITDA", f"R$ {ebitda:,.2f}", delta=f"{((ebitda/total_rec*100) if total_rec > 0 else 0):.1f}% Margem")
+            st.metric("Lucro Líquido", f"R$ {lucro_liquido:,.2f}")
             st.divider()
+            if total_rec > 0:
+                st.write("Composição do Resultado")
+                st.bar_chart(pd.DataFrame({
+                    "Valores": [total_rec, total_desp_op, total_finan],
+                    "Categoria": ["Receita", "Desp. Op", "Financeiro"]
+                }).set_index("Categoria"))
 
     elif st.session_state.menu_opcao == "💸 Fluxo de Caixa":
         st.subheader("💸 Fluxo de Caixa e Liquidez")
         
-        # --- CÁLCULOS DE CAIXA ---
         def calc_caixa(limite):
             if df_base.empty: return 0.0
             sub = df_base[df_base['data_lancamento'] <= limite]
@@ -213,71 +246,30 @@ else:
         total_sai = df_fluxo[df_fluxo['status'] == "Pago"]['valor'].sum()
         s_fin = s_ini + total_ent - total_sai
 
-        # --- CÁLCULOS DE LIQUIDEZ ---
-        # Ativos: O que temos em mãos (Saldo Inicial) + O que entrou (Entradas)
-        # Passivos: O que saiu (Pagos) + O que está pendente (Contas a Pagar)
         total_ativos = s_ini + total_ent
         pendentes = df_periodo[df_periodo['status'] == "Pendente"]['valor'].sum()
         total_passivos = total_sai + pendentes
         
         liquidez = total_ativos / total_passivos if total_passivos > 0 else total_ativos
         
-        # --- LAYOUT DE MÉTRICAS ---
         m1, m2, m3, m4 = st.columns(4)
         m1.metric("Saldo Inicial", f"R$ {s_ini:,.2f}")
         m2.metric("Saldo Final", f"R$ {s_fin:,.2f}")
         m3.metric("Fluxo Líquido", f"R$ {total_ent - total_sai:,.2f}", delta=f"{total_ent - total_sai:,.2f}")
-        
-        # Cor do indicador de liquidez
-        cor_liq = "normal" if liquidez >= 1 else "inverse"
-        m4.metric("Índice de Liquidez", f"{liquidez:.2f}", delta="Ideal > 1.0", delta_color=cor_liq)
+        m4.metric("Índice de Liquidez", f"{liquidez:.2f}", delta="Ideal > 1.0")
 
         st.divider()
-
-        # --- PAINEL DE LIQUIDEZ ---
-        st.markdown("### 🔍 Análise de Solvência")
         l_col1, l_col2 = st.columns(2)
-        
         with l_col1:
-            st.markdown(f"""
-            <div class="conta-card">
-                <div class="conta-titulo" style="background:#0369a1">TOTAL EM ATIVOS (Disponível + Entradas)</div>
-                <div style="padding:20px; text-align:center; font-size:1.5rem; color:#0369a1; font-weight:bold;">
-                    R$ {total_ativos:,.2f}
-                </div>
-                <div class="just-box" style="text-align:center; padding-bottom:10px;">
-                    Representa todo o recurso que passou pelo caixa no período.
-                </div>
-            </div>
-            """, unsafe_allow_html=True)
-            
+            st.markdown(f'<div class="conta-card"><div class="conta-titulo" style="background:#0369a1">TOTAL EM ATIVOS</div><div style="padding:20px; text-align:center; font-size:1.5rem; color:#0369a1; font-weight:bold;">R$ {total_ativos:,.2f}</div></div>', unsafe_allow_html=True)
         with l_col2:
-            st.markdown(f"""
-            <div class="conta-card">
-                <div class="conta-titulo" style="background:#be123c">TOTAL EM PASSIVOS (Saídas + Pendentes)</div>
-                <div style="padding:20px; text-align:center; font-size:1.5rem; color:#be123c; font-weight:bold;">
-                    R$ {total_passivos:,.2f}
-                </div>
-                <div class="just-box" style="text-align:center; padding-bottom:10px;">
-                    Inclui pagamentos realizados e compromissos pendentes.
-                </div>
-            </div>
-            """, unsafe_allow_html=True)
+            st.markdown(f'<div class="conta-card"><div class="conta-titulo" style="background:#be123c">TOTAL EM PASSIVOS</div><div style="padding:20px; text-align:center; font-size:1.5rem; color:#be123c; font-weight:bold;">R$ {total_passivos:,.2f}</div></div>', unsafe_allow_html=True)
 
-        # --- HISTÓRICO ---
         if not df_fluxo.empty:
-            st.markdown("### 📋 Histórico de Movimentações (Caixa)")
+            st.markdown("### 📋 Histórico de Movimentações")
             df_display = df_fluxo[['data_lancamento', 'descricao', 'status', 'valor', 'justificativa']].copy()
             df_display.columns = ['Data', 'Conta', 'Tipo', 'Valor (R$)', 'Justificativa']
-            
-            def color_status(val):
-                color = '#059669' if val == 'Entrada' else '#dc2626'
-                return f'color: {color}; font-weight: bold'
-            
-            styled_df = df_display.style.format({'Valor (R$)': "{:,.2f}"}).map(color_status, subset=['Tipo'])
-            st.dataframe(styled_df, use_container_width=True, hide_index=True)
-        else:
-            st.info("Não houve movimentações de Entrada ou Pagamento neste intervalo de datas.")
+            st.dataframe(df_display, use_container_width=True, hide_index=True)
 
     elif st.session_state.menu_opcao == "⚙️ Gestão":
         if st.button("🚨 Resetar Tudo"):
