@@ -77,7 +77,6 @@ def gerar_pdf(user_email, df_per, data_i, data_f, s_ini, s_fin, v_at, v_pas, v_p
     pdf.set_font("Arial", "B", 12)
     pdf.cell(190, 10, "3. BALANÇO PATRIMONIAL (RIGIDAMENTE PERÍODO)", ln=True)
     pdf.set_font("Arial", "", 10)
-    # Lógica Contábil: Ativo = Passivo + PL + Lucro(DRE)
     pl_final = v_pl + v_lucro
     pdf.cell(95, 8, f"ATIVOS TOTAIS (A): R$ {v_at:,.2f}", border=1)
     pdf.cell(95, 8, f"PASSIVOS TOTAIS (P): R$ {v_pas:,.2f}", border=1, ln=True)
@@ -149,12 +148,24 @@ with st.sidebar:
         idx_conta = opcoes_conta.index(reg['descricao']) if reg['descricao'] in contas_existentes else 0
         conta_sel = st.selectbox("Selecione a Conta", opcoes_conta, index=idx_conta)
         desc_input = st.text_input("Nome da Conta", value=reg['descricao']).upper().strip() if conta_sel == "+ Adicionar Nova Conta" else conta_sel
+        
         data_f = st.date_input("Data", value=reg['data_lancamento'])
-        nat = st.selectbox("Grupo", ["Ativo", "Passivo", "Patrimônio Líquido", "Receita", "Despesa", "Encargos Financeiros"], index=0)
+        
+        grupos = ["Ativo", "Passivo", "Patrimônio Líquido", "Receita", "Despesa", "Encargos Financeiros"]
+        idx_nat = grupos.index(reg['natureza']) if reg['natureza'] in grupos else 0
+        nat = st.selectbox("Grupo", grupos, index=idx_nat)
+        
         tipo = st.radio("Operação", ["Débito", "Crédito"], index=0 if reg['tipo'] == "Débito" else 1, horizontal=True)
         valor = st.number_input("Valor", min_value=0.0, value=float(reg['valor']))
-        status_pag = st.selectbox("Status", ["Pago", "Entrada", "Pendente", "Investimento", "Transferência Interna"])
+        
+        # --- CORREÇÃO DO STATUS AQUI ---
+        opcoes_status = ["Pago", "Entrada", "Pendente", "Investimento", "Transferência Interna"]
+        idx_status = opcoes_status.index(reg['status']) if reg['status'] in opcoes_status else 0
+        status_pag = st.selectbox("Status", opcoes_status, index=idx_status)
+        # -------------------------------
+
         just_input = st.text_area("Justificativa", value=reg['justificativa'])
+        
         if st.form_submit_button("Confirmar"):
             payload = {"user_id": st.session_state.user.id, "descricao": desc_input, "natureza": nat, "tipo": tipo, "valor": valor, "justificativa": just_input, "status": status_pag, "data_lancamento": str(data_f)}
             if st.session_state.edit_id: supabase.table("lancamentos").update(payload).eq("id", st.session_state.edit_id).execute()
@@ -189,7 +200,7 @@ with f1: data_ini = st.date_input("Início do Período", value=datetime.now().da
 with f2: data_fim = st.date_input("Fim do Período", value=datetime.now().date())
 df_periodo = df_base[(df_base['data_lancamento'] >= data_ini) & (df_base['data_lancamento'] <= data_fim)].copy()
 
-# --- CÁLCULOS TÉCNICOS GLOBAIS (CORRIGINDO O NAMEERROR) ---
+# --- CÁLCULOS TÉCNICOS ---
 def get_saldo(df, nat):
     if df.empty: return 0.0
     d = df[(df['natureza'] == nat) & (df['tipo'] == 'Débito')]['valor'].sum()
@@ -201,7 +212,6 @@ def get_caixa(data_limite):
     sub = df_base[df_base['data_lancamento'] <= data_limite]
     return sub[sub['status'] == "Entrada"]['valor'].sum() - sub[sub['status'] == "Pago"]['valor'].sum()
 
-# Definição global das variáveis para evitar NameError
 s_ini = get_caixa(data_ini - timedelta(days=1))
 s_fin = get_caixa(data_fim)
 t_ent = df_periodo[df_periodo['status'] == "Entrada"]['valor'].sum()
@@ -274,7 +284,6 @@ else:
         m1.metric("Saldo Inicial", f"R$ {s_ini:,.2f}")
         m2.metric("Saldo Final", f"R$ {s_fin:,.2f}")
         m3.metric("Fluxo Líquido", f"R$ {s_fin - s_ini:,.2f}")
-        # Cálculo da Liquidez usando variáveis globais
         pendentes = df_periodo[df_periodo['status']=='Pendente']['valor'].sum()
         liq = (s_ini + t_ent) / (t_sai + pendentes + 1)
         m4.metric("Índice Liquidez", f"{liq:.2f}")
