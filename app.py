@@ -158,11 +158,9 @@ with st.sidebar:
         tipo = st.radio("Operação", ["Débito", "Crédito"], index=0 if reg['tipo'] == "Débito" else 1, horizontal=True)
         valor = st.number_input("Valor", min_value=0.0, value=float(reg['valor']))
         
-        # --- CORREÇÃO DO STATUS AQUI ---
         opcoes_status = ["Pago", "Entrada", "Pendente", "Investimento", "Transferência Interna"]
         idx_status = opcoes_status.index(reg['status']) if reg['status'] in opcoes_status else 0
         status_pag = st.selectbox("Status", opcoes_status, index=idx_status)
-        # -------------------------------
 
         just_input = st.text_area("Justificativa", value=reg['justificativa'])
         
@@ -291,7 +289,11 @@ else:
         c1, c2 = st.columns(2)
         c1.markdown(f'<div class="conta-card"><div class="conta-titulo" style="background:#0369a1">ATIVOS</div><div style="padding:20px; text-align:center; font-size:1.5rem; color:#0369a1; font-weight:bold;">R$ {v_at_per:,.2f}</div></div>', unsafe_allow_html=True)
         c2.markdown(f'<div class="conta-card"><div class="conta-titulo" style="background:#be123c">PASSIVOS</div><div style="padding:20px; text-align:center; font-size:1.5rem; color:#be123c; font-weight:bold;">R$ {v_pas_per:,.2f}</div></div>', unsafe_allow_html=True)
-        st.dataframe(df_periodo[df_periodo['status'].isin(["Entrada", "Pago"])], use_container_width=True)
+        
+        # --- EXIBIÇÃO LIMPA DA TABELA NO FLUXO DE CAIXA ---
+        colunas_visiveis = ['data_lancamento', 'descricao', 'valor', 'tipo', 'status', 'justificativa']
+        df_limpo = df_periodo[df_periodo['status'].isin(["Entrada", "Pago"])][colunas_visiveis]
+        st.dataframe(df_limpo, use_container_width=True)
 
     elif st.session_state.menu_opcao == "⚙️ Gestão":
         if st.button("🚨 Resetar Tudo"):
