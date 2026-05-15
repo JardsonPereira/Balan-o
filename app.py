@@ -200,18 +200,18 @@ with f2: data_fim = st.date_input("Fim do Período", value=datetime.now().date()
 # DataFrame Base para cálculos históricos
 df_periodo = df_base[(df_base['data_lancamento'] >= data_ini) & (df_base['data_lancamento'] <= data_fim)].copy()
 
-# --- LÓGICA DE SALDO ACUMULADO E LIQUIDEZ ---
+# --- LÓGICA DE CONTINUIDADE DE SALDO (ABRIL CARREGA MARÇO) ---
 def get_caixa_acumulado(data_limite):
     if df_base.empty: return 0.0
-    # Cálculo rigoroso de todo o histórico até a data limite
+    # Crucial: usa df_base para pegar registros fora do filtro do Streamlit
     sub = df_base[df_base['data_lancamento'] <= data_limite]
     entradas = sub[sub['status'] == "Entrada"]['valor'].sum()
     saidas = sub[sub['status'] == "Pago"]['valor'].sum()
     return entradas - saidas
 
-# Saldo Inicial: Tudo o que aconteceu antes do dia de início do filtro
+# O saldo inicial de Abril será o acumulado até 31 de Março
 s_ini = get_caixa_acumulado(data_ini - timedelta(days=1))
-# Saldo Final: Tudo o que aconteceu até o dia final do filtro
+# O saldo final de Abril será o acumulado até o dia final selecionado
 s_fin = get_caixa_acumulado(data_fim)
 
 # --- CÁLCULOS TÉCNICOS ---
@@ -285,19 +285,17 @@ else:
 
     elif st.session_state.menu_opcao == "💸 Fluxo de Caixa":
         m1, m2, m3, m4 = st.columns(4)
-        m1.metric("Saldo Inicial (Anterior)", f"R$ {s_ini:,.2f}")
-        m2.metric("Saldo Final (Atual)", f"R$ {s_fin:,.2f}")
-        m3.metric("Variação do Período", f"R$ {s_fin - s_ini:,.2f}")
+        m1.metric("Saldo Inicial (Carregado)", f"R$ {s_ini:,.2f}")
+        m2.metric("Saldo Final (Acumulado)", f"R$ {s_fin:,.2f}")
+        m3.metric("Fluxo Líquido Período", f"R$ {s_fin - s_ini:,.2f}")
         
-        # --- CORREÇÃO DO ÍNDICE DE LIQUIDEZ CORRENTE ---
-        # Fórmula: (Saldo Anterior + Entradas do Período) / (Saídas do Período + Pendências)
+        # --- CORREÇÃO DO ÍNDICE DE LIQUIDEZ ---
         t_ent_per = df_periodo[df_periodo['status'] == "Entrada"]['valor'].sum()
         t_sai_per = df_periodo[df_periodo['status'] == "Pago"]['valor'].sum()
         pendentes_per = df_periodo[df_periodo['status'] == 'Pendente']['valor'].sum()
         
         disponivel = s_ini + t_ent_per
         obrigacoes = t_sai_per + pendentes_per
-        # Proteção contra divisão por zero
         liq = disponivel / obrigacoes if obrigacoes > 0 else disponivel
         m4.metric("Índice Liquidez", f"{liq:.2f}")
 
