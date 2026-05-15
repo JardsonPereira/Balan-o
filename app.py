@@ -205,19 +205,17 @@ def get_saldo(df, nat):
     c = df[(df['natureza'] == nat) & (df['tipo'] == 'Crédito')]['valor'].sum()
     return (d - c) if nat in ['Ativo', 'Despesa', 'Encargos Financeiros'] else (c - d)
 
-def get_caixa_acumulado(data_corte):
-    """Calcula o saldo real de caixa considerando TUDO antes da data informada."""
+def get_caixa(data_corte):
+    """Calcula o saldo acumulado de caixa baseado no histórico total até a data de corte."""
     if df_base.empty: return 0.0
     sub = df_base[df_base['data_lancamento'] <= data_corte]
-    entradas = sub[sub['status'] == "Entrada"]['valor'].sum()
-    saidas = sub[sub['status'] == "Pago"]['valor'].sum()
-    return entradas - saidas
+    # Lógica: Entradas (+) e Pagos (-) para determinar a liquidez disponível
+    return sub[sub['status'] == "Entrada"]['valor'].sum() - sub[sub['status'] == "Pago"]['valor'].sum()
 
-# LÓGICA DE SALDO CARREGADO:
-# O saldo inicial do período é o acumulado até o DIA ANTERIOR ao início do filtro.
-s_ini = get_caixa_acumulado(data_ini - timedelta(days=1))
-# O saldo final é o acumulado até o último dia do filtro.
-s_fin = get_caixa_acumulado(data_fim)
+# Saldo Inicial: Soma de tudo ANTES do dia de início do filtro
+s_ini = get_caixa(data_ini - timedelta(days=1))
+# Saldo Final: Soma de tudo até o dia de fim do filtro
+s_fin = get_caixa(data_fim)
 
 v_rec = df_periodo[(df_periodo['natureza'] == 'Receita') & (df_periodo['tipo'] == 'Crédito')]['valor'].sum()
 v_desp_op = df_periodo[(df_periodo['natureza'] == 'Despesa') & (df_periodo['tipo'] == 'Débito')]['valor'].sum()
@@ -285,15 +283,14 @@ else:
         m1, m2, m3, m4 = st.columns(4)
         m1.metric("Saldo Inicial (Carregado)", f"R$ {s_ini:,.2f}")
         m2.metric("Saldo Final", f"R$ {s_fin:,.2f}")
-        m3.metric("Fluxo Líquido Período", f"R$ {s_fin - s_ini:,.2f}")
+        m3.metric("Fluxo Líquido", f"R$ {s_fin - s_ini:,.2f}")
         
-        t_ent_per = df_periodo[df_periodo['status'] == "Entrada"]['valor'].sum()
-        t_sai_per = df_periodo[df_periodo['status'] == "Pago"]['valor'].sum()
+        t_ent = df_periodo[df_periodo['status'] == "Entrada"]['valor'].sum()
+        t_sai = df_periodo[df_periodo['status'] == "Pago"]['valor'].sum()
         pendentes = df_periodo[df_periodo['status']=='Pendente']['valor'].sum()
-        # Índice de liquidez considerando o que tem em caixa + o que entrou / saídas + pendências
-        liq = (s_ini + t_ent_per) / (t_sai_per + pendentes + 1)
+        liq = (s_ini + t_ent) / (t_sai + pendentes + 1)
         m4.metric("Índice Liquidez", f"{liq:.2f}")
-        
+
         st.markdown("### Análise Patrimonial")
         c1, c2 = st.columns(2)
         c1.markdown(f'<div class="conta-card"><div class="conta-titulo" style="background:#0369a1">ATIVOS</div><div style="padding:20px; text-align:center; font-size:1.5rem; color:#0369a1; font-weight:bold;">R$ {v_at_per:,.2f}</div></div>', unsafe_allow_html=True)
