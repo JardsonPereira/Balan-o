@@ -24,8 +24,8 @@ except Exception:
 
 # --- FUNÇÕES ---
 def carregar_dados(u_id):
-    """Busca dados em tempo real para garantir atualização automática nas abas."""
     try:
+        # Busca direta sem cache para atualização instantânea
         res = supabase.table("lancamentos").select("*").eq("user_id", u_id).execute()
         temp_df = pd.DataFrame(res.data)
         if not temp_df.empty:
@@ -34,54 +34,6 @@ def carregar_dados(u_id):
             if 'justificativa' not in temp_df.columns: temp_df['justificativa'] = ''
         return temp_df
     except Exception: return pd.DataFrame()
-
-def gerar_pdf(user_email, df_per, data_i, data_f, s_ini, s_fin, v_at, v_pas, v_pl, v_rec, v_desp, v_ebitda, v_finan, v_lucro):
-    pdf = FPDF()
-    pdf.add_page()
-    pdf.set_font("Arial", "B", 16)
-    pdf.cell(190, 10, "RELATÓRIO CONTÁBIL CONSOLIDADO", ln=True, align="C")
-    pdf.set_font("Arial", "", 10)
-    pdf.cell(190, 7, f"Usuário: {user_email}", ln=True, align="C")
-    pdf.cell(190, 7, f"Período: {data_i} até {data_f} | Gerado em: {datetime.now().strftime('%d/%m/%Y %H:%M')}", ln=True, align="C")
-    pdf.ln(10)
-
-    # 1. FLUXO DE CAIXA
-    pdf.set_font("Arial", "B", 12)
-    pdf.cell(190, 10, "1. FLUXO DE CAIXA E VARIAÇÃO", ln=True)
-    pdf.set_font("Arial", "", 10)
-    pdf.cell(63, 8, f"Saldo Inicial: R$ {s_ini:,.2f}", border=1)
-    pdf.cell(63, 8, f"Saldo Final: R$ {s_fin:,.2f}", border=1)
-    pdf.cell(64, 8, f"Variação Líquida: R$ {s_fin - s_ini:,.2f}", border=1, ln=True)
-    pdf.ln(5)
-
-    # 2. DRE
-    pdf.set_font("Arial", "B", 12)
-    pdf.cell(190, 10, "2. DEMONSTRAÇÃO DO RESULTADO (DRE)", ln=True)
-    pdf.set_font("Arial", "", 10)
-    pdf.cell(140, 8, "(+) Receitas Brutas", border=1)
-    pdf.cell(50, 8, f"R$ {v_rec:,.2f}", border=1, ln=True, align="R")
-    pdf.cell(140, 8, "(-) Despesas Operacionais", border=1)
-    pdf.cell(50, 8, f"R$ ({v_desp:,.2f})", border=1, ln=True, align="R")
-    pdf.set_font("Arial", "B", 10)
-    pdf.cell(140, 8, "(=) EBITDA", border=1)
-    pdf.cell(50, 8, f"R$ {v_ebitda:,.2f}", border=1, ln=True, align="R")
-    pdf.cell(140, 8, "(-) Encargos Financeiros / Impostos", border=1)
-    pdf.cell(50, 8, f"R$ ({v_finan:,.2f})", border=1, ln=True, align="R")
-    pdf.set_font("Arial", "B", 10)
-    pdf.cell(140, 8, "(=) LUCRO LÍQUIDO DO PERÍODO", border=1)
-    pdf.cell(50, 8, f"R$ {v_lucro:,.2f}", border=1, ln=True, align="R")
-    pdf.ln(5)
-
-    # 3. BALANÇO EQUILIBRADO
-    pdf.set_font("Arial", "B", 12)
-    pdf.cell(190, 10, "3. BALANÇO PATRIMONIAL", ln=True)
-    pdf.set_font("Arial", "", 10)
-    pl_final = v_pl + v_lucro
-    pdf.cell(95, 8, f"ATIVOS TOTAIS (A): R$ {v_at:,.2f}", border=1)
-    pdf.cell(95, 8, f"PASSIVOS TOTAIS (P): R$ {v_pas:,.2f}", border=1, ln=True)
-    pdf.cell(190, 8, f"EQUAÇÃO: Ativo ({v_at:,.2f}) = Passivo + PL ({v_pas + pl_final:,.2f})", border=1, ln=True, align="C")
-
-    return pdf.output()
 
 # --- AUTENTICAÇÃO ---
 if st.session_state.user is None:
@@ -100,10 +52,7 @@ if st.session_state.user is None:
         st.sidebar.success("Conta criada!")
     st.stop()
 
-# CARREGAMENTO DE DADOS (Executa em todo rerun)
-df_base = carregar_dados(st.session_state.user.id)
-
-# --- FORMULÁRIO LATERAL ---
+# --- LÓGICA DE FORMULÁRIO (PROCESSA ANTES DE CARREGAR O DF_BASE) ---
 with st.sidebar:
     st.write(f"👤 **{st.session_state.user.email}**")
     if st.button("Sair"):
@@ -111,9 +60,12 @@ with st.sidebar:
         st.rerun()
     st.divider()
     
-    if st.session_state.edit_id and not df_base.empty:
+    # Carregamento temporário apenas para preencher o selectbox de contas
+    df_temp = carregar_dados(st.session_state.user.id)
+    
+    if st.session_state.edit_id and not df_temp.empty:
         st.header("📝 Editar Lançamento")
-        reg = df_base[df_base['id'] == st.session_state.edit_id].iloc[0]
+        reg = df_temp[df_temp['id'] == st.session_state.edit_id].iloc[0]
         if st.button("Cancelar Edição"):
             st.session_state.edit_id = None
             st.rerun()
@@ -122,18 +74,16 @@ with st.sidebar:
         reg = {"descricao": "", "natureza": "Ativo", "tipo": "Débito", "valor": 0.0, "justificativa": "", "status": "Pago", "data_lancamento": datetime.now().date()}
 
     with st.form(key=f"contabil_form_{st.session_state.form_count}"):
-        contas_existentes = sorted(df_base['descricao'].unique().tolist()) if not df_base.empty else []
+        contas_existentes = sorted(df_temp['descricao'].unique().tolist()) if not df_temp.empty else []
         opcoes_conta = ["+ Adicionar Nova Conta"] + contas_existentes
         idx_conta = opcoes_conta.index(reg['descricao']) if reg['descricao'] in contas_existentes else 0
         conta_sel = st.selectbox("Selecione a Conta", opcoes_conta, index=idx_conta)
         desc_input = st.text_input("Nome da Conta", value=reg['descricao']).upper().strip() if conta_sel == "+ Adicionar Nova Conta" else conta_sel
-        
         data_f = st.date_input("Data", value=reg['data_lancamento'])
         grupos = ["Ativo", "Passivo", "Patrimônio Líquido", "Receita", "Despesa", "Encargos Financeiros"]
         nat = st.selectbox("Grupo", grupos, index=grupos.index(reg['natureza']) if reg['natureza'] in grupos else 0)
         tipo = st.radio("Operação", ["Débito", "Crédito"], index=0 if reg['tipo'] == "Débito" else 1, horizontal=True)
         valor = st.number_input("Valor", min_value=0.0, value=float(reg['valor']))
-        
         status_opcoes = ["Pago", "Entrada", "Pendente", "Investimento", "Transferência Interna"]
         status_pag = st.selectbox("Status", status_opcoes, index=status_opcoes.index(reg['status']) if reg['status'] in status_opcoes else 0)
         just_input = st.text_area("Justificativa", value=reg['justificativa'])
@@ -144,9 +94,13 @@ with st.sidebar:
             else: supabase.table("lancamentos").insert(payload).execute()
             st.session_state.edit_id = None
             st.session_state.form_count += 1
+            st.cache_data.clear() # Limpa cache global
             st.rerun()
 
-# --- CSS ---
+# --- CARREGAMENTO OFICIAL (APÓS POSSÍVEL ALTERAÇÃO) ---
+df_base = carregar_dados(st.session_state.user.id)
+
+# --- CSS (LAYOUT ORIGINAL) ---
 st.markdown("""<style>
     .conta-card { background: white; border-radius: 12px; box-shadow: 0 4px 12px rgba(0,0,0,0.05); margin-bottom: 20px; border: 1px solid #e2e8f0; }
     .conta-titulo { background: #1e293b; color: white; padding: 10px; text-align: center; font-weight: 700; border-radius: 12px 12px 0 0; }
@@ -162,7 +116,8 @@ st.markdown("""<style>
 col_nav = st.columns(5)
 opcoes_menu = ["📊 Razonetes", "🧾 Balancete", "📈 DRE", "💸 Fluxo de Caixa", "⚙️ Gestão"]
 for i, op in enumerate(opcoes_menu):
-    if col_nav[i].button(op, use_container_width=True): st.session_state.menu_opcao = op
+    if col_nav[i].button(op, use_container_width=True): 
+        st.session_state.menu_opcao = op
 
 st.divider()
 
@@ -172,7 +127,7 @@ with f1: data_ini = st.date_input("Início do Período", value=datetime.now().da
 with f2: data_fim = st.date_input("Fim do Período", value=datetime.now().date())
 df_periodo = df_base[(df_base['data_lancamento'] >= data_ini) & (df_base['data_lancamento'] <= data_fim)].copy()
 
-# --- LÓGICA DE CONTINUIDADE (CARRY-OVER) ---
+# --- CÁLCULO DE CONTINUIDADE (SALDO CARREGADO) ---
 def get_caixa_acumulado(data_limite):
     if df_base.empty: return 0.0
     sub = df_base[df_base['data_lancamento'] <= data_limite]
@@ -194,13 +149,7 @@ v_finan = df_periodo[(df_periodo['natureza'] == 'Encargos Financeiros') & (df_pe
 v_lucro = v_rec - v_desp_op - v_finan
 v_at_per, v_pas_per, v_pl_per = get_saldo(df_periodo, 'Ativo'), get_saldo(df_periodo, 'Passivo'), get_saldo(df_periodo, 'Patrimônio Líquido')
 
-# Botão Impressão
-col_imp, _ = st.columns([1, 4])
-with col_imp:
-    pdf_bytes = gerar_pdf(st.session_state.user.email, df_periodo, data_ini, data_fim, s_ini, s_fin, v_at_per, v_pas_per, v_pl_per, v_rec, v_desp_op, v_rec - v_desp_op, v_finan, v_lucro)
-    st.download_button("🖨️ Baixar PDF", data=bytes(pdf_bytes), file_name=f"Relatorio_{data_ini}.pdf", mime="application/pdf")
-
-# --- CONTEÚDO DAS ABAS ---
+# --- CONTEÚDO ---
 if df_periodo.empty and st.session_state.menu_opcao != "⚙️ Gestão":
     st.info("Sem dados no período.")
 else:
@@ -218,11 +167,9 @@ else:
                         st.markdown(f'<div class="conta-card"><div class="conta-titulo">{conta}</div>', unsafe_allow_html=True)
                         c1, c2 = st.columns(2)
                         with c1: 
-                            for _, r in df_c[df_c['tipo']=='Débito'].iterrows(): 
-                                st.markdown(f'<div class="valor-deb">D: {r["valor"]:,.2f}</div><div class="just-box">{r["justificativa"]}</div>', unsafe_allow_html=True)
+                            for _, r in df_c[df_c['tipo']=='Débito'].iterrows(): st.markdown(f'<div class="valor-deb">D: {r["valor"]:,.2f}</div><div class="just-box">{r["justificativa"]}</div>', unsafe_allow_html=True)
                         with c2: 
-                            for _, r in df_c[df_c['tipo']=='Crédito'].iterrows(): 
-                                st.markdown(f'<div class="valor-cre">C: {r["valor"]:,.2f}</div><div class="just-box">{r["justificativa"]}</div>', unsafe_allow_html=True)
+                            for _, r in df_c[df_c['tipo']=='Crédito'].iterrows(): st.markdown(f'<div class="valor-cre">C: {r["valor"]:,.2f}</div><div class="just-box">{r["justificativa"]}</div>', unsafe_allow_html=True)
                         st.markdown(f'<div class="conta-rodape">Saldo: R$ {saldo:,.2f}</div></div>', unsafe_allow_html=True)
 
     elif st.session_state.menu_opcao == "🧾 Balancete":
@@ -239,26 +186,15 @@ else:
         c3.metric("Total Devedor (SD)", f"R$ {df_bal['SD'].sum():,.2f}")
         c4.metric("Total Credor (SC)", f"R$ {df_bal['SC'].sum():,.2f}")
 
-    elif st.session_state.menu_opcao == "📈 DRE":
-        col_d, _ = st.columns([2, 1])
-        with col_d:
-            st.markdown(f'<div class="dre-row"><span>(+) Receitas</span><span>R$ {v_rec:,.2f}</span></div>', unsafe_allow_html=True)
-            st.markdown(f'<div class="dre-row"><span>(-) Despesas Operacionais</span><span>(R$ {v_desp_op:,.2f})</span></div>', unsafe_allow_html=True)
-            st.markdown(f'<div class="dre-total">(=) EBITDA: R$ {v_rec - v_desp_op:,.2f}</div>', unsafe_allow_html=True)
-            st.markdown(f'<div class="dre-row"><span>(-) Encargos Financeiros</span><span>(R$ {v_finan:,.2f})</span></div>', unsafe_allow_html=True)
-            cor = "#059669" if v_lucro >= 0 else "#dc2626"
-            st.markdown(f'<div class="dre-total" style="color:{cor}">(=) LUCRO LÍQUIDO: R$ {v_lucro:,.2f}</div>', unsafe_allow_html=True)
-
     elif st.session_state.menu_opcao == "💸 Fluxo de Caixa":
         m1, m2, m3, m4 = st.columns(4)
         m1.metric("Saldo Inicial (Anterior)", f"R$ {s_ini:,.2f}")
         m2.metric("Saldo Final", f"R$ {s_fin:,.2f}")
         m3.metric("Fluxo Líquido", f"R$ {s_fin - s_ini:,.2f}")
         
-        # Índice de Liquidez Corrigido
+        # Índice Liquidez Corrigido
         t_ent, t_sai = df_periodo[df_periodo['status'] == "Entrada"]['valor'].sum(), df_periodo[df_periodo['status'] == "Pago"]['valor'].sum()
-        pendentes = df_periodo[df_periodo['status'] == 'Pendente']['valor'].sum()
-        obrigacoes = t_sai + pendentes
+        obrigacoes = t_sai + df_periodo[df_periodo['status'] == 'Pendente']['valor'].sum()
         liq = (s_ini + t_ent) / obrigacoes if obrigacoes > 0 else (s_ini + t_ent)
         m4.metric("Índice Liquidez", f"{liq:.2f}")
 
