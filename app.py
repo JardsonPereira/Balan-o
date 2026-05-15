@@ -7,7 +7,12 @@ import io
 
 # --- CONFIGURAÇÃO ---
 st.set_page_config(page_title="ContabilApp - Sistema Integrado", layout="wide")
-st.cache_data.clear()
+
+# Inicialização de estados
+if 'user' not in st.session_state: st.session_state.user = None
+if 'edit_id' not in st.session_state: st.session_state.edit_id = None
+if 'form_count' not in st.session_state: st.session_state.form_count = 0
+if 'menu_opcao' not in st.session_state: st.session_state.menu_opcao = "📊 Razonetes"
 
 try:
     url: str = st.secrets["SUPABASE_URL"]
@@ -17,15 +22,10 @@ except Exception:
     st.error("Erro de conexão. Verifique as Secrets no Streamlit Cloud.")
     st.stop()
 
-# --- ESTADOS DO SISTEMA ---
-if 'user' not in st.session_state: st.session_state.user = None
-if 'edit_id' not in st.session_state: st.session_state.edit_id = None
-if 'form_count' not in st.session_state: st.session_state.form_count = 0
-if 'menu_opcao' not in st.session_state: st.session_state.menu_opcao = "📊 Razonetes"
-
 # --- FUNÇÕES ---
 def carregar_dados(u_id):
     try:
+        # Forçamos a limpeza do cache para garantir dados novos após o lançamento
         res = supabase.table("lancamentos").select("*").eq("user_id", u_id).execute()
         temp_df = pd.DataFrame(res.data)
         if not temp_df.empty:
@@ -44,7 +44,7 @@ def gerar_pdf(user_email, df_per, data_i, data_f, s_ini, s_fin, v_at, v_pas, v_p
     pdf.cell(190, 7, f"Usuário: {user_email}", ln=True, align="C")
     pdf.cell(190, 7, f"Período: {data_i} até {data_f} | Gerado em: {datetime.now().strftime('%d/%m/%Y %H:%M')}", ln=True, align="C")
     pdf.ln(10)
-
+    
     # 1. FLUXO DE CAIXA
     pdf.set_font("Arial", "B", 12)
     pdf.cell(190, 10, "1. FLUXO DE CAIXA E VARIAÇÃO", ln=True)
@@ -122,6 +122,7 @@ if st.session_state.user is None:
         st.sidebar.success("Conta criada!")
     st.stop()
 
+# Carregamento imediato
 df_base = carregar_dados(st.session_state.user.id)
 
 # --- FORMULÁRIO LATERAL ---
@@ -188,7 +189,9 @@ st.markdown("""<style>
 col_nav = st.columns(5)
 opcoes_menu = ["📊 Razonetes", "🧾 Balancete", "📈 DRE", "💸 Fluxo de Caixa", "⚙️ Gestão"]
 for i, op in enumerate(opcoes_menu):
-    if col_nav[i].button(op, use_container_width=True): st.session_state.menu_opcao = op
+    if col_nav[i].button(op, use_container_width=True): 
+        st.session_state.menu_opcao = op
+        st.rerun() # Garante atualização ao trocar de aba
 
 st.divider()
 
@@ -197,21 +200,18 @@ f1, f2 = st.columns(2)
 with f1: data_ini = st.date_input("Início do Período", value=datetime.now().date().replace(day=1))
 with f2: data_fim = st.date_input("Fim do Período", value=datetime.now().date())
 
-# DataFrame Base para cálculos históricos
+# Dataset filtrado para o período
 df_periodo = df_base[(df_base['data_lancamento'] >= data_ini) & (df_base['data_lancamento'] <= data_fim)].copy()
 
-# --- LÓGICA DE CONTINUIDADE DE SALDO (ABRIL CARREGA MARÇO) ---
+# --- LÓGICA DE SALDO ACUMULADO ---
 def get_caixa_acumulado(data_limite):
     if df_base.empty: return 0.0
-    # Crucial: usa df_base para pegar registros fora do filtro do Streamlit
     sub = df_base[df_base['data_lancamento'] <= data_limite]
     entradas = sub[sub['status'] == "Entrada"]['valor'].sum()
     saidas = sub[sub['status'] == "Pago"]['valor'].sum()
     return entradas - saidas
 
-# O saldo inicial de Abril será o acumulado até 31 de Março
 s_ini = get_caixa_acumulado(data_ini - timedelta(days=1))
-# O saldo final de Abril será o acumulado até o dia final selecionado
 s_fin = get_caixa_acumulado(data_fim)
 
 # --- CÁLCULOS TÉCNICOS ---
@@ -286,17 +286,15 @@ else:
     elif st.session_state.menu_opcao == "💸 Fluxo de Caixa":
         m1, m2, m3, m4 = st.columns(4)
         m1.metric("Saldo Inicial (Carregado)", f"R$ {s_ini:,.2f}")
-        m2.metric("Saldo Final (Acumulado)", f"R$ {s_fin:,.2f}")
+        m2.metric("Saldo Final", f"R$ {s_fin:,.2f}")
         m3.metric("Fluxo Líquido Período", f"R$ {s_fin - s_ini:,.2f}")
         
-        # --- CORREÇÃO DO ÍNDICE DE LIQUIDEZ ---
         t_ent_per = df_periodo[df_periodo['status'] == "Entrada"]['valor'].sum()
         t_sai_per = df_periodo[df_periodo['status'] == "Pago"]['valor'].sum()
         pendentes_per = df_periodo[df_periodo['status'] == 'Pendente']['valor'].sum()
         
-        disponivel = s_ini + t_ent_per
         obrigacoes = t_sai_per + pendentes_per
-        liq = disponivel / obrigacoes if obrigacoes > 0 else disponivel
+        liq = (s_ini + t_ent_per) / obrigacoes if obrigacoes > 0 else (s_ini + t_ent_per)
         m4.metric("Índice Liquidez", f"{liq:.2f}")
 
         st.markdown("### Análise Patrimonial")
