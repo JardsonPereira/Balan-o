@@ -8,9 +8,11 @@ import io
 # --- CONFIGURAÇÃO ---
 st.set_page_config(page_title="ContabilApp - Sistema Integrado", layout="wide")
 
-# Força atualização dos dados ao carregar para evitar dados "fantasmas"
-if 'user' in st.session_state:
-    st.cache_data.clear()
+# --- ESTADOS DO SISTEMA ---
+if 'user' not in st.session_state: st.session_state.user = None
+if 'edit_id' not in st.session_state: st.session_state.edit_id = None
+if 'form_count' not in st.session_state: st.session_state.form_count = 0
+if 'menu_opcao' not in st.session_state: st.session_state.menu_opcao = "📊 Razonetes"
 
 try:
     url: str = st.secrets["SUPABASE_URL"]
@@ -20,14 +22,9 @@ except Exception:
     st.error("Erro de conexão. Verifique as Secrets no Streamlit Cloud.")
     st.stop()
 
-# --- ESTADOS DO SISTEMA ---
-if 'user' not in st.session_state: st.session_state.user = None
-if 'edit_id' not in st.session_state: st.session_state.edit_id = None
-if 'form_count' not in st.session_state: st.session_state.form_count = 0
-if 'menu_opcao' not in st.session_state: st.session_state.menu_opcao = "📊 Razonetes"
-
 # --- FUNÇÕES ---
 def carregar_dados(u_id):
+    """Busca dados em tempo real para garantir atualização automática nas abas."""
     try:
         res = supabase.table("lancamentos").select("*").eq("user_id", u_id).execute()
         temp_df = pd.DataFrame(res.data)
@@ -68,7 +65,6 @@ def gerar_pdf(user_email, df_per, data_i, data_f, s_ini, s_fin, v_at, v_pas, v_p
     pdf.set_font("Arial", "B", 10)
     pdf.cell(140, 8, "(=) EBITDA", border=1)
     pdf.cell(50, 8, f"R$ {v_ebitda:,.2f}", border=1, ln=True, align="R")
-    pdf.set_font("Arial", "", 10)
     pdf.cell(140, 8, "(-) Encargos Financeiros / Impostos", border=1)
     pdf.cell(50, 8, f"R$ ({v_finan:,.2f})", border=1, ln=True, align="R")
     pdf.set_font("Arial", "B", 10)
@@ -76,16 +72,14 @@ def gerar_pdf(user_email, df_per, data_i, data_f, s_ini, s_fin, v_at, v_pas, v_p
     pdf.cell(50, 8, f"R$ {v_lucro:,.2f}", border=1, ln=True, align="R")
     pdf.ln(5)
 
-    # 3. BALANÇO
+    # 3. BALANÇO EQUILIBRADO
     pdf.set_font("Arial", "B", 12)
     pdf.cell(190, 10, "3. BALANÇO PATRIMONIAL", ln=True)
     pdf.set_font("Arial", "", 10)
     pl_final = v_pl + v_lucro
     pdf.cell(95, 8, f"ATIVOS TOTAIS (A): R$ {v_at:,.2f}", border=1)
     pdf.cell(95, 8, f"PASSIVOS TOTAIS (P): R$ {v_pas:,.2f}", border=1, ln=True)
-    pdf.cell(190, 8, f"PATRIMÔNIO LÍQUIDO: R$ {pl_final:,.2f}", border=1, ln=True, align="C")
-    pdf.set_font("Arial", "B", 10)
-    pdf.cell(190, 8, f"Equilíbrio: A ({v_at:,.2f}) = P+PL ({v_pas + pl_final:,.2f})", border=1, ln=True, align="C")
+    pdf.cell(190, 8, f"EQUAÇÃO: Ativo ({v_at:,.2f}) = Passivo + PL ({v_pas + pl_final:,.2f})", border=1, ln=True, align="C")
 
     return pdf.output()
 
@@ -106,6 +100,7 @@ if st.session_state.user is None:
         st.sidebar.success("Conta criada!")
     st.stop()
 
+# CARREGAMENTO DE DADOS (Executa em todo rerun)
 df_base = carregar_dados(st.session_state.user.id)
 
 # --- FORMULÁRIO LATERAL ---
@@ -132,17 +127,15 @@ with st.sidebar:
         idx_conta = opcoes_conta.index(reg['descricao']) if reg['descricao'] in contas_existentes else 0
         conta_sel = st.selectbox("Selecione a Conta", opcoes_conta, index=idx_conta)
         desc_input = st.text_input("Nome da Conta", value=reg['descricao']).upper().strip() if conta_sel == "+ Adicionar Nova Conta" else conta_sel
-        data_f = st.date_input("Data", value=reg['data_lancamento'])
         
+        data_f = st.date_input("Data", value=reg['data_lancamento'])
         grupos = ["Ativo", "Passivo", "Patrimônio Líquido", "Receita", "Despesa", "Encargos Financeiros"]
-        idx_nat = grupos.index(reg['natureza']) if reg['natureza'] in grupos else 0
-        nat = st.selectbox("Grupo", grupos, index=idx_nat)
+        nat = st.selectbox("Grupo", grupos, index=grupos.index(reg['natureza']) if reg['natureza'] in grupos else 0)
         tipo = st.radio("Operação", ["Débito", "Crédito"], index=0 if reg['tipo'] == "Débito" else 1, horizontal=True)
         valor = st.number_input("Valor", min_value=0.0, value=float(reg['valor']))
         
-        opcoes_status = ["Pago", "Entrada", "Pendente", "Investimento", "Transferência Interna"]
-        idx_status = opcoes_status.index(reg['status']) if reg['status'] in opcoes_status else 0
-        status_pag = st.selectbox("Status", opcoes_status, index=idx_status)
+        status_opcoes = ["Pago", "Entrada", "Pendente", "Investimento", "Transferência Interna"]
+        status_pag = st.selectbox("Status", status_opcoes, index=status_opcoes.index(reg['status']) if reg['status'] in status_opcoes else 0)
         just_input = st.text_area("Justificativa", value=reg['justificativa'])
         
         if st.form_submit_button("Confirmar"):
@@ -153,7 +146,7 @@ with st.sidebar:
             st.session_state.form_count += 1
             st.rerun()
 
-# --- CSS (ESTRUTURA ORIGINAL DE CARDS) ---
+# --- CSS ---
 st.markdown("""<style>
     .conta-card { background: white; border-radius: 12px; box-shadow: 0 4px 12px rgba(0,0,0,0.05); margin-bottom: 20px; border: 1px solid #e2e8f0; }
     .conta-titulo { background: #1e293b; color: white; padding: 10px; text-align: center; font-weight: 700; border-radius: 12px 12px 0 0; }
@@ -177,17 +170,13 @@ st.divider()
 f1, f2 = st.columns(2)
 with f1: data_ini = st.date_input("Início do Período", value=datetime.now().date().replace(day=1))
 with f2: data_fim = st.date_input("Fim do Período", value=datetime.now().date())
-
-# DataFrame Filtrado para exibição
 df_periodo = df_base[(df_base['data_lancamento'] >= data_ini) & (df_base['data_lancamento'] <= data_fim)].copy()
 
-# --- LÓGICA DE CONTINUIDADE (SALDO CARREGADO) ---
+# --- LÓGICA DE CONTINUIDADE (CARRY-OVER) ---
 def get_caixa_acumulado(data_limite):
     if df_base.empty: return 0.0
     sub = df_base[df_base['data_lancamento'] <= data_limite]
-    entradas = sub[sub['status'] == "Entrada"]['valor'].sum()
-    saidas = sub[sub['status'] == "Pago"]['valor'].sum()
-    return entradas - saidas
+    return sub[sub['status'] == "Entrada"]['valor'].sum() - sub[sub['status'] == "Pago"]['valor'].sum()
 
 s_ini = get_caixa_acumulado(data_ini - timedelta(days=1))
 s_fin = get_caixa_acumulado(data_fim)
@@ -203,9 +192,7 @@ v_rec = df_periodo[(df_periodo['natureza'] == 'Receita') & (df_periodo['tipo'] =
 v_desp_op = df_periodo[(df_periodo['natureza'] == 'Despesa') & (df_periodo['tipo'] == 'Débito')]['valor'].sum()
 v_finan = df_periodo[(df_periodo['natureza'] == 'Encargos Financeiros') & (df_periodo['tipo'] == 'Débito')]['valor'].sum()
 v_lucro = v_rec - v_desp_op - v_finan
-v_at_per = get_saldo(df_periodo, 'Ativo')
-v_pas_per = get_saldo(df_periodo, 'Passivo')
-v_pl_per = get_saldo(df_periodo, 'Patrimônio Líquido')
+v_at_per, v_pas_per, v_pl_per = get_saldo(df_periodo, 'Ativo'), get_saldo(df_periodo, 'Passivo'), get_saldo(df_periodo, 'Patrimônio Líquido')
 
 # Botão Impressão
 col_imp, _ = st.columns([1, 4])
@@ -213,7 +200,7 @@ with col_imp:
     pdf_bytes = gerar_pdf(st.session_state.user.email, df_periodo, data_ini, data_fim, s_ini, s_fin, v_at_per, v_pas_per, v_pl_per, v_rec, v_desp_op, v_rec - v_desp_op, v_finan, v_lucro)
     st.download_button("🖨️ Baixar PDF", data=bytes(pdf_bytes), file_name=f"Relatorio_{data_ini}.pdf", mime="application/pdf")
 
-# --- CONTEÚDO ---
+# --- CONTEÚDO DAS ABAS ---
 if df_periodo.empty and st.session_state.menu_opcao != "⚙️ Gestão":
     st.info("Sem dados no período.")
 else:
@@ -264,25 +251,20 @@ else:
 
     elif st.session_state.menu_opcao == "💸 Fluxo de Caixa":
         m1, m2, m3, m4 = st.columns(4)
-        m1.metric("Saldo Inicial (Carregado)", f"R$ {s_ini:,.2f}")
+        m1.metric("Saldo Inicial (Anterior)", f"R$ {s_ini:,.2f}")
         m2.metric("Saldo Final", f"R$ {s_fin:,.2f}")
         m3.metric("Fluxo Líquido", f"R$ {s_fin - s_ini:,.2f}")
         
-        # Correção do Índice de Liquidez
-        entradas_p = df_periodo[df_periodo['status'] == "Entrada"]['valor'].sum()
-        saidas_p = df_periodo[df_periodo['status'] == "Pago"]['valor'].sum()
-        pendentes_p = df_periodo[df_periodo['status'] == 'Pendente']['valor'].sum()
-        obrigacoes = saidas_p + pendentes_p
-        liq = (s_ini + entradas_p) / obrigacoes if obrigacoes > 0 else (s_ini + entradas_p)
+        # Índice de Liquidez Corrigido
+        t_ent, t_sai = df_periodo[df_periodo['status'] == "Entrada"]['valor'].sum(), df_periodo[df_periodo['status'] == "Pago"]['valor'].sum()
+        pendentes = df_periodo[df_periodo['status'] == 'Pendente']['valor'].sum()
+        obrigacoes = t_sai + pendentes
+        liq = (s_ini + t_ent) / obrigacoes if obrigacoes > 0 else (s_ini + t_ent)
         m4.metric("Índice Liquidez", f"{liq:.2f}")
 
-        st.markdown("### Lançamentos no Período")
         st.dataframe(df_periodo[['data_lancamento', 'descricao', 'valor', 'tipo', 'status', 'justificativa']], use_container_width=True)
 
     elif st.session_state.menu_opcao == "⚙️ Gestão":
-        if st.button("🚨 Resetar Tudo"):
-            supabase.table("lancamentos").delete().eq("user_id", st.session_state.user.id).execute()
-            st.rerun()
         for _, row in df_base.sort_values('data_lancamento', ascending=False).iterrows():
             with st.expander(f"{row['data_lancamento']} | {row['descricao']} | R$ {row['valor']}"):
                 c1, c2 = st.columns(2)
