@@ -197,23 +197,22 @@ f1, f2 = st.columns(2)
 with f1: data_ini = st.date_input("Início do Período", value=datetime.now().date().replace(day=1))
 with f2: data_fim = st.date_input("Fim do Período", value=datetime.now().date())
 
-# Dataset filtrado para exibição nas tabelas
+# DataFrame Base para cálculos históricos
 df_periodo = df_base[(df_base['data_lancamento'] >= data_ini) & (df_base['data_lancamento'] <= data_fim)].copy()
 
-# --- CÁLCULOS DE SALDO CARREGADO (LOGICA CRÍTICA) ---
-def calcular_caixa_ate(data_corte):
-    """Calcula o saldo acumulado de caixa desde o início dos tempos até a data informada."""
+# --- LÓGICA DE SALDO ACUMULADO E LIQUIDEZ ---
+def get_caixa_acumulado(data_limite):
     if df_base.empty: return 0.0
-    # Considera lançamentos com data menor ou igual ao corte
-    historico = df_base[df_base['data_lancamento'] <= data_corte]
-    entradas = historico[historico['status'] == "Entrada"]['valor'].sum()
-    saidas = historico[historico['status'] == "Pago"]['valor'].sum()
+    # Cálculo rigoroso de todo o histórico até a data limite
+    sub = df_base[df_base['data_lancamento'] <= data_limite]
+    entradas = sub[sub['status'] == "Entrada"]['valor'].sum()
+    saidas = sub[sub['status'] == "Pago"]['valor'].sum()
     return entradas - saidas
 
-# Saldo Inicial do período é o que sobrou no dia anterior ao início do filtro
-s_ini = calcular_caixa_ate(data_ini - timedelta(days=1))
-# Saldo Final do período é o acumulado total até o último dia do filtro
-s_fin = calcular_caixa_ate(data_fim)
+# Saldo Inicial: Tudo o que aconteceu antes do dia de início do filtro
+s_ini = get_caixa_acumulado(data_ini - timedelta(days=1))
+# Saldo Final: Tudo o que aconteceu até o dia final do filtro
+s_fin = get_caixa_acumulado(data_fim)
 
 # --- CÁLCULOS TÉCNICOS ---
 def get_saldo(df, nat):
@@ -286,14 +285,20 @@ else:
 
     elif st.session_state.menu_opcao == "💸 Fluxo de Caixa":
         m1, m2, m3, m4 = st.columns(4)
-        m1.metric("Saldo Inicial (Carregado)", f"R$ {s_ini:,.2f}")
-        m2.metric("Saldo Final", f"R$ {s_fin:,.2f}")
-        m3.metric("Fluxo Líquido Período", f"R$ {s_fin - s_ini:,.2f}")
+        m1.metric("Saldo Inicial (Anterior)", f"R$ {s_ini:,.2f}")
+        m2.metric("Saldo Final (Atual)", f"R$ {s_fin:,.2f}")
+        m3.metric("Variação do Período", f"R$ {s_fin - s_ini:,.2f}")
         
-        t_ent = df_periodo[df_periodo['status'] == "Entrada"]['valor'].sum()
-        t_sai = df_periodo[df_periodo['status'] == "Pago"]['valor'].sum()
-        pendentes = df_periodo[df_periodo['status']=='Pendente']['valor'].sum()
-        liq = (s_ini + t_ent) / (t_sai + pendentes + 1)
+        # --- CORREÇÃO DO ÍNDICE DE LIQUIDEZ CORRENTE ---
+        # Fórmula: (Saldo Anterior + Entradas do Período) / (Saídas do Período + Pendências)
+        t_ent_per = df_periodo[df_periodo['status'] == "Entrada"]['valor'].sum()
+        t_sai_per = df_periodo[df_periodo['status'] == "Pago"]['valor'].sum()
+        pendentes_per = df_periodo[df_periodo['status'] == 'Pendente']['valor'].sum()
+        
+        disponivel = s_ini + t_ent_per
+        obrigacoes = t_sai_per + pendentes_per
+        # Proteção contra divisão por zero
+        liq = disponivel / obrigacoes if obrigacoes > 0 else disponivel
         m4.metric("Índice Liquidez", f"{liq:.2f}")
 
         st.markdown("### Análise Patrimonial")
@@ -302,7 +307,7 @@ else:
         c2.markdown(f'<div class="conta-card"><div class="conta-titulo" style="background:#be123c">PASSIVOS</div><div style="padding:20px; text-align:center; font-size:1.5rem; color:#be123c; font-weight:bold;">R$ {v_pas_per:,.2f}</div></div>', unsafe_allow_html=True)
         
         colunas_visiveis = ['data_lancamento', 'descricao', 'valor', 'tipo', 'status', 'justificativa']
-        df_limpo = df_periodo[df_periodo['status'].isin(["Entrada", "Pago"])][colunas_visiveis]
+        df_limpo = df_periodo[df_periodo['status'].isin(["Entrada", "Pago", "Pendente"])][colunas_visiveis]
         st.dataframe(df_limpo, use_container_width=True)
 
     elif st.session_state.menu_opcao == "⚙️ Gestão":
