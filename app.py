@@ -54,7 +54,7 @@ def gerar_pdf(user_email, df_per, data_i, data_f, s_ini, s_fin, v_at, v_pas, v_p
     pdf.cell(64, 8, f"Variação Líquida: R$ {s_fin - s_ini:,.2f}", border=1, ln=True)
     pdf.ln(5)
 
-    # 2. DRE
+    # ... [Restante da função gerar_pdf mantida exatamente igual] ...
     pdf.set_font("Arial", "B", 12)
     pdf.cell(190, 10, "2. DEMONSTRAÇÃO DO RESULTADO (DRE)", ln=True)
     pdf.set_font("Arial", "", 10)
@@ -73,7 +73,6 @@ def gerar_pdf(user_email, df_per, data_i, data_f, s_ini, s_fin, v_at, v_pas, v_p
     pdf.cell(50, 8, f"R$ {v_lucro:,.2f}", border=1, ln=True, align="R")
     pdf.ln(5)
 
-    # 3. BALANÇO EQUILIBRADO
     pdf.set_font("Arial", "B", 12)
     pdf.cell(190, 10, "3. BALANÇO PATRIMONIAL (RIGIDAMENTE PERÍODO)", ln=True)
     pdf.set_font("Arial", "", 10)
@@ -87,7 +86,6 @@ def gerar_pdf(user_email, df_per, data_i, data_f, s_ini, s_fin, v_at, v_pas, v_p
     pdf.cell(190, 8, f"EQUAÇÃO: Ativo (R$ {v_at:,.2f}) = Passivo + PL + Lucro (R$ {v_pas + pl_final:,.2f})", border=1, ln=True, align="C", fill=True)
     pdf.ln(10)
 
-    # 4. LANÇAMENTOS
     pdf.set_font("Arial", "B", 12)
     pdf.cell(190, 10, "4. LANÇAMENTOS DO PERÍODO", ln=True)
     pdf.set_font("Arial", "B", 8)
@@ -198,26 +196,27 @@ with f1: data_ini = st.date_input("Início do Período", value=datetime.now().da
 with f2: data_fim = st.date_input("Fim do Período", value=datetime.now().date())
 df_periodo = df_base[(df_base['data_lancamento'] >= data_ini) & (df_base['data_lancamento'] <= data_fim)].copy()
 
+# --- LÓGICA DE SALDO ACUMULADO (A ALTERAÇÃO SOLICITADA) ---
+def get_caixa_total(data_limite):
+    """Calcula o saldo de caixa acumulado de TODO o histórico até a data limite."""
+    if df_base.empty: return 0.0
+    # Considera todos os lançamentos do usuário na base de dados até o dia 'data_limite'
+    sub = df_base[df_base['data_lancamento'] <= data_limite]
+    entradas = sub[sub['status'] == "Entrada"]['valor'].sum()
+    saidas = sub[sub['status'] == "Pago"]['valor'].sum()
+    return entradas - saidas
+
+# Saldo Inicial: Soma de todo o passado até o dia anterior ao início do filtro
+s_ini = get_caixa_total(data_ini - timedelta(days=1))
+# Saldo Final: Soma de todo o passado + o período atual (até o fim do filtro)
+s_fin = get_caixa_total(data_fim)
+
 # --- CÁLCULOS TÉCNICOS ---
 def get_saldo(df, nat):
     if df.empty: return 0.0
     d = df[(df['natureza'] == nat) & (df['tipo'] == 'Débito')]['valor'].sum()
     c = df[(df['natureza'] == nat) & (df['tipo'] == 'Crédito')]['valor'].sum()
     return (d - c) if nat in ['Ativo', 'Despesa', 'Encargos Financeiros'] else (c - d)
-
-def get_caixa_total(data_corte):
-    """Calcula o saldo de caixa de TODO o histórico até a data de corte."""
-    if df_base.empty: return 0.0
-    sub = df_base[df_base['data_lancamento'] <= data_corte]
-    entradas = sub[sub['status'] == "Entrada"]['valor'].sum()
-    saidas = sub[sub['status'] == "Pago"]['valor'].sum()
-    return entradas - saidas
-
-# AQUI ESTÁ A LÓGICA DE CONTINUIDADE:
-# Saldo Inicial = Acumulado de todo o histórico até o dia anterior à data de início do filtro
-s_ini = get_caixa_total(data_ini - timedelta(days=1))
-# Saldo Final = Acumulado de todo o histórico até a data de fim do filtro
-s_fin = get_caixa_total(data_fim)
 
 v_rec = df_periodo[(df_periodo['natureza'] == 'Receita') & (df_periodo['tipo'] == 'Crédito')]['valor'].sum()
 v_desp_op = df_periodo[(df_periodo['natureza'] == 'Despesa') & (df_periodo['tipo'] == 'Débito')]['valor'].sum()
@@ -285,9 +284,7 @@ else:
         m1, m2, m3, m4 = st.columns(4)
         m1.metric("Saldo Inicial (Acumulado)", f"R$ {s_ini:,.2f}")
         m2.metric("Saldo Final (Acumulado)", f"R$ {s_fin:,.2f}")
-        m3.metric("Variação no Período", f"R$ {s_fin - s_ini:,.2f}")
-        
-        # Lógica de Liquidez preservada conforme solicitado
+        m3.metric("Fluxo Líquido Período", f"R$ {s_fin - s_ini:,.2f}")
         t_ent = df_periodo[df_periodo['status'] == "Entrada"]['valor'].sum()
         t_sai = df_periodo[df_periodo['status'] == "Pago"]['valor'].sum()
         pendentes = df_periodo[df_periodo['status']=='Pendente']['valor'].sum()
